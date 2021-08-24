@@ -1,0 +1,409 @@
+{
+  "id": "e7058acc-c0cf-476d-b690-df22fd8d7d81",
+  "version": "2.0",
+  "name": "lab-permanence",
+  "url": "https://sso.redhat.com",
+  "tests": [{
+    "id": "1172f96d-1af3-4db7-861a-ef55c0d59fbb",
+    "name": "{{ item }}",
+    "commands": [{
+      "id": "eb3a4c96-b0d7-4f7d-9b4d-acd0d9487b1f",
+      "comment": "",
+      "command": "open",
+      "target": "https://rol.redhat.com/rol/app",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "6e3f6276-3393-41d9-97cc-16d5e11576e7",
+      "comment": "",
+      "command": "click",
+      "target": "id=username",
+      "targets": [
+        ["id=username", "id"],
+        ["name=username", "name"],
+        ["css=#username", "css:finder"],
+        ["xpath=//input[@id='username']", "xpath:attributes"],
+        ["xpath=//section[@id='step1']/div/input", "xpath:idRelative"],
+        ["xpath=//input", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "b45bcecf-c34e-4483-bc24-65347c3f50f2",
+      "comment": "",
+      "command": "type",
+      "target": "id=username",
+      "targets": [
+        ["id=username", "id"],
+        ["name=username", "name"],
+        ["css=#username", "css:finder"],
+        ["xpath=//input[@id='username']", "xpath:attributes"],
+        ["xpath=//section[@id='step1']/div/input", "xpath:idRelative"],
+        ["xpath=//input", "xpath:position"]
+      ],
+      "value": "{{ rh_username }}"
+    }, {
+      "id": "fa42f357-eed9-4afe-8fc0-e9496aa2447e",
+      "comment": "",
+      "command": "click",
+      "target": "id=login-show-step2",
+      "targets": [
+        ["id=login-show-step2", "id"],
+        ["css=#login-show-step2", "css:finder"],
+        ["xpath=//button[@id='login-show-step2']", "xpath:attributes"],
+        ["xpath=//section[@id='step1']/div[2]/button", "xpath:idRelative"],
+        ["xpath=//div[2]/button", "xpath:position"],
+        ["xpath=//button[contains(.,'Next')]", "xpath:innerText"]
+      ],
+      "value": ""
+    }, {
+      "id": "1e5bf164-2f11-4d93-8ea6-ff4621569c8d",
+      "comment": "",
+      "command": "click",
+      "target": "id=login-show-step2",
+      "targets": [
+        ["id=login-show-step2", "id"],
+        ["css=#login-show-step2", "css:finder"],
+        ["xpath=//button[@id='login-show-step2']", "xpath:attributes"],
+        ["xpath=//section[@id='step1']/div[2]/button", "xpath:idRelative"],
+        ["xpath=//div[2]/button", "xpath:position"],
+        ["xpath=//button[contains(.,'Next')]", "xpath:innerText"]
+      ],
+      "value": ""
+    }, {
+      "id": "aa1dd9c5-daf4-49aa-9383-39db1b28d90b",
+      "comment": "",
+      "command": "click",
+      "target": "id=login-show-step2",
+      "targets": [
+        ["id=login-show-step2", "id"],
+        ["css=#login-show-step2", "css:finder"],
+        ["xpath=//button[@id='login-show-step2']", "xpath:attributes"],
+        ["xpath=//section[@id='step1']/div[2]/button", "xpath:idRelative"],
+        ["xpath=//div[2]/button", "xpath:position"],
+        ["xpath=//button[contains(.,'Next')]", "xpath:innerText"]
+      ],
+      "value": ""
+    }, {
+      "id": "4dc25ac4-9d8c-4fbc-a30d-120b16bd2616",
+      "comment": "",
+      "command": "pause",
+      "target": "3000",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "d7a09497-527b-4d5b-a9a6-446bf31f3669",
+      "comment": "",
+      "command": "type",
+      "target": "id=password",
+      "targets": [
+        ["id=password", "id"],
+        ["name=password", "name"],
+        ["css=#password", "css:finder"],
+        ["xpath=//input[@id='password']", "xpath:attributes"],
+        ["xpath=//section[@id='step2']/div[3]/div[2]/input", "xpath:idRelative"],
+        ["xpath=//div[3]/div[2]/input", "xpath:position"]
+      ],
+      "value": "{{ rh_password }}"
+    }, {
+      "id": "6e60dcba-a328-43d3-ab19-d6f0cbd17884",
+      "comment": "",
+      "command": "click",
+      "target": "id=kc-login",
+      "targets": [
+        ["id=kc-login", "id"],
+        ["name=login", "name"],
+        ["css=#kc-login", "css:finder"],
+        ["xpath=//input[@id='kc-login']", "xpath:attributes"],
+        ["xpath=//div[@id='kc-form-buttons']/input", "xpath:idRelative"],
+        ["xpath=//div[4]/input", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "aba2eec7-aa6b-4a5c-b341-2703b86be84c",
+      "comment": "",
+      "command": "pause",
+      "target": "5000",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "dee534eb-f32f-45db-b643-edda40bb1b4a",
+      "comment": "",
+      "command": "open",
+      "target": "https://rol.redhat.com/rol/app/courses/{{ item }}",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "43bb663a-8e41-4a68-b462-15933a84cc6b",
+      "comment": "",
+      "command": "pause",
+      "target": "5000",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "6b6b2120-4207-43a2-a29e-161fc66847b3",
+      "comment": "",
+      "command": "click",
+      "target": "id=course-tabs-tab-8",
+      "targets": [
+        ["css=#course-tabs-tab-8 > .hidden-xs", "css:finder"],
+        ["xpath=//a[@id='course-tabs-tab-8']/span[2]", "xpath:idRelative"],
+        ["xpath=//li[3]/a/span[2]", "xpath:position"],
+        ["xpath=//span[contains(.,'Lab Environment')]", "xpath:innerText"]
+      ],
+      "value": ""
+    }, {
+      "id": "1bb4dc50-1466-409c-b2ea-44a6a8133cde",
+      "comment": "",
+      "command": "click",
+      "target": "css=.btn-secondary",
+      "targets": [
+        ["css=.btn-secondary", "css:finder"],
+        ["xpath=(//button[@type='button'])[8]", "xpath:attributes"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/div[2]/button", "xpath:idRelative"],
+        ["xpath=//div[2]/button", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "e21e0a2d-f539-4634-aefc-b2e1b1e78239",
+      "comment": "",
+      "command": "pause",
+      "target": "10000",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "b1745f58-54e6-4635-a959-f84db0d52981",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "5ed7eb01-1db1-4592-9601-bb4767e3a7fa",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "36469b9b-572e-433f-a7c2-70dd5cab77f6",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "a8ddb8b2-99c8-458f-a7bd-98699766d2d3",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "19348c5b-696f-429d-9e82-be22acf6a960",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "dffca1eb-994a-4105-a15c-a74a121fbddf",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "2a4c45c6-51f9-4745-8e20-114f3d938904",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "c4690ca0-0c75-45cd-b12a-5e5a7e885b36",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "4e56c922-c570-44e7-bb2b-91bb3b3e2613",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "173dc695-cde4-4fa9-8c0f-e36fd61337d0",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "01e9690b-7f73-4633-ae53-004fbfa37543",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "03b70ede-d619-428e-9869-8c8f8bf5af67",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "db4a5d88-50d6-4c50-8851-7f3bfcaa97a5",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "72de6eaf-4cd4-495f-9519-2cfff0fc00a6",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "3388d987-93f9-49b0-bd07-16db52b6f7b1",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "8a0335fe-7f3e-44be-aa25-645882c507a6",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "966f34fc-5834-40ee-aca6-4c1af0beb8a7",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "e966007c-d64c-404d-8cb3-a709be5275e5",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "d076ef6b-621d-4bd0-a929-e4b30c05fb9b",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "fee85d6e-957e-43e1-9ad2-8fe661b7d0d0",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "7cdf103e-9106-442f-91b7-c908d62d4aaa",
+      "comment": "",
+      "command": "click",
+      "target": "css=tr:nth-child(2) > td > .btn-secondary > span",
+      "targets": [
+        ["css=tr:nth-child(2) > td > .btn-secondary > span", "css:finder"],
+        ["xpath=//div[@id='tab-course-lab-environment']/div/table/tr[2]/td[2]/button/span", "xpath:idRelative"],
+        ["xpath=//tr[2]/td[2]/button/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "27fdbed8-11d6-469e-920f-b34775b913e7",
+      "comment": "",
+      "command": "pause",
+      "target": "500",
+      "targets": [],
+      "value": ""
+    }, {
+      "id": "75be864e-6d36-4764-9360-31c664fdb05c",
+      "comment": "",
+      "command": "click",
+      "target": "css=span > span",
+      "targets": [
+        ["css=span > span", "css:finder"],
+        ["xpath=//a[@id='avatar']/div/div/div/span/span", "xpath:idRelative"],
+        ["xpath=//span/span", "xpath:position"]
+      ],
+      "value": ""
+    }, {
+      "id": "1fa13e03-37b5-4081-be60-248a3f287d72",
+      "comment": "",
+      "command": "click",
+      "target": "linkText=Logout",
+      "targets": [
+        ["linkText=Logout", "linkText"],
+        ["css=.open li:nth-child(4) > a", "css:finder"],
+        ["xpath=//a[contains(text(),'Logout')]", "xpath:link"],
+        ["xpath=//div[@id='app']/header/div/div/div/menu[2]/ul/li[4]/ul/li[4]/a", "xpath:idRelative"],
+        ["xpath=(//a[contains(@href, '#')])[23]", "xpath:href"],
+        ["xpath=//li[4]/ul/li[4]/a", "xpath:position"],
+        ["xpath=//a[contains(.,'Logout')]", "xpath:innerText"]
+      ],
+      "value": ""
+    }]
+  }],
+  "suites": [{
+    "id": "e1f276bd-fb4b-43bc-b498-a135b1b9b4e6",
+    "name": "Default Suite",
+    "persistSession": false,
+    "parallel": false,
+    "timeout": 300,
+    "tests": ["1172f96d-1af3-4db7-861a-ef55c0d59fbb"]
+  }],
+  "urls": ["https://sso.redhat.com/"],
+  "plugins": []
+}

@@ -1,0 +1,30 @@
+- name: ROL labs launcher
+  hosts: localhost
+  vars_files: credentials.yml
+  vars:
+    - course_id:
+        - do180-4.5
+        - do180-4.6
+        - do280-4.5
+        - do280-4.6
+        - do288-4.5
+        - do288-4.6
+        - rh124-7
+        - rh124-8.0
+        - rh124-8.2
+    - rh_username: "{{ username | default('') }}"
+    - rh_password: "{{ password | default('') }}"
+        
+  tasks:
+    - name: generate selenium .side files for courses
+      template:
+        src: selenium-course-start.side.j2
+        dest: "/tmp/selenium-course-start-{{ item }}.side"
+      loop: "{{ course_id }}"
+
+    - name: execute selenium .side files for each course
+      #command: 'selenium-side-runner -c "goog:chromeOptions.args=[--headless,--nogpu] browserName=chrome" /tmp/selenium-course-start-{{ item }}.side'
+      command: 'selenium-side-runner /tmp/selenium-course-start-{{ item }}.side'
+      loop: "{{ course_id }}"
+      register: selenium_logs
+      changed_when: "'FAIL' in selenium_logs.stderr_lines"
