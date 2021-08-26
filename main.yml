@@ -12,6 +12,7 @@
         - rh124-7
         - rh124-8.0
         - rh124-8.2
+        - rh403-6.6
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
         
