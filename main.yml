@@ -3,15 +3,17 @@
   vars_files: credentials.yml
   vars:
     - course_id:
-        - do180-4.5
+        #- do180-4.5
         - do180-4.6
-        - do280-4.5
+        #- do280-4.5
         - do280-4.6
-        - do288-4.5
+        #- do288-4.5
         - do288-4.6
-        - rh124-7
-        - rh124-8.0
+        #- rh124-7
+        #- rh124-8.0
         - rh124-8.2
+        - rh134-8.2
+        - rh294-8.4
         - rh403-6.6
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
@@ -23,9 +25,16 @@
         dest: "/tmp/selenium-course-start-{{ item }}.side"
       loop: "{{ course_id }}"
 
-    - name: execute selenium .side files for each course
-      #command: 'selenium-side-runner -c "goog:chromeOptions.args=[--headless,--nogpu] browserName=chrome" /tmp/selenium-course-start-{{ item }}.side'
-      command: 'selenium-side-runner /tmp/selenium-course-start-{{ item }}.side'
+    - name: Create or start each course
+      # Command with browser in background with no display
+      shell: 'selenium-side-runner -c "goog:chromeOptions.args=[--headless,--nogpu] browserName=chrome" /tmp/selenium-course-start-{{ item }}.side || /bin/true'
+      # Command to debug
+      #command: 'selenium-side-runner /tmp/selenium-course-start-{{ item }}.side || /bin/true'
       loop: "{{ course_id }}"
-      register: selenium_logs
-      changed_when: "'FAIL' in selenium_logs.stderr_lines"
+      register: selenium
+      # Expected errors that don't mean the task has failed
+      changed_when: "'.btn-secondary' in selenium.stderr or selenium.rc == 0" # or 'ElementNotInteractableError' in selenium.stderr"
+
+    - name: Show any output or error from previous task
+      debug: 
+        var: selenium

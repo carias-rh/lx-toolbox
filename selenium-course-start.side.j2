@@ -6,43 +6,37 @@
   "tests": [{
     "id": "1172f96d-1af3-4db7-861a-ef55c0d59fbb",
     "name": "{{ item }}",
+
     "commands": [{
       "id": "eb3a4c96-b0d7-4f7d-9b4d-acd0d9487b1f",
       "comment": "",
       "command": "open",
-      "target": "https://rol.redhat.com/rol/app",
+      "target": "https://rol.redhat.com/rol/app/courses/{{ item }}",
       "targets": [],
       "value": ""
     }, {
-      "id": "6e3f6276-3393-41d9-97cc-16d5e11576e7",
+      "id": "b828362d-61c5-4a3d-9439-64304c5f6969",
       "comment": "",
-      "command": "click",
-      "target": "id=username",
-      "targets": [
-        ["id=username", "id"],
-        ["name=username", "name"],
-        ["css=#username", "css:finder"],
-        ["xpath=//input[@id='username']", "xpath:attributes"],
-        ["xpath=//section[@id='step1']/div/input", "xpath:idRelative"],
-        ["xpath=//input", "xpath:position"]
-      ],
+      "command": "pause",
+      "target": "2500",
+      "targets": [],
       "value": ""
     }, {
-      "id": "b45bcecf-c34e-4483-bc24-65347c3f50f2",
+      "id": "c8ec568b-4e56-41d2-a66f-103defc45d05",
       "comment": "",
       "command": "type",
-      "target": "id=username",
+      "target": "id=username-verification",
       "targets": [
-        ["id=username", "id"],
+        ["id=username-verification", "id"],
         ["name=username", "name"],
-        ["css=#username", "css:finder"],
-        ["xpath=//input[@id='username']", "xpath:attributes"],
-        ["xpath=//section[@id='step1']/div/input", "xpath:idRelative"],
+        ["css=#username-verification", "css:finder"],
+        ["xpath=//input[@id='username-verification']", "xpath:attributes"],
+        ["xpath=//form[@id='rh-username-verification-form']/div/input", "xpath:idRelative"],
         ["xpath=//input", "xpath:position"]
       ],
       "value": "{{ rh_username }}"
     }, {
-      "id": "fa42f357-eed9-4afe-8fc0-e9496aa2447e",
+      "id": "9be0493c-db7e-416e-90c0-c67984fd5c2a",
       "comment": "",
       "command": "click",
       "target": "id=login-show-step2",
@@ -50,48 +44,20 @@
         ["id=login-show-step2", "id"],
         ["css=#login-show-step2", "css:finder"],
         ["xpath=//button[@id='login-show-step2']", "xpath:attributes"],
-        ["xpath=//section[@id='step1']/div[2]/button", "xpath:idRelative"],
+        ["xpath=//form[@id='rh-username-verification-form']/div[2]/button", "xpath:idRelative"],
         ["xpath=//div[2]/button", "xpath:position"],
-        ["xpath=//button[contains(.,'Next')]", "xpath:innerText"]
+        ["xpath=//button[contains(.,'Siguiente')]", "xpath:innerText"]
       ],
       "value": ""
     }, {
-      "id": "1e5bf164-2f11-4d93-8ea6-ff4621569c8d",
-      "comment": "",
-      "command": "click",
-      "target": "id=login-show-step2",
-      "targets": [
-        ["id=login-show-step2", "id"],
-        ["css=#login-show-step2", "css:finder"],
-        ["xpath=//button[@id='login-show-step2']", "xpath:attributes"],
-        ["xpath=//section[@id='step1']/div[2]/button", "xpath:idRelative"],
-        ["xpath=//div[2]/button", "xpath:position"],
-        ["xpath=//button[contains(.,'Next')]", "xpath:innerText"]
-      ],
-      "value": ""
-    }, {
-      "id": "aa1dd9c5-daf4-49aa-9383-39db1b28d90b",
-      "comment": "",
-      "command": "click",
-      "target": "id=login-show-step2",
-      "targets": [
-        ["id=login-show-step2", "id"],
-        ["css=#login-show-step2", "css:finder"],
-        ["xpath=//button[@id='login-show-step2']", "xpath:attributes"],
-        ["xpath=//section[@id='step1']/div[2]/button", "xpath:idRelative"],
-        ["xpath=//div[2]/button", "xpath:position"],
-        ["xpath=//button[contains(.,'Next')]", "xpath:innerText"]
-      ],
-      "value": ""
-    }, {
-      "id": "4dc25ac4-9d8c-4fbc-a30d-120b16bd2616",
+      "id": "12347e4e-dd8f-4483-b517-333880b16d77",
       "comment": "",
       "command": "pause",
-      "target": "3000",
+      "target": "2500",
       "targets": [],
       "value": ""
     }, {
-      "id": "d7a09497-527b-4d5b-a9a6-446bf31f3669",
+      "id": "b126d066-6ccb-4e71-8cbe-4743dad0cbac",
       "comment": "",
       "command": "type",
       "target": "id=password",
@@ -100,22 +66,22 @@
         ["name=password", "name"],
         ["css=#password", "css:finder"],
         ["xpath=//input[@id='password']", "xpath:attributes"],
-        ["xpath=//section[@id='step2']/div[3]/div[2]/input", "xpath:idRelative"],
-        ["xpath=//div[3]/div[2]/input", "xpath:position"]
+        ["xpath=//form[@id='rh-password-verification-form']/div[2]/div[2]/input", "xpath:idRelative"],
+        ["xpath=//div[2]/div[2]/input", "xpath:position"]
       ],
       "value": "{{ rh_password }}"
     }, {
-      "id": "6e60dcba-a328-43d3-ab19-d6f0cbd17884",
+      "id": "6a17ad67-9a0f-4465-b92a-6c61f028a8cf",
       "comment": "",
       "command": "click",
-      "target": "id=kc-login",
+      "target": "id=rh-password-verification-submit-button",
       "targets": [
-        ["id=kc-login", "id"],
-        ["name=login", "name"],
-        ["css=#kc-login", "css:finder"],
-        ["xpath=//input[@id='kc-login']", "xpath:attributes"],
-        ["xpath=//div[@id='kc-form-buttons']/input", "xpath:idRelative"],
-        ["xpath=//div[4]/input", "xpath:position"]
+        ["id=rh-password-verification-submit-button", "id"],
+        ["css=#rh-password-verification-submit-button", "css:finder"],
+        ["xpath=//button[@id='rh-password-verification-submit-button']", "xpath:attributes"],
+        ["xpath=//form[@id='rh-password-verification-form']/div[3]/button", "xpath:idRelative"],
+        ["xpath=//div[3]/button", "xpath:position"],
+        ["xpath=//button[contains(.,'Iniciar sesión')]", "xpath:innerText"]
       ],
       "value": ""
     }, {
@@ -126,17 +92,10 @@
       "targets": [],
       "value": ""
     }, {
-      "id": "dee534eb-f32f-45db-b643-edda40bb1b4a",
-      "comment": "",
-      "command": "open",
-      "target": "https://rol.redhat.com/rol/app/courses/{{ item }}",
-      "targets": [],
-      "value": ""
-    }, {
       "id": "43bb663a-8e41-4a68-b462-15933a84cc6b",
       "comment": "",
       "command": "pause",
-      "target": "5000",
+      "target": "2000",
       "targets": [],
       "value": ""
     }, {
