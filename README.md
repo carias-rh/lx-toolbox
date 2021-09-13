@@ -1,5 +1,12 @@
-# rol-lab-persistence
-Automation with ansible and selenium to start and extend life of most used labs in rol.redhat.com
+# Automated rol.redhat.com lab creation
+This project uses ansible and selenium to create and extend life of most used labs in rol.redhat.com:
+  - rh124-8.2
+  - rh134-8.2
+  - rh294-8.4
+  - do180-4.6
+  - do280-4.6
+  - do288-4.6
+  - rh403-6.6
 
 ## Requisites
 - selenium-side-runner
