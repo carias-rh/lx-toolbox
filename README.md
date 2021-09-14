@@ -35,3 +35,8 @@ Run the playbook
 ansible-playbook main.yml --vault-password-file ../vault
 
 ``` 
+
+Customize your courses either in the main.yml vars or by using extra-vars parameter
+```
+ansible-playbook main.yml --vault-password-file ../vault --extra-vars='{"course_id": ["rh124-8.2", "cl210-16.1"]}'
+```
