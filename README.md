@@ -10,6 +10,8 @@ This project uses ansible and selenium to create and extend life of most used la
 
 ## Requisites
 - selenium-side-runner
+- chrome/chromium browser
+- chromedriver
 
 ## Setup
 Create a credentials.yml file with the following variables and fill in with your rol.redhat.com credentials
