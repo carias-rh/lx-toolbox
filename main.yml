@@ -10,6 +10,7 @@
         - do280-4.6
         - do288-4.6
         - rh403-6.6
+        - cl210-16.1
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
         
@@ -33,3 +34,7 @@
     - name: Show any output or error from previous task
       debug: 
         var: selenium
+# TBD:
+#  - Create a selenium template that only extends the course lifespan
+#  - Create a wrapper with that option as default using tags
+#  - Remove lifespan extension from first template so that only creates the lab
