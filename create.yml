@@ -2,30 +2,33 @@
   hosts: localhost
   vars_files: credentials.yml
   vars:
-    - course_id:
-        - rh124-8.2
-        - rh134-8.2
-        - rh294-8.4
-        - do180-4.6
-        - do280-4.6
-        - do288-4.6
-        - rh403-6.6
-        - cl210-16.1
+    - lab_environment: "rol"
+    - course_id: 
+        - "rh124-8.2"
+      # - rh134-8.2
+      # - rh294-8.4
+      # - rh199-8.2
+      # - do180-4.6
+      # - do280-4.6
+      # - do288-4.6
+      # - rh199-8.2
+      # - rh403-6.6
+      # - cl210-16.1
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
         
   tasks:
     - name: generate selenium .side files for courses
       template:
-        src: selenium-course-start.side.j2
-        dest: "/tmp/selenium-course-start-{{ item }}.side"
+        src: templates/selenium-course-create.side.j2
+        dest: "/tmp/selenium-course-create-{{ item }}.side"
       loop: "{{ course_id }}"
 
     - name: Create or start each course
       # Command with browser in background with no display
-      shell: 'selenium-side-runner -c "goog:chromeOptions.args=[--headless,--nogpu] browserName=chrome" /tmp/selenium-course-start-{{ item }}.side || /bin/true'
+      shell: 'selenium-side-runner -c "goog:chromeOptions.args=[--headless,--nogpu] browserName=chrome" /tmp/selenium-course-create-{{ item }}.side || /bin/true'
       # Command to debug
-      #command: 'selenium-side-runner /tmp/selenium-course-start-{{ item }}.side || /bin/true'
+      #command: 'selenium-side-runner /tmp/selenium-course-create-{{ item }}.side || /bin/true'
       loop: "{{ course_id }}"
       register: selenium
       # Expected errors that don't mean the task has failed
@@ -34,7 +37,3 @@
     - name: Show any output or error from previous task
       debug: 
         var: selenium
-# TBD:
-#  - Create a selenium template that only extends the course lifespan
-#  - Create a wrapper with that option as default using tags
-#  - Remove lifespan extension from first template so that only creates the lab

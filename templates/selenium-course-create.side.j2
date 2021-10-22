@@ -6,12 +6,11 @@
   "tests": [{
     "id": "1172f96d-1af3-4db7-861a-ef55c0d59fbb",
     "name": "{{ item }}",
-
     "commands": [{
       "id": "eb3a4c96-b0d7-4f7d-9b4d-acd0d9487b1f",
       "comment": "",
       "command": "open",
-      "target": "https://rol.redhat.com/rol/app/courses/{{ item }}",
+      "target": "https://rol.redhat.com/{{ lab_environment }}/app/courses/{{ item }}",
       "targets": [],
       "value": ""
     }, {

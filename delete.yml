@@ -1,0 +1,30 @@
+- name: ROL labs launcher
+  hosts: localhost
+  vars_files: credentials.yml
+  vars:
+    - environment: rol
+    - course_id:
+        - do374-2.0
+    - rh_username: "{{ username | default('') }}"
+    - rh_password: "{{ password | default('') }}"
+        
+  tasks:
+    - name: generate selenium .side files for courses
+      template:
+        src: templates/selenium-course-delete.side.j2
+        dest: "/tmp/selenium-course-delete-{{ item }}.side"
+      loop: "{{ course_id }}"
+
+    - name: Delete each course
+      # Command with browser in background with no display
+      shell: 'selenium-side-runner -c "goog:chromeOptions.args=[--headless,--nogpu] browserName=chrome" /tmp/selenium-course-delete-{{ item }}.side || /bin/true'
+      # Command to debug
+      #command: 'selenium-side-runner /tmp/selenium-course-start-{{ item }}.side || /bin/true'
+      loop: "{{ course_id }}"
+      register: selenium
+      # Expected errors that don't mean the task has failed
+      changed_when: "'.btn-secondary' in selenium.stderr or selenium.rc == 0" # or 'ElementNotInteractableError' in selenium.stderr"
+
+    - name: Show any output or error from previous task
+      debug: 
+        var: selenium
