@@ -5,15 +5,15 @@
     - lab_environment: "rol"
     - course_id: 
         - "rh124-8.2"
-      # - rh134-8.2
-      # - rh294-8.4
-      # - rh199-8.2
-      # - do180-4.6
-      # - do280-4.6
-      # - do288-4.6
-      # - rh199-8.2
-      # - rh403-6.6
-      # - cl210-16.1
+        - "rh134-8.2"
+        - "rh294-8.4"
+        - "rh199-8.2"
+        - "do180-4.6"
+        - "do280-4.6"
+        - "do288-4.6"
+        - "rh199-8.2"
+        - "rh403-6.6"
+        - "cl210-16.1"
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
         

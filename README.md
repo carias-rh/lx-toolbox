@@ -1,5 +1,5 @@
 # Automated rol.redhat.com lab creation
-This project uses ansible and selenium to create and extend life of most used labs in rol.redhat.com:
+This project uses ansible and selenium to create, delete, and extend life of most used labs in rol.redhat.com:
   - rh124-8.2
   - rh134-8.2
   - rh294-8.4
@@ -34,11 +34,11 @@ chmod 600 ../vault
 Run the playbook
 
 ``` 
-ansible-playbook main.yml --vault-password-file ../vault
+ansible-playbook create.yml --vault-password-file ../vault
 
 ``` 
 
 Customize the environment (rol or rol-stage) and courses either in the main.yml vars or by using extra-vars parameter
 ```
-ansible-playbook main.yml --vault-password-file ../vault --extra-vars='lab_environment=rol-stage' --extra-vars='{"course_id": ["rh124-8.2", "cl210-16.1"]}'
+ansible-playbook delete.yml --vault-password-file ../vault --extra-vars='lab_environment=rol-stage' --extra-vars='{"course_id": ["rh124-8.2", "cl210-16.1"]}'
 ```
