@@ -3,10 +3,10 @@ This project uses ansible and selenium to create, delete, and extend life of mos
   - rh124-8.2
   - rh134-8.2
   - rh294-8.4
+  - rh199-8.2 
   - do180-4.6
   - do280-4.6
   - do288-4.6
-  - rh403-6.6
 
 ## Requisites
 - selenium-side-runner
