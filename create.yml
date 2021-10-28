@@ -11,9 +11,6 @@
         - "do180-4.6"
         - "do280-4.6"
         - "do288-4.6"
-        - "rh199-8.2"
-        - "rh403-6.6"
-        - "cl210-16.1"
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
         
@@ -27,13 +24,9 @@
     - name: Create or start each course
       # Command with browser in background with no display
       shell: 'selenium-side-runner -c "goog:chromeOptions.args=[--headless,--nogpu] browserName=chrome" /tmp/selenium-course-create-{{ item }}.side || /bin/true'
-      # Command to debug
-      #command: 'selenium-side-runner /tmp/selenium-course-create-{{ item }}.side || /bin/true'
+      # Debug command to see the browser in action
+      # command: 'selenium-side-runner /tmp/selenium-course-start-{{ item }}.side || /bin/true'
       loop: "{{ course_id }}"
       register: selenium
       # Expected errors that don't mean the task has failed
       changed_when: "'.btn-secondary' in selenium.stderr or selenium.rc == 0" # or 'ElementNotInteractableError' in selenium.stderr"
-
-    - name: Show any output or error from previous task
-      debug: 
-        var: selenium
