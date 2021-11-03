@@ -9,9 +9,21 @@ This project uses ansible and selenium to create, delete, and extend life of mos
   - do288-4.6
 
 ## Requisites
+- nodejs
+`$ sudo yum install -y nodejs`
 - selenium-side-runner
+`$ npm install -g selenium-side-runner`
 - chrome/chromium browser
-- chromedriver
+- [chromedriver](https://sites.google.com/chromium.org/driver/downloads?authuser=0)
+
+Make sure that you install the same version for chrome browser and chromedriver
+``` 
+[carias@carias ~]$ google-chrome-stable --version
+Google Chrome 93.0.4577.63
+[carias@carias ~]$ chromedriver --version
+ChromeDriver 93.0.4577.63 (ff5c0da2ec0adeaed5550e6c7e98417dac77d98a-refs/branch-heads/4577@{#1135})
+[carias@carias ~]$
+```
 
 ## Setup
 Create a credentials.yml file with your rol.redhat.com credentials
