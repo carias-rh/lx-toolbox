@@ -13,7 +13,7 @@ This project uses ansible and selenium to create, delete, and extend life of mos
 Can be installed without root from the Internal Software catalog in your RHEL 8 CSB distribution
 - ansible-navigator
 `pip3 install 'ansible-navigator[ansible-core]' --user`
-```
+
 
 ## Setup
 Create a credentials.yml file with your rol.redhat.com credentials
