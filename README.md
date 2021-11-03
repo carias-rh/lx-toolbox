@@ -9,20 +9,10 @@ This project uses ansible and selenium to create, delete, and extend life of mos
   - do288-4.6
 
 ## Requisites
-- nodejs
-`$ sudo yum install -y nodejs`
-- selenium-side-runner
-`$ npm install -g selenium-side-runner`
-- chrome/chromium browser
-- [chromedriver](https://sites.google.com/chromium.org/driver/downloads?authuser=0)
-
-Make sure that you install the same version for chrome browser and chromedriver
-``` 
-[carias@carias ~]$ google-chrome-stable --version
-Google Chrome 93.0.4577.63
-[carias@carias ~]$ chromedriver --version
-ChromeDriver 93.0.4577.63 (ff5c0da2ec0adeaed5550e6c7e98417dac77d98a-refs/branch-heads/4577@{#1135})
-[carias@carias ~]$
+- podman 
+Can be installed without root from the Internal Software catalog in your RHEL 8 CSB distribution
+- ansible-navigator
+`pip3 install 'ansible-navigator[ansible-core]' --user`
 ```
 
 ## Setup
@@ -55,16 +45,21 @@ Customize the environment (rol or rol-stage) and courses in the create/delete.ym
         - "rh294-8.4"
 ```
 
-Run the playbook.
+Build the Containerfile for the Execution Environment of ansible-navigator
+```
+$ podman login registry.redhat.io
+$ podman build -t rol-lab-persistence:v0.1 .
 ``` 
-$ ansible-playbook create.yml --vault-password-file ../vault
+
+Run the playbook with ansible-navigator.
+``` 
+$ ansible-navigator run -m stdout create.yml --vault-password-file ../vault
 
 ``` 
-
 
 Another option is to override the vars by using the extra-vars parameter.
 ```
-$ ansible-playbook delete.yml --vault-password-file ../vault \ 
+$ ansible-navigator run -m stdout delete.yml --vault-password-file ../vault \ 
      --extra-vars='lab_environment=rol-stage' \
      --extra-vars='{"course_id": ["rh124-8.2", "rh134-8.2"]}'
 ```
