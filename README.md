@@ -45,12 +45,6 @@ Customize the environment (rol or rol-stage) and courses in the create/delete.ym
         - "rh294-8.4"
 ```
 
-Build the Containerfile for the Execution Environment of ansible-navigator
-```
-$ podman login registry.redhat.io
-$ podman build -t rol-lab-persistence:v0.1 .
-``` 
-
 Run the playbook with ansible-navigator.
 ``` 
 $ ansible-navigator run -m stdout create.yml --vault-password-file ../vault
