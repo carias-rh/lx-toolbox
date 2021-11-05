@@ -2,7 +2,7 @@
   hosts: localhost
   vars_files: credentials.yml
   vars:
-    - environment: rol
+    - lab_environment: "rol"
     - course_id:
         - "rh124-8.2"
         - "rh134-8.2"
