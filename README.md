@@ -19,18 +19,18 @@ username: "youruser@redhat.com"
 password: "yourpassword"
 ``` 
 
-Customize the environment (rol or rol-stage) and courses in the create/delete.yml vars section.
+Customize the lab_environment and courses_id variables in the create/delete.yml vars section.
 ```
 - name: ROL labs launcher
   hosts: localhost
   vars_files: credentials.yml
   vars:
-    - lab_environment: "rol"
-    - course_id: 
-        - "rh124-8.2"
-        - "rh134-8.2"
-        - "rh294-8.4"
-...
+    - lab_environment: rol 	# Valid options are: rol / rol-stage
+    - course_id:  		# Get the course_id from the URL, such https://rol.redhat.com/rol/app/courses/rh124-8.2
+        - rh124-8.2
+        - rh134-8.2
+        - rh294-8.4
+        ...
 ```
 
 Run the playbook with ansible-navigator.
@@ -39,13 +39,14 @@ $ ansible-navigator run -m stdout create.yml
 
 ``` 
 
-Another option is to override the vars by using the extra-vars parameter.
+Remember you can override the variables without editing the yaml files by using the extra-vars parameter.
 ```
 $ ansible-navigator run -m stdout delete.yml \ 
-     --extra-vars='lab_environment=rol-stage' \
-     --extra-vars='{"course_id": ["rh124-8.2", "rh134-8.2"]}'
+	-e 'lab_environment=rol-stage' \
+	-e '{"course_id": ["rh124-8.2", "rh134-8.2"]}'
 ```
 
 ## Recommendations
-- The *create.yml* playbook will also increase the *Auto-destroy* box of the lab to the maximum available (usually 14 days), so it's recomended to create a cronjob that runs at least every 2 weeks.
+- The *create.yml* playbook will also increase the *Auto-destroy* box of the lab to the maximum available (usually 14 days). I recomend to create a cronjob that runs at least every 2 weeks.
 - Sometimes labs get stuck and don't stop, so it's important to keep an eye on the *Lab hours used* counter to detect any abusive usage.
+- Due to fast changes in lab environment during development phases of a course, I recommend a daily cronjob to create and delete the lab to start each day with a new fresh lab environment.
