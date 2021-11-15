@@ -9,8 +9,12 @@ This project uses ansible and selenium to create, delete, and extend life of mos
   - do288-4.6
 
 ## Requisites
+- podman (from Internal Software catalog, tab 6 - Development)
 - ansible-navigator
-`pip3 install 'ansible-navigator[ansible-core]' --user`
+```
+pip3 install 'ansible-navigator[ansible-core]' --user
+export PATH=$PATH:~/.local/bin/
+```
 
 ## Setup
 Fill in the credentials.yml file with your rol.redhat.com credentials:

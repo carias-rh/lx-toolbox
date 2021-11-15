@@ -24,8 +24,6 @@
     - name: Delete each course
       # Command with browser in background with no display
       shell: 'selenium-side-runner -c "goog:chromeOptions.args=[--no-sandbox,--headless,--nogpu] browserName=chrome" /tmp/selenium-course-delete-{{ item }}.side || /bin/true'
-      # Debug command to see the browser in action
-      # command: 'selenium-side-runner /tmp/selenium-course-delete-{{ item }}.side || /bin/true'
       loop: "{{ course_id }}"
       register: selenium
       # Expected errors that don't mean the task has failed
