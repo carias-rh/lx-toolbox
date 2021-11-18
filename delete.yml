@@ -20,7 +20,7 @@
         src: templates/lab-delete.py.j2
         dest: "/tmp/lab-delete.py"
 
-    - name: Create or start each course
+    - name: Delete courses
       # Command with browser in background with no display
       shell: '/usr/bin/python3 /tmp/lab-delete.py || /bin/true'
       register: selenium

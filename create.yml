@@ -20,7 +20,7 @@
         src: templates/lab-create.py.j2
         dest: "/tmp/lab-create.py"
 
-    - name: Create or start each course
+    - name: Create courses
       # Command with browser in background with no display
       shell: '/usr/bin/python3 /tmp/lab-create.py || /bin/true'
       register: selenium
