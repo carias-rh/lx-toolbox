@@ -63,7 +63,8 @@ def delete_labs():
         delete_lab = driver.find_element_by_xpath("//*[text()='Delete']")
         delete_lab.click()
         
-        confirm_delete_lab = driver.find_element_by_xpath('/html/body/div[3]/div[2]/div/div/div[2]/button[1]')
+        #confirm_delete_lab = driver.find_element_by_xpath('/html/body/div[3]/div[2]/div/div/div[2]/button[1]')
+        confirm_delete_lab = driver.find_element_by_xpath("//*[text()='Delete']")
         confirm_delete_lab.click()
     except:
         print("An exception occurred during lab deletion")

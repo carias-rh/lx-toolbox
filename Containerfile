@@ -6,4 +6,5 @@ RUN microdnf install -y chromium chromedriver \
   && microdnf clean all \
   && rm -rf /var/cache/{dnf,yum} 
 
-RUN pip3 install selenium --use-feature=2020-resolver 
+RUN pip3 install selenium --use-feature=2020-resolver \ 
+  && pip3 install --upgrade requests
