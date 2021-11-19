@@ -22,6 +22,7 @@ We can use the shared public cluster from the labs (DO180, DO288), although I'm 
 
 This method only requires that you create a secret with your credentials and a cronjob that will launch the script weekly to keep your labs created.
 ``` 
+$ oc login 	https://api.na46.prod.nextcle.com:6443 -u<generated_user> -p<generated_password>
 $ oc new-project <name it>
 $ oc create secret generic rol-credentials --from-literal=username=yourusername@redhat.com --from-literal=password=yourpassword
 $ oc create -f cronjobs/cronjobs.yml
@@ -51,10 +52,13 @@ Customize the lab_environment and courses_id variables in the create/delete.yml 
 ```
 #### Running with ansible-navigator
 
-##### Requisites
+## Requisites
+- podman (from Internal Software catalog, tab 6 - Development)
 - ansible-navigator
-`pip3 install 'ansible-navigator[ansible-core]' --user`
-
+```
+pip3 install 'ansible-navigator[ansible-core]' --user
+export PATH=$PATH:~/.local/bin/
+```
 
 Run the playbook with ansible-navigator.
 ``` 
@@ -72,6 +76,7 @@ $ ansible-navigator run -m stdout delete.yml \
 #### Running with ansible-playbook
 
 ##### Requisites
+- Root access to your laptop
 - ansible core
 - python3
 - selenium libraries
@@ -82,10 +87,6 @@ Run the playbook with ansible-navigator.
 $ ansible-playbook create.yml
 
 ``` 
-
-
-
-
 
 ## Recommendations
 - The *create.yml* playbook will also increase the *Auto-destroy* box of the lab to the maximum available (usually 14 days). I recomend to create a cronjob that runs at least every 2 weeks.

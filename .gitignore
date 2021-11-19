@@ -1,3 +1,9 @@
 .ssh
 ansible-navigator.log
 *-artifact-*
+lab-delete.log
+lab-start.log
+task
+token
+credentials.yml
+credentials.yml.orig
