@@ -73,6 +73,9 @@ $ ansible-navigator run -m stdout delete.yml \
 
 ##### Requisites
 - ansible core
+- python3
+- selenium libraries
+`pip3 install selenium`
 
 Run the playbook with ansible-navigator.
 ``` 
