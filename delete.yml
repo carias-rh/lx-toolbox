@@ -21,6 +21,5 @@
         dest: "/tmp/lab-delete.py"
 
     - name: Delete courses
-      # Command with browser in background with no display
       shell: '/usr/bin/python3 /tmp/lab-delete.py || /bin/true'
       register: selenium
