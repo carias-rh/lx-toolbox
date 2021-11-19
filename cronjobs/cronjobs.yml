@@ -1,0 +1,97 @@
+---
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: create-rol-labs
+  namespace: lab-persistence
+spec:
+  schedule: 0 7 * * 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: create-rol-labs
+            image: quay.io/carias_rh/rol-lab-persistence-ubi8:v0.3
+            env:
+              - name: ROL_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: rol-credentials 
+                    key: username
+              - name: ROL_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: rol-credentials 
+                    key: password
+            args:
+            - /bin/sh
+            - -c
+            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; /usr/bin/ansible-playbook create.yml -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD"'
+          restartPolicy: OnFailure
+
+---          
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: create-stage-do374
+  namespace: lab-persistence
+spec:
+  schedule: 0 6 * * *
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          creationTimestamp: null
+        spec:
+          containers:
+          - name: create-stage-do374
+            image: quay.io/carias_rh/rol-lab-persistence-ubi8:v0.3
+            env:
+              - name: ROL_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: rol-credentials 
+                    key: username
+              - name: ROL_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: rol-credentials 
+                    key: password
+            args:
+            - /bin/sh
+            - -c
+            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; /usr/bin/ansible-playbook create.yml -e lab_environment="rol-stage"  -e ''{"course_id": ["do374-2.0"]}'' -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD"'
+          restartPolicy: OnFailure
+---          
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: delete-stage-do374
+  namespace: lab-persistence
+spec:
+  schedule: 0 20 * * *
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: delete-stage-do374
+            image: quay.io/carias_rh/rol-lab-persistence-ubi8:v0.3
+            env:
+              - name: ROL_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: rol-credentials 
+                    key: username
+              - name: ROL_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: rol-credentials 
+                    key: password
+            args:
+            - /bin/sh
+            - -c
+            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; /usr/bin/ansible-playbook delete.yml -e lab_environment="rol-stage"  -e ''{"course_id": ["do374-2.0"]}'' -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD";'
+          restartPolicy: OnFailure
+

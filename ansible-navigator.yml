@@ -1,5 +1,5 @@
 ---
 ansible-navigator:
   execution-environment:
-    image: quay.io/carias_rh/rol-lab-persistence-ubi8:v0.1
+    image: quay.io/carias_rh/rol-lab-persistence-ubi8:v0.3
     pull-policy: missing
