@@ -27,7 +27,7 @@ spec:
             args:
             - /bin/sh
             - -c
-            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; git checkout python-script;/usr/bin/ansible-playbook create.yml -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD"'
+            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; /usr/bin/ansible-playbook create.yml -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD"'
           restartPolicy: OnFailure
 
 ---          
@@ -61,7 +61,7 @@ spec:
             args:
             - /bin/sh
             - -c
-            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; git checkout python-script;/usr/bin/ansible-playbook create.yml -e lab_environment="rol-stage"  -e ''{"course_id": ["do374-2.0"]}'' -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD"'
+            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; /usr/bin/ansible-playbook create.yml -e lab_environment="rol-stage"  -e ''{"course_id": ["do374-2.0"]}'' -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD"'
           restartPolicy: OnFailure
 ---          
 apiVersion: batch/v1beta1
@@ -92,6 +92,6 @@ spec:
             args:
             - /bin/sh
             - -c
-            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; git checkout python-script;/usr/bin/ansible-playbook delete.yml -e lab_environment="rol-stage"  -e ''{"course_id": ["do374-2.0"]}'' -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD";'
+            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; /usr/bin/ansible-playbook delete.yml -e lab_environment="rol-stage"  -e ''{"course_id": ["do374-2.0"]}'' -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD";'
           restartPolicy: OnFailure
 
