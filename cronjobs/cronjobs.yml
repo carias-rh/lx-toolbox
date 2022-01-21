@@ -5,7 +5,7 @@ metadata:
   name: create-rol-labs
   namespace: lab-persistence
 spec:
-  schedule: 0 7 * * 1
+  schedule: "0 6 * * 1-5"
   jobTemplate:
     spec:
       template:
@@ -37,7 +37,7 @@ metadata:
   name: create-stage-do374
   namespace: lab-persistence
 spec:
-  schedule: 0 6 * * *
+  schedule: "0 6 * * 1-5"
   jobTemplate:
     spec:
       template:
@@ -61,7 +61,7 @@ spec:
             args:
             - /bin/sh
             - -c
-            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; /usr/bin/ansible-playbook create.yml -e lab_environment="rol-stage"  -e ''{"course_id": ["do374-2.0"]}'' -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD"'
+            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; git checkout python-script; /usr/bin/ansible-playbook create.yml -e lab_environment="rol-stage"  -e ''{"course_id": ["do374-2.0"]}'' -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD"'
           restartPolicy: OnFailure
 ---          
 apiVersion: batch/v1beta1
@@ -70,7 +70,7 @@ metadata:
   name: delete-stage-do374
   namespace: lab-persistence
 spec:
-  schedule: 0 20 * * *
+  schedule: "0 20 * * 1-5"
   jobTemplate:
     spec:
       template:
@@ -92,6 +92,6 @@ spec:
             args:
             - /bin/sh
             - -c
-            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; /usr/bin/ansible-playbook delete.yml -e lab_environment="rol-stage"  -e ''{"course_id": ["do374-2.0"]}'' -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD";'
+            - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; git checkout python-script; /usr/bin/ansible-playbook delete.yml -e lab_environment="rol-stage"  -e ''{"course_id": ["do374-2.0"]}'' -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD";'
           restartPolicy: OnFailure
 
