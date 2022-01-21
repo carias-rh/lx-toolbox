@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  creationTimestamp: null
+  name: create-rol-labs
+spec:
+  template:
+    metadata:
+      creationTimestamp: null
+    spec:
+      containers:
+      - name: create-rol-labs
+        image: quay.io/carias_rh/rol-lab-persistence-ubi8:v0.3
+        env:
+          - name: ROL_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: rol-credentials
+                key: username
+          - name: ROL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: rol-credentials
+                key: password
+        args:
+        - /bin/sh
+        - -c
+        - 'git clone https://github.com/carias-rh/rol-lab-persistence; cd rol-lab-persistence; /usr/bin/ansible-playbook create.yml -vv -e username="$ROL_USERNAME" -e password="$ROL_PASSWORD"'
+      restartPolicy: Never
