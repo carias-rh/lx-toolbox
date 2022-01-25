@@ -13,8 +13,14 @@
         - do288-4.6
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
+    - counter: 2
         
   tasks:
+
+    - name: generate hotp token
+      shell: counter=$(cat ./counter); oathtool --hotp {{ secret }}  -c ${counter}; counter=$(( $counter + 1 )); echo $counter > ./counter
+      register: token
+
     - name: Generate selenium script
       template:
         src: templates/lab-create.py.j2
