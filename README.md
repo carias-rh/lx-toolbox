@@ -8,25 +8,8 @@ This project uses ansible and selenium to create, delete, and extend life of mos
   - do280-4.6
   - do288-4.6
 
-It has been implemented to be deployed with a simple ansible-plabook, ansible-navigator, or openshift.
+It has been implemented to be deployed with a simple ansible-plabook, ansible-navigator.
 You will now found the different setups, from the easiest one to the one that may need more root permissions on your laptop. 
-
-## Using openshift
-
-### Requisites
-- An active subscription to rol.redhat.com
-- oc client (optional)
-
-### Setup
-We can use the shared public cluster from the labs (DO180, DO288), although I'm not sure for how long the projects will persist before being pruned. 
-
-This method only requires that you create a secret with your credentials and a cronjob that will launch the script weekly to keep your labs created.
-``` 
-$ oc login https://api.na46.prod.nextcle.com:6443 -u<generated_user> -p<generated_password>
-$ oc new-project <name_it>
-$ oc create secret generic rol-credentials --from-literal=username=yourusername@redhat.com --from-literal=password=yourpassword
-$ oc create -f cronjobs/cronjobs.yml
-``` 
 
 ## Using ansible
 

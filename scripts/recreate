@@ -1,0 +1,51 @@
+#!/bin/bash
+
+function get_course_from_list()
+# Checks if there is an equivalent course in the list and returns the full name
+{
+	COURSE_LIST=$(cat /home/carias/Documents/rol-lab-persistence/courses-list.txt)
+	for course in $COURSE_LIST; do echo $course |grep "$1" >> /tmp/list.txt ; done
+
+	if [[ $(echo $1 |grep ea) != ""  ]]
+        then
+                COURSE_PATH=$(cat /tmp/list.txt | tail -n1)
+        else
+                COURSE_PATH=$(cat /tmp/list.txt |grep -v ea | tail -n1)
+        fi
+
+	echo ""
+        echo "Course starting: $COURSE_PATH"
+	echo ""
+        rm /tmp/list.txt
+
+
+}
+
+function start_course()
+{
+	if [ $# -eq 2 ]
+	  then
+	      if [ $2 == "rol" ] || [ $2 == "rol-stage" ]
+		 then /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/recreate.yml -e "lab_environment=$2"  -e "{'course_id': ['$COURSE_PATH']}" -v
+              fi
+	else 
+	      LAB_ENVIRONMENT=rol
+              /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/recreate.yml -e "lab_environment=$LAB_ENVIRONMENT"  -e "{'course_id': ['$COURSE_PATH']}" -v 
+	fi
+
+}
+
+if [ $# -eq 0 ]
+  then
+      echo "No arguments supplied, please introduce course at least"
+  else
+      get_course_from_list $1
+      if [[ $COURSE_PATH != "" ]]
+      	then start_course $@
+      else
+  	echo "Course $1 does not exist"
+      fi
+fi
+
+
+

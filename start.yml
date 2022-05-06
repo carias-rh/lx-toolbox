@@ -2,9 +2,7 @@
   hosts: localhost
   vars_files: credentials.yml
   vars:
-    - lab_environment: rol-stage
-    - course_id: 
-        - do467-2.1
+    - lab_environment: rol
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
     - counter: 0
@@ -17,9 +15,9 @@
 
     - name: Generate selenium script
       template:
-        src: templates/lab-recreate.py.j2
-        dest: "/tmp/lab-recreate.py"
+        src: templates/lab-start.py.j2
+        dest: "/tmp/lab-start.py"
 
     - name: Create courses
-      shell: '/usr/bin/python3 /tmp/lab-recreate.py'
+      shell: '/usr/bin/python3 /tmp/lab-start.py'
       register: selenium

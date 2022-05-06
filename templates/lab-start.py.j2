@@ -8,16 +8,27 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 
-options = webdriver.ChromeOptions()
-options.add_argument('--ignore-certificate-errors')
-options.add_argument('headless')
-options.add_argument('--no-sandbox')
-options.add_argument("--window-size=1920,1080")
-options.add_argument("--user-data-dir=~/.config/google-chrome/Ansible-profile-create")
-options.add_argument("--enable-extensions")
+# Chrome webdriver
+#options = webdriver.ChromeOptions()
+#options.add_argument('--ignore-certificate-errors')
+##options.add_argument('headless')
+##options.add_argument('--no-sandbox')
+#options.add_argument("--window-size=1920,1080")
+#options.add_argument("--user-data-dir=/home/carias/.config/google-chrome/Ansible-profile-start")
+#options.add_argument("--enable-extensions")
+#
+## from selenium.webdriver.firefox.options import Options
+## Define the webdriver to use.
+#driver = webdriver.Chrome(executable_path="/usr/bin/chromedriver", chrome_options=options)
 
-# Define the webdriver to use.
-driver = webdriver.Chrome(executable_path="/usr/bin/chromedriver", chrome_options=options)
+# Firefox webdriver
+profile = webdriver.FirefoxProfile(os.path.expanduser('~/.mozilla/firefox/bmi8735x.ansible-start-lab/'))
+profile.add_extension(extension='copy_on_select-1.0-an+fx.xpi')
+
+driver = webdriver.Firefox(firefox_profile=profile)
+driver.maximize_window()
+
+
 
 # Go to the website
 def go_to_main_site(lab_environment):
@@ -53,8 +64,7 @@ def login():
         login_button.click()
 
     except:
-        print("An exception occurred while accepting during login")
-        time.sleep(3)
+        print("An exception occurred while login")
 
 def load_cookies():
     try:
@@ -66,11 +76,10 @@ def load_cookies():
 
 
 def save_cookies():
-    try:
+    try: 
         pickle.dump( driver.get_cookies() , open("cookies.pkl","wb"))
     except:
         print("Failed saving cookies")
-
 
 def accept_cookies():
     try:
@@ -81,20 +90,46 @@ def accept_cookies():
     except:
         print("An exception occurred while accepting cookies")
 
-
 def create_lab(lab_environment, course_id):
+    try:    
+        labs_tab = driver.find_element_by_xpath('//*[@id="course-tabs-tab-8"]/span[2]')
+        labs_tab.click()
+        time.sleep(2)
+    
+        create_lab = driver.find_element_by_xpath("//*[text()='Create']")
+        create_lab.click()
+    
+        time.sleep(15)
+    except:
+        print("An exception occurred during lab creation in " + lab_environment + " environment and course " + course_id)
+
+def start_lab(lab_environment, course_id):
+    try:
+        save_cookies()
+        labs_tab = driver.find_element_by_xpath('//*[@id="course-tabs-tab-8"]/span[2]')
+        labs_tab.click()
+        time.sleep(2)
+
+        start_button = driver.find_element_by_xpath("//*[text()='Start']")
+        start_button.click()
+
+    except:
+        print("An exception occurred during lab start in " + lab_environment + " environment and course " + course_id)
+        create_lab(lab_environment, course_id)
+
+
+def increase_autostop(lab_environment, course_id):
     try:
         labs_tab = driver.find_element_by_xpath('//*[@id="course-tabs-tab-8"]/span[2]')
         labs_tab.click()
         time.sleep(2)
 
-        create_lab = driver.find_element_by_xpath("//*[text()='Create']")
-        create_lab.click()
+        increase_autostop = driver.find_element_by_xpath('//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')
 
-        time.sleep(15)
+        for i in range(30):
+            increase_autostop.click()
     except:
-        print(
-            "An exception occurred during lab creation in " + lab_environment + " environment and course " + course_id)
+        print("An exception occurred during lifespan extension in " + lab_environment + " environment and course " + course_id)
 
 def increase_lifespan(lab_environment, course_id):
     try:
@@ -109,6 +144,7 @@ def increase_lifespan(lab_environment, course_id):
     except:
         print("An exception occurred during lifespan extension in " + lab_environment + " environment and course " + course_id)
 
+
 ## Main
 
 go_to_main_site("{{ lab_environment }}")
@@ -118,7 +154,8 @@ accept_cookies()
 {% for course in course_id -%}
 
 go_to_course("{{ lab_environment }}", "{{ course }}")
-create_lab("{{ lab_environment }}", "{{ course }}")
+start_lab("{{ lab_environment }}", "{{ course }}")
+increase_autostop("{{ lab_environment }}", "{{ course }}")
 increase_lifespan("{{ lab_environment }}", "{{ course }}")
 
 {% endfor -%}

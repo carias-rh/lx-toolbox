@@ -8,13 +8,18 @@
         - rh134-8.2
         - rh294-8.4
         - rh199-8.2
-        - do180-4.6
         - do280-4.6
         - do288-4.6
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
-        
+    - counter: 0
+
   tasks:
+
+    - name: generate hotp token
+      shell: counter=$(cat ./counter); oathtool --hotp {{ secret }}  -c ${counter}; counter=$(( $counter + 1 )); echo $counter > ./counter
+      register: token
+
     - name: Generate selenium script
       template:
         src: templates/lab-delete.py.j2

@@ -8,3 +8,9 @@ token
 credentials.yml
 credentials.yml.orig
 counter
+/cookies.pkl
+/api-curl-courses
+/.idea
+/geckodriver.log
+/rol-lab.log
+/copy_on_select-1.0-an+fx.xpi
