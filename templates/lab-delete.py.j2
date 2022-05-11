@@ -87,20 +87,21 @@ def accept_cookies():
     except:
         print("An exception occurred while accepting cookies")
 
-def delete_lab():
-    labs_tab = driver.find_element_by_xpath('//*[@id="course-tabs-tab-8"]/span[2]')
-    labs_tab.click()
-    time.sleep(2)
-
+def delete_lab(lab_environment, course_id):
     try:
-        #delete_button = driver.find_element_by_xpath("//*[text()='Delete']")
-        delete_lab = driver.find_element_by_xpath("/html/body/div[1]/article/div/div[3]/div/section/div[2]/div/div[3]/div/div/div[3]/button[1]")
-        delete_button.click()
-        
-        confirm_delete_lab = driver.find_element_by_xpath('/html/body/div[3]/div[2]/div/div/div[2]/button[1]')
-        confirm_delete_lab.click()
+        labs_tab = driver.find_element_by_xpath('//*[@id="course-tabs-tab-8"]/span[2]')
+        labs_tab.click()
+        time.sleep(2)
+
+        delete_lab = driver.find_element_by_xpath("//*[text()='Delete']")
+        delete_lab.click()
+
+        delete_lab_confirm = driver.find_element_by_xpath("/html/body/div[3]/div[2]/div/div/div[2]/button[1]")
+        delete_lab_confirm.click()
+
+        time.sleep(10)
     except:
-        print("An exception occurred during lab deletion")
+        print("An exception occurred during lab deletion in " + lab_environment + " environment and course " + course_id)
 
 
 go_to_main_site("{{ lab_environment }}")
@@ -110,7 +111,7 @@ accept_cookies()
 {% for course in course_id -%}
 
 go_to_course("{{ lab_environment }}", "{{ course }}")
-delete_lab()
+delete_lab("{{ lab_environment }}", "{{ course }}")
 
 {% endfor -%}
 
