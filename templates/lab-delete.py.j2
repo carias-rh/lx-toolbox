@@ -36,7 +36,7 @@ def login():
 
         next_button = driver.find_element_by_xpath('//*[@id="rh-sso-flow"]')
         next_button.click()
-        time.sleep(1)
+        time.sleep(3)
 
         userid_login_box = driver.find_element_by_xpath('//*[@id="username"]')
         userid_login_box.send_keys("carias")
