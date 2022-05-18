@@ -1,7 +1,7 @@
 #!/usr/local/bin/python3
 ### Maintained by carias@redhat.com
 
-import time, sys, os.path
+import time, os.path
 import pickle
 from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
@@ -14,6 +14,7 @@ driver = webdriver.Firefox()
 driver.install_addon(os.path.expanduser(format(os.getcwd()) + '/copy_on_select-1.0-an+fx.xpi'), temporary=True)
 driver.maximize_window()
 
+
 # Go to the website
 def go_to_main_site(lab_environment):
     driver.get('https://rol.redhat.com/' + lab_environment + '/app')
@@ -24,26 +25,26 @@ def go_to_course(lab_environment, course_id):
     driver.get('https://rol.redhat.com/' + lab_environment + '/app/courses/' + course_id)
     time.sleep(5)
 
-
 def login():
+
     try:
         userid_login_box = driver.find_element_by_xpath("/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
         userid_login_box.send_keys("{{ rh_username }}@redhat.com")
-
+        
         next_button = driver.find_element_by_xpath('//*[@id="login-show-step2"]')
         next_button.click()
         time.sleep(1)
-
+        
         next_button = driver.find_element_by_xpath('//*[@id="rh-sso-flow"]')
         next_button.click()
         time.sleep(1)
-
+    
         userid_login_box = driver.find_element_by_xpath('//*[@id="username"]')
         userid_login_box.send_keys("carias")
 
         password_login_box = driver.find_element_by_xpath('//*[@id="password"]')
         password_login_box.send_keys("{{ pin }}{{ token.stdout }}")
-
+    
         login_button = driver.find_element_by_xpath('//*[@id="submit"]')
         login_button.click()
 
@@ -60,7 +61,7 @@ def load_cookies():
 
 
 def save_cookies():
-    try:
+    try: 
         pickle.dump( driver.get_cookies() , open("cookies.pkl","wb"))
     except:
         print("Failed saving cookies")
@@ -74,22 +75,21 @@ def accept_cookies():
     except:
         print("An exception occurred while accepting cookies")
 
-def delete_lab(lab_environment, course_id):
+def impersonate():
     try:
-        labs_tab = driver.find_element_by_xpath('//*[@id="course-tabs-tab-8"]/span[2]')
-        labs_tab.click()
-        time.sleep(2)
+        impersonate_button = driver.find_element_by_xpath("//*[text()='Switch user']")
+        impersonate_button.click()
 
-        delete_lab = driver.find_element_by_xpath("//*[text()='Delete']")
-        delete_lab.click()
+        impersonate_box = driver.find_element_by_xpath('//*[@id="formInlineUsername"]')
+        impersonate_box.send_keys("{{ impersonate_username }}")
 
-        delete_lab_confirm = driver.find_element_by_xpath("/html/body/div[3]/div[2]/div/div/div[2]/button[1]")
-        delete_lab_confirm.click()
+        accept_impersonate_button = driver.find_element_by_xpath("/html/body/div[3]/div[2]/div/div/div[2]/form/button")
+        accept_impersonate_button.click()
 
-        time.sleep(10)
     except:
-        print("An exception occurred during lab deletion in " + lab_environment + " environment and course " + course_id)
+        print("An exception occurred while impersonating {{ impersonate_username }}")
 
+## Main
 
 go_to_main_site("{{ lab_environment }}")
 login()
@@ -98,8 +98,9 @@ accept_cookies()
 {% for course in course_id -%}
 
 go_to_course("{{ lab_environment }}", "{{ course }}")
-delete_lab("{{ lab_environment }}", "{{ course }}")
+impersonate()
+
 
 {% endfor -%}
 
-driver.quit()
+#driver.quit()

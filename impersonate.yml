@@ -1,0 +1,25 @@
+- name: ROL labs launcher
+  hosts: localhost
+  vars_files: credentials.yml
+  vars:
+    - lab_environment: rol
+    - course_id: ""
+    - rh_username: "{{ username | default('') }}"
+    - rh_password: "{{ password | default('') }}"
+    - impersonate_username: ""
+    - counter: 0
+        
+  tasks:
+
+    - name: generate hotp token
+      shell: counter=$(cat ./counter); oathtool --hotp {{ secret }}  -c ${counter}; counter=$(( $counter + 1 )); echo $counter > ./counter
+      register: token
+
+    - name: Generate selenium script
+      template:
+        src: templates/lab-impersonate.py.j2
+        dest: "/tmp/lab-impersonate.py"
+
+    - name: Impersonate
+      shell: '/usr/bin/python3 /tmp/lab-impersonate.py'
+      register: selenium
