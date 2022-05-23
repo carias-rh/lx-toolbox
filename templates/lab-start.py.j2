@@ -92,6 +92,8 @@ def start_lab(lab_environment, course_id):
     try:
         driver.refresh()
         save_cookies()
+        time.sleep(3)
+
         labs_tab = driver.find_element_by_xpath('//*[@id="course-tabs-tab-8"]/span[2]')
         labs_tab.click()
         time.sleep(2)
