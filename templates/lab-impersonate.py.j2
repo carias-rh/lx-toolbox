@@ -75,18 +75,17 @@ def accept_cookies():
 def impersonate():
     try:
         driver.refresh()
-        time.sleep(5)
+        time.sleep(10)
         impersonate_button = driver.find_element_by_xpath("//*[text()='Switch user']")
         impersonate_button.click()
-        #time.sleep(1)
+        time.sleep(0.5)
 
         impersonate_box = driver.find_element_by_xpath('//*[@id="formInlineUsername"]')
         impersonate_box.send_keys("{{ impersonate_username }}")
-        #time.sleep(2)
+        time.sleep(0.5)
  
-        accept_impersonate_button = driver.find_element_by_xpath("/html/body/div[3]/div[2]/div/div/div[2]/form/button")
-        accept_impersonate_button.click()
-        time.sleep(4)
+        accept_impersonate_button = driver.find_element_by_xpath("/html/body/div[3]/div[2]/div/div/div[2]/form/button").click()
+        time.sleep(2)
 
     except:
         print("An exception occurred while impersonating {{ impersonate_username }}")

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+#set -x 
+# [carias@carias ~]$ curl 'https://rol.redhat.com/rol/api/courses/'   -H 'x-csrftoken: zE0ErBM4HwjoFz84wSERvoEk3AmsWXYI'    -H 'cookie: csrftoken=zE0ErBM4HwjoFz84wSERvoEk3AmsWXYI; sessionid=zfytlrtl64kam1r6w5dj57nnp63fgq7x'   --compressed | jq '.[].code' > courses-list.txt
+
 function get_course_from_list()
 # Checks if there is an equivalent course in the list and returns the full name
 {
@@ -10,12 +13,32 @@ function get_course_from_list()
         then
                 COURSE_PATH=$(cat /tmp/list.txt | tail -n1)
         else
-                COURSE_PATH=$(cat /tmp/list.txt |grep -v ea | tail -n1)
+                COURSE_LIST=$(cat /tmp/list.txt |grep -v ea | grep -v "[*A-Z]")
+                COURSE_VERSION=0
+                for course in $COURSE_LIST
+                do
+                        CHECK_COURSE_VERSION=$(echo $course |cut -d '-' -f2 | cut -d '.' -f1)
+                        if [[ `expr $CHECK_COURSE_VERSION` -gt `expr $COURSE_VERSION` ]]
+                        then
+                                COURSE_VERSION=$CHECK_COURSE_VERSION
+                        fi
+                done
+                COURSE_LIST=$(cat /tmp/list.txt |grep -v ea | grep $COURSE_VERSION)
+
+                # compare subversion
+                COURSE_SUBVERSION=0
+                for course in $COURSE_LIST
+                do
+                        CHECK_COURSE_SUBVERSION=$(echo $course | cut -d '-' -f2 | cut -d '.' -f2)
+                        if [[ `expr $CHECK_COURSE_SUBVERSION` -gt `expr $COURSE_SUBVERSION` ]]
+                        then
+                                COURSE_SUBVERSION=$CHECK_COURSE_SUBVERSION
+                        fi
+                done
+                COURSE_PATH=$(cat /tmp/list.txt | grep -v ea | grep $COURSE_VERSION.$COURSE_SUBVERSION)
+
         fi
 
-	echo ""
-        echo "Course starting: $COURSE_PATH"
-	echo ""
         rm /tmp/list.txt
 
 
@@ -37,9 +60,24 @@ function start_course()
 
 if [ $# -eq 0 ]
   then
-      echo "No arguments supplied, please introduce course at least"
+      echo "No arguments supplied, please introduce course at least, such:"
+      echo "$ recreate 199"
+      echo "or by selecting the environment:"
+      echo "$ recreate 199 rol-stage"
+
   else
       get_course_from_list $1
+
+            echo ""
+      echo "Course starting: $COURSE_PATH"
+      if [ $# -eq 2 ]
+      then
+          echo "Environment: $2"
+      else
+          echo "Environment: rol-production"
+      fi
+      echo ""
+
       if [[ $COURSE_PATH != "" ]]
       	then start_course $@
       else

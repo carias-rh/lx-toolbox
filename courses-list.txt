@@ -1,3 +1,4 @@
+do467-2.2
 ad183-7.0
 ad221-7.10
 ad221ea-7.10
@@ -71,6 +72,7 @@ do276-en_US-1.0-7.2
 do280-en_US-1.0-3.4
 do280-3.5
 do280-3.9
+do280-4.10
 do280-4.2
 do280-4.5
 do280vc-4.5.2
@@ -83,6 +85,7 @@ do285-3.9
 do285-4.2
 do285-4.5
 do285-4.6
+do286-4.6
 do288-3.6
 do288-4.1
 do288-4.2
@@ -147,6 +150,7 @@ do447-2.8
 do457-2.5
 do457ea-2.5
 do467ea-2.0
+do467ea-2.1
 do480ea-2.3
 do480ea-2.4
 
@@ -221,11 +225,13 @@ rh124-en_US-1.0-7
 rh124-demo-en_US-1.0-7
 rh124-8.0
 rh124-8.2
+rh124-9.0
 rh124ea-8.2
 rh124ea-9.0
 rh134-en_US-1.0-7
 rh134-8.0
 rh134-8.2
+rh134-9.0
 rh134ea-8.2
 rh134ea-9.0
 
@@ -276,6 +282,7 @@ rhcsa650e-8.2
 tl112-1
 tl112ea-1
 tl250vc-1.0
+tl500-3.11
 workshop-red-hat-directory-server-administration-10-0
 red-hat-openshift-workshop-46-0
 ibm-skills-subscription-10-0

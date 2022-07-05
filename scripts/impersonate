@@ -13,18 +13,18 @@ function get_course_from_list()
 	        COURSE_PATH=$(cat /tmp/list.txt | tail -n1)
 	else
                 COURSE_LIST=$(cat /tmp/list.txt |grep -v ea | grep -v "[*A-Z]")
-		COURSE_VERSION=0
-		for course in $COURSE_LIST
-		do
-			CHECK_COURSE_VERSION=$(echo $course |cut -d '-' -f2 | cut -d '.' -f1)
-			if [[ `expr $CHECK_COURSE_VERSION` -gt `expr $COURSE_VERSION` ]]
-			then
-				COURSE_VERSION=$CHECK_COURSE_VERSION
-			fi
-		done	
-		COURSE_LIST=$(cat /tmp/list.txt |grep -v ea | grep $COURSE_VERSION)
+                COURSE_VERSION=0
+                for course in $COURSE_LIST
+                do
+                        CHECK_COURSE_VERSION=$(echo $course |cut -d '-' -f2 | cut -d '.' -f1)
+                        if [[ `expr $CHECK_COURSE_VERSION` -gt `expr $COURSE_VERSION` ]]
+                        then
+                                COURSE_VERSION=$CHECK_COURSE_VERSION
+                        fi
+                done
+                COURSE_LIST=$(cat /tmp/list.txt |grep -v ea | grep $COURSE_VERSION)
 
-		# compare subversion
+                # compare subversion
                 COURSE_SUBVERSION=0
                 for course in $COURSE_LIST
                 do
@@ -35,48 +35,33 @@ function get_course_from_list()
                         fi
                 done
                 COURSE_PATH=$(cat /tmp/list.txt | grep -v ea | grep $COURSE_VERSION.$COURSE_SUBVERSION)
+		
 	fi
 
-	rm /tmp/list.txt
+        rm /tmp/list.txt
 
 }
 
 function start_course()
 {
-	if [ $# -eq 2 ]
-	  then
-	      if [ "$2" == "rol" ] || [ "$2" == "rol-stage" ]
-		 then /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/start.yml -e "lab_environment=$2"  -e "{'course_id': ['$COURSE_PATH']}" -v
-              fi
-	else 
-	      LAB_ENVIRONMENT=rol
-              /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/start.yml -e "lab_environment=$LAB_ENVIRONMENT"  -e "{'course_id': ['$COURSE_PATH']}" -v 
-	fi
+        /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/impersonate.yml -e impersonate_username=$2  -e "{'course_id': ['$COURSE_PATH']}" -v 
 
 }
 
-if [ $# -eq 0 ]
+if [[ $# -ne 2 ]]
   then
-      echo "No arguments supplied, please introduce course at least, such:"
-      echo "$ start 199"
-      echo "or by selecting the environment:"
-      echo "$ start 199 rol-stage"
+      echo "Please introduce Course and Username to impersonate, such: "
+      echo "$ impersonate 180 username"
 
   else
       get_course_from_list $1
 
       echo ""
       echo "Course starting: $COURSE_PATH"
-      if [ $# -eq 2 ]
-      then
-          echo "Environment: $2"
-      else
-          echo "Environment: rol-production"
-      fi
+      echo "Environment: rol-production"
+      echo "Impersonate: $2"
       echo ""
-
-
-
+      
       if [[ $COURSE_PATH != "" ]]
       	then start_course $@
       else
