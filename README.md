@@ -30,7 +30,8 @@ $ dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40
 
 ![image](https://user-images.githubusercontent.com/80515069/177427661-7a1d9c81-ad96-485c-a31a-376e7dc3c1e5.png)
 
-Make sure that the "counter" file always matches the Count of the token.
+Make sure that the `./counter` file always matches the `Count` value of the token.
+
 ![image](https://user-images.githubusercontent.com/80515069/177428398-59747c8c-1f9e-4904-8c15-7dc66e8c8f06.png)
 
 ### Other learners
@@ -80,7 +81,7 @@ $ ansible-playbook delete.yml \
         -e '{"course_id": ["rh124-8.2", "rh134-8.2"]}'
 ```
 
-You can also install the wrapper scripts for easy launch at your convenience:
+You can also install the wrapper `./scripts` for easy launch at your convenience:
 ```
 $ which start
 /usr/local/bin/start
