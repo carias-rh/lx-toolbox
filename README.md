@@ -41,9 +41,10 @@ username: "youruser@redhat.com"
 password: "yourpassword"
 ``` 
 
-
-Customize the lab_environment and courses_id variables in the create/delete.yml vars section.
+## Custom courses and environment
+Customize the `lab_environment` and `courses_id` variables in the vars section:
 ```
+$ cat create.yaml
 - name: ROL labs launcher
   hosts: localhost
   vars_files: credentials.yml
@@ -64,6 +65,7 @@ Customize the lab_environment and courses_id variables in the create/delete.yml 
 - python3
 - selenium libraries
 `pip3 install selenium`
+- [geckodriver](https://github.com/mozilla/geckodriver/releases) under `/usr/bin/`
 
 Run the playbook with ansible-navigator.
 ``` 
