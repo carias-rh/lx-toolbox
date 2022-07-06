@@ -80,7 +80,37 @@ $ ansible-playbook delete.yml \
         -e '{"course_id": ["rh124-8.2", "rh134-8.2"]}'
 ```
 
-Install the wrappers at your convenience, such in /usr/local/bin
+You can also install the wrapper scripts for easy launch at your convenience:
+```
+$ which start
+/usr/local/bin/start
+
+$ start 180 
+
+Course starting: do180-4.10
+Environment: rol-production
+
+Using /etc/ansible/ansible.cfg as config file
+[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
+
+PLAY [ROL labs launcher] *****************************************************************************************************************************************************************************************************************************************************************
+...
+``` 
+Another wrapper example that allows you to impersonate a user:
+```
+$ impersonate 280 carias
+
+Course starting: do280-4.10
+Environment: rol-production
+Impersonate: carias
+
+Using /etc/ansible/ansible.cfg as config file
+[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
+
+PLAY [ROL labs launcher] *****************************************************************************************************************************************************************************************************************************************************************
+...
+```
+
 
 # Recommendations
 - The *create.yml* playbook will also increase the *Auto-destroy* box of the lab to the maximum available (usually 14 days). I recomend to create a cronjob that runs at least every 2 weeks.
