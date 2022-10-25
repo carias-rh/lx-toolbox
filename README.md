@@ -30,7 +30,8 @@ $ dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40
 
 ![image](https://user-images.githubusercontent.com/80515069/177427661-7a1d9c81-ad96-485c-a31a-376e7dc3c1e5.png)
 
-Make sure that the "counter" file always matches the Count of the token.
+Make sure that the `./counter` file always matches the `Count` value of the token.
+
 ![image](https://user-images.githubusercontent.com/80515069/177428398-59747c8c-1f9e-4904-8c15-7dc66e8c8f06.png)
 
 ### Other learners
@@ -41,9 +42,10 @@ username: "youruser@redhat.com"
 password: "yourpassword"
 ``` 
 
-
-Customize the lab_environment and courses_id variables in the create/delete.yml vars section.
+## Custom courses and environment
+Customize the `lab_environment` and `courses_id` variables in the vars section:
 ```
+$ cat create.yaml
 - name: ROL labs launcher
   hosts: localhost
   vars_files: credentials.yml
@@ -64,6 +66,7 @@ Customize the lab_environment and courses_id variables in the create/delete.yml 
 - python3
 - selenium libraries
 `pip3 install selenium`
+- [geckodriver](https://github.com/mozilla/geckodriver/releases) under `/usr/bin/`
 
 Run the playbook with ansible-navigator.
 ``` 
@@ -78,7 +81,37 @@ $ ansible-playbook delete.yml \
         -e '{"course_id": ["rh124-8.2", "rh134-8.2"]}'
 ```
 
-Install the wrappers at your convenience, such in /usr/local/bin
+You can also install the wrapper `./scripts` for easy launch at your convenience:
+```
+$ which start
+/usr/local/bin/start
+
+$ start 180 
+
+Course starting: do180-4.10
+Environment: rol-production
+
+Using /etc/ansible/ansible.cfg as config file
+[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
+
+PLAY [ROL labs launcher] *****************************************************************************************************************************************************************************************************************************************************************
+...
+``` 
+Another wrapper example that allows you to impersonate a user:
+```
+$ impersonate 280 carias
+
+Course starting: do280-4.10
+Environment: rol-production
+Impersonate: carias
+
+Using /etc/ansible/ansible.cfg as config file
+[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
+
+PLAY [ROL labs launcher] *****************************************************************************************************************************************************************************************************************************************************************
+...
+```
+
 
 # Recommendations
 - The *create.yml* playbook will also increase the *Auto-destroy* box of the lab to the maximum available (usually 14 days). I recomend to create a cronjob that runs at least every 2 weeks.
