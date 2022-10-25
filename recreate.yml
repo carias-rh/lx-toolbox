@@ -20,6 +20,6 @@
         src: templates/lab-recreate.py.j2
         dest: "/tmp/lab-recreate.py"
 
-    - name: Create courses
+    - name: Recreate courses
       shell: '/usr/bin/python3 /tmp/lab-recreate.py'
       register: selenium

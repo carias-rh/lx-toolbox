@@ -66,6 +66,7 @@ def delete_lab(lab_environment, course_id):
             (By.XPATH, '//*[text()="Delete"]'))).click()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[3]/div[2]/div/div/div[2]/button[1]'))).click()
+        time.sleep(30)
 
     except:
         print("An exception occurred during lab deletion in " + lab_environment + " environment and course " + course_id)
@@ -75,7 +76,7 @@ def create_lab(lab_environment, course_id):
     try:
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 60).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[text()="Create"]'))).click()
 
     except:
@@ -88,7 +89,7 @@ def increase_autostop(lab_environment, course_id):
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
 
-        increase_autostop = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
+        increase_autostop = WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
 
         for i in range(30):
             increase_autostop.click()
@@ -101,7 +102,7 @@ def increase_lifespan(lab_environment, course_id):
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
 
-        increase_lifespan = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+        increase_lifespan = WebDriverWait(driver, 60).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')))
 
         for i in range(30):
