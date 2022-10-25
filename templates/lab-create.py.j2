@@ -28,38 +28,31 @@ driver.maximize_window()
 # Go to the website
 def go_to_main_site(lab_environment):
     driver.get('https://rol.redhat.com/' + lab_environment + '/app')
-    time.sleep(2)
+
 
 def go_to_course(lab_environment, course_id):
     driver.get('https://rol.redhat.com/' + lab_environment + '/app/courses/' + course_id)
-    time.sleep(5)
+
 
 def login():
 
     try:
-        userid_login_box = driver.find_element_by_xpath("/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
-        userid_login_box.send_keys("{{ rh_username }}@redhat.com")
-        
-        next_button = driver.find_element_by_xpath('//*[@id="login-show-step2"]')
-        next_button.click()
-        time.sleep(1)
-        
-        next_button = driver.find_element_by_xpath('//*[@id="rh-sso-flow"]')
-        next_button.click()
-        time.sleep(3)
-    
-        userid_login_box = driver.find_element_by_xpath('//*[@id="username"]')
-        userid_login_box.send_keys("carias")
+        driver.find_element("xpath", "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input").send_keys("{{ rh_username }}@redhat.com")
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="login-show-step2"]'))).click()
 
-        password_login_box = driver.find_element_by_xpath('//*[@id="password"]')
-        password_login_box.send_keys("{{ pin }}{{ token.stdout }}")
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
+        time.sleep(2)
     
-        login_button = driver.find_element_by_xpath('//*[@id="submit"]')
-        login_button.click()
+        driver.find_element("xpath", '//*[@id="username"]').send_keys("carias")
+        driver.find_element("xpath", '//*[@id="password"]').send_keys("{{ pin }}{{ token.stdout }}")
+    
+        driver.find_element("xpath", '//*[@id="submit"]').click()
 
     except:
         print("An exception occurred while accepting during login")
-        time.sleep(3)
+
 
 def accept_cookies():
     try:
@@ -73,37 +66,35 @@ def accept_cookies():
 
 def create_lab(lab_environment, course_id):
     try:
-        time.sleep(5)
-        labs_tab = driver.find_element_by_xpath('//*[@id="course-tabs-tab-8"]/span[2]')
-        labs_tab.click()
-        time.sleep(2)
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[text()="Create"]'))).click()
 
-        create_lab = driver.find_element_by_xpath("//*[text()='Create']")
-        create_lab.click()
-
-        time.sleep(15)
     except:
         print(
             "An exception occurred during lab creation in " + lab_environment + " environment and course " + course_id)
 
 def increase_lifespan(lab_environment, course_id):
     try:
-        labs_tab = driver.find_element_by_xpath('//*[@id="course-tabs-tab-8"]/span[2]')
-        labs_tab.click()
-        time.sleep(2)
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
 
-        increase_lifespan = driver.find_element_by_xpath('//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')
+        increase_lifespan = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')))
 
         for i in range(30):
             increase_lifespan.click()
     except:
         print("An exception occurred during lifespan extension in " + lab_environment + " environment and course " + course_id)
 
+
+
 ## Main
 
 go_to_main_site("{{ lab_environment }}")
-login()
 accept_cookies()
+login()
 
 {% for course in course_id -%}
 

@@ -10,7 +10,8 @@
         - rh294-8.4
         - do180-4.10
         - do280-4.10
-        - do288-4.6
+        - do288-4.10
+        - do374-2.0
         - do447-2.8
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
