@@ -1,8 +1,7 @@
 #!/usr/local/bin/python3
 ### Maintained by carias@redhat.com
 
-import time, sys, os.path
-import pickle
+import time, os.path
 from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -25,6 +24,7 @@ driver = webdriver.Firefox()
 driver.install_addon(os.path.expanduser(format(os.getcwd()) + '/copy_on_select-1.0-an+fx.xpi'), temporary=True)
 driver.maximize_window()
 
+
 # Go to the website
 def go_to_main_site(lab_environment):
     driver.get('https://rol.redhat.com/' + lab_environment + '/app')
@@ -43,11 +43,9 @@ def login():
 
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
-        time.sleep(2)
-    
+
         driver.find_element("xpath", '//*[@id="username"]').send_keys("carias")
         driver.find_element("xpath", '//*[@id="password"]').send_keys("{{ pin }}{{ token.stdout }}")
-    
         driver.find_element("xpath", '//*[@id="submit"]').click()
 
     except:
@@ -68,7 +66,7 @@ def create_lab(lab_environment, course_id):
     try:
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[text()="Create"]'))).click()
 
     except:

@@ -52,8 +52,8 @@ $ cat create.yaml
   vars:
     - lab_environment: rol 	# Valid options are: rol / rol-stage
     - course_id:  		# Get the course_id from the URL, such https://rol.redhat.com/rol/app/courses/rh124-8.2
-        - rh124-8.2
-        - rh134-8.2
+        - rh124-9.0
+        - rh134-9.0
         - rh294-8.4
         ...
 ```
