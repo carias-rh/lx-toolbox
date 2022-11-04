@@ -84,7 +84,7 @@ def start_lab(lab_environment, course_id):
 def increase_autostop(lab_environment, course_id):
     try:
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+            (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
 
         increase_autostop = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
