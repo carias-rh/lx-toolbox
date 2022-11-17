@@ -8,11 +8,6 @@
     - counter: 0
         
   tasks:
-
-    - name: generate hotp token
-      shell: counter=$(cat ./counter); oathtool --hotp {{ secret }}  -c ${counter}; counter=$(( $counter + 1 )); echo $counter > ./counter
-      register: token
-
     - name: Generate selenium script
       template:
         src: templates/lab-start.py.j2

@@ -7,22 +7,21 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 
-#options = webdriver.ChromeOptions()
-#options.add_argument('--ignore-certificate-errors')
-#options.add_argument('headless')
-#options.add_argument('--no-sandbox')
-#options.add_argument("--window-size=1920,1080")
-#options.add_argument("--user-data-dir=~/.config/google-chrome/Ansible-profile-create")
-#options.add_argument("--enable-extensions")
+# Chromedriver options
+options = webdriver.ChromeOptions()
+options.add_argument('--ignore-certificate-errors')
+options.add_argument('headless')
+options.add_argument('--no-sandbox')
+options.add_argument("--window-size=1920,1080")
 
 ## Define the webdriver to use.
-#driver = webdriver.Chrome(executable_path="/usr/bin/chromedriver", chrome_options=options)
+driver = webdriver.Chrome(executable_path="/usr/bin/chromedriver", chrome_options=options)
 
 ## Firefox webdriver
-driver = webdriver.Firefox()
+#driver = webdriver.Firefox()
 
-driver.install_addon(os.path.expanduser(format(os.getcwd()) + '/copy_on_select-1.0-an+fx.xpi'), temporary=True)
-driver.maximize_window()
+#driver.install_addon(os.path.expanduser(format(os.getcwd()) + '/copy_on_select-1.0-an+fx.xpi'), temporary=True)
+#driver.maximize_window()
 
 
 # Go to the website
@@ -31,6 +30,8 @@ def go_to_main_site(lab_environment):
 
 
 def go_to_course(lab_environment, course_id):
+    WebDriverWait(driver, 100).until(EC.element_to_be_clickable(
+        (By.XPATH, '//*[@id="avatar"]')))
     driver.get('https://rol.redhat.com/' + lab_environment + '/app/courses/' + course_id)
 
 
@@ -44,9 +45,19 @@ def login():
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
 
+        # RH SSO
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="submit"]')))
         driver.find_element("xpath", '//*[@id="username"]').send_keys("carias")
-        driver.find_element("xpath", '//*[@id="password"]').send_keys("{{ pin }}{{ token.stdout }}")
+        counter = os.popen("cat /home/carias/Documents/rol-lab-persistence/counter").read()
+        token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
+        driver.find_element("xpath", '//*[@id="password"]').send_keys(
+            str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
         driver.find_element("xpath", '//*[@id="submit"]').click()
+
+        # Increment SSO token counter
+        counter = int(counter) + 1
+        os.popen("echo " + str(counter) + " > /home/carias/Documents/rol-lab-persistence/counter")
 
     except:
         print("An exception occurred while accepting during login")

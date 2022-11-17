@@ -52,18 +52,31 @@ def login():
         print("An exception occurred while accepting during login")
 
 
-def intercom_active_inactive():
+def intercom_change_status(status):
     try:
         WebDriverWait(driver, 90).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[1]/div[1]/div[1]/div/div/div/div/div[1]/div/div/div[3]/div/div'))).click()
-        WebDriverWait(driver, 90).until(EC.element_to_be_clickable(
+
+        # Change status to Away, look for Active status
+        if status == "Away":
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+                (By.XPATH, '//*[text()="Active"]')))
+            WebDriverWait(driver, 90).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div[2]/div/div/button/span'))).click()
-        driver.quit()
+
+        else:
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+                (By.XPATH, '//*[text()="Away"]')))
+            WebDriverWait(driver, 90).until(EC.element_to_be_clickable(
+            (By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div[2]/div/div/button/span'))).click()
+
     except:
         print("An exception occurred while activating intercom")
+
 
 # Main
 
 go_to_main_site()
 login()
-intercom_active_inactive()
+intercom_change_status(status="{{ status }}")
+driver.quit()

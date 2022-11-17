@@ -5,18 +5,14 @@
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
     - counter: 0
+    - status: "Away"
         
   tasks:
-
-#    - name: generate hotp token
-#      shell: counter=$(cat ./counter); oathtool --hotp {{ secret }}  -c ${counter}; counter=$(( $counter + 1 )); echo $counter > ./counter
-#      register: token
-
     - name: Generate selenium script
       template:
         src: templates/intercom.py.j2
         dest: "/tmp/intercom.py"
 
     - name: Activate intercom
-      shell: '/usr/bin/python3 /tmp/intercom.py'
+      shell: '/usr/bin/python3 /tmp/intercom.py {{ status }}'
       register: selenium
