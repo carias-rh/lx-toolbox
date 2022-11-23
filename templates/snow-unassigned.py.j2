@@ -1,0 +1,99 @@
+#!/usr/local/bin/python3
+### Maintained by carias@redhat.com
+
+import time, os.path
+import re
+
+from selenium import webdriver
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.select import Select
+from selenium.webdriver.common.by import By
+
+options = webdriver.ChromeOptions()
+options.add_argument('--ignore-certificate-errors')
+options.add_argument("--window-size=1200,800")
+options.add_argument('headless')
+options.add_argument('--no-sandbox')
+
+# Define the webdriver to use.
+# Chrome webdriver
+driver = webdriver.Chrome(options=options)
+
+
+# Go to the website
+def go_to_main_site():
+    driver.get("https://redhat.service-now.com/nav_to.do?uri=%2Fx_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_clear_stack%3Dtrue%26sysparm_query%3Dassigned_toISEMPTY%255Eassignment_group%253D974cb3e01bc31c50c57c3224cc4bcbfe%255EstateIN1%252C2%252C-2%252C14%252C13%252C15%252C16%252C17%252C18%255Eactive%253Dtrue%26sysparm_first_row%3D1%26sysparm_view%3D")
+    time.sleep(2)
+
+def login():
+    try:
+            # RH SSO
+            driver.find_element("xpath", '//*[@id="username"]').send_keys("carias")
+            counter = os.popen("cat /home/carias/Documents/rol-lab-persistence/counter").read()
+            token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
+            driver.find_element("xpath", '//*[@id="password"]').send_keys(str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
+            driver.find_element("xpath", '//*[@id="submit"]').click()
+
+            # Increment SSO token counter
+            counter = int(counter) + 1
+            os.popen("echo " + str(counter) + " > /home/carias/Documents/rol-lab-persistence/counter")
+
+    except:
+        print("An exception occurred while accepting during login")
+
+
+def auto_assign_tickets():
+    try:
+        while True:
+            time.sleep(2)
+            driver.switch_to.frame(driver.find_element("xpath", '//*[@id="gsft_main"]'))
+
+            # Select the first item on the list
+            WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/span/div/div[5]/table/tbody/tr/td/div/table/tbody/tr[1]/td[3]/a'))).click()
+
+            # Fill the boxes and save
+            Select(WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.state"]')))).select_by_visible_text('In Progress')
+            Select(WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.category"]')))).select_by_visible_text('RHLS Basic External Support')
+            time.sleep(0.5)
+            Select(WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.subcategory"]')))).select_by_visible_text('Course Content')
+            time.sleep(0.5)
+            Select(WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.issue"]')))).select_by_visible_text('Other')
+
+            # Get description
+            description = driver.find_element("xpath", '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]').get_attribute('value')
+
+            # Extract user name from description and fill in the field
+            user_name = re.findall("User Name:.*", description)
+            name = user_name[0].split(":  ")[1]
+
+            driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').clear()
+            driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').send_keys(name)
+
+            # Extract user email from description and fill in the field
+            user_email = re.findall("User Email:.*", description)
+            try:
+                email = re.findall("([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
+            except:
+                email = name + "@redhat.com"
+
+            driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').clear()
+            driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').send_keys(email)
+
+            # Save
+            WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            time.sleep(2)
+
+            # Go back to list
+            driver.switch_to.default_content()
+            time.sleep(2)
+            WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="gsft_nav"]/div/magellan-favorites-list/ul/li[3]/div/div[1]/a/div[2]/span'))).click()
+
+    except:
+        print("No more items to assign")
+
+# Main
+go_to_main_site()
+login()
+auto_assign_tickets()
+driver.quit()

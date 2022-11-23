@@ -1,0 +1,18 @@
+- name: ROL labs launcher
+  hosts: localhost
+  vars_files: credentials.yml
+  vars:
+    - rh_username: "{{ username | default('') }}"
+    - rh_password: "{{ password | default('') }}"
+    - counter: 0
+    - status: "Away"
+        
+  tasks:
+    - name: Generate selenium script
+      template:
+        src: templates/snow-unassigned.py.j2
+        dest: "/tmp/snow-unassigned.py"
+
+    - name: Activate intercom
+      shell: '/usr/bin/python3 /tmp/snow-unassigned.py'
+      register: selenium
