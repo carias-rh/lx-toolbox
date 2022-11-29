@@ -45,8 +45,8 @@ def login():
 def auto_assign_tickets():
     try:
         while True:
-            time.sleep(2)
-            driver.switch_to.frame(driver.find_element("xpath", '//*[@id="gsft_main"]'))
+
+            WebDriverWait(driver, 10).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
 
             # Select the first item on the list
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/span/div/div[5]/table/tbody/tr/td/div/table/tbody/tr[1]/td[3]/a'))).click()
@@ -85,12 +85,10 @@ def auto_assign_tickets():
 
             # Save
             WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
-            time.sleep(2)
 
-            # Go back to list
+            # Go back to "RHT - Unassigned T2"
             driver.switch_to.default_content()
-            time.sleep(2)
-            WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="gsft_nav"]/div/magellan-favorites-list/ul/li[3]/div/div[1]/a/div[2]/span'))).click()
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[5]/div/div/nav/div/div[3]/div/div/magellan-favorites-list/ul/li[3]/div/div[1]/a'))).click()
 
     except:
         print("No more items to assign")
