@@ -8,12 +8,20 @@
         - rh134-9.0
         - rh199-9.0
         - rh294-9.0
-        - do180-4.10
+        - rh342-8.4
+        - rh358-8.1
+        - rh442-8.0
+        - do100-1.22
         - do188-4.10
         - do280-4.10
         - do288-4.10
+        - do316-4.10
+        - do328-2.0
         - do374-2.0
         - do447-2.8
+        - cl110-16.1
+        - cl210-16.1
+        - cl260-5.0
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
     - counter: 0
