@@ -65,7 +65,7 @@ def accept_cookies():
 
 def create_lab(lab_environment, course_id):
     try:
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 120).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
         WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[text()="Create"]'))).click()
@@ -76,7 +76,7 @@ def create_lab(lab_environment, course_id):
 
 def increase_lifespan(lab_environment, course_id):
     try:
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 60).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
 
         increase_lifespan = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
