@@ -81,8 +81,14 @@ def start_lab(lab_environment, course_id):
         driver.refresh()
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-
-        driver.find_element("xpath", "//*[text()='Start']").click()
+        # Click on Start lab
+        try:
+            # Not sure why it fails on rol-stage
+            WebDriverWait(driver, 50).until(EC.element_to_be_clickable(
+                (By.XPATH, "//*[text()='Start']"))).click()
+        except:
+            WebDriverWait(driver, 50).until(EC.element_to_be_clickable(
+                (By.XPATH, "/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[3]/button[2]"))).click()
 
     except:
         print("An exception occurred during lab start in " + lab_environment + " environment and course " + course_id)
@@ -94,6 +100,7 @@ def increase_autostop(lab_environment, course_id):
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
 
+        time.sleep(30)
         increase_autostop = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
 
@@ -106,6 +113,7 @@ def increase_autostop(lab_environment, course_id):
 
 def increase_lifespan(lab_environment, course_id):
     try:
+        time.sleep(30)
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
 
@@ -126,6 +134,7 @@ login()
 {% for course in course_id -%}
 
 go_to_course("{{ lab_environment }}", "{{ course }}")
+accept_cookies()
 start_lab("{{ lab_environment }}", "{{ course }}")
 increase_autostop("{{ lab_environment }}", "{{ course }}")
 increase_lifespan("{{ lab_environment }}", "{{ course }}")

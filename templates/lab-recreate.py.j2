@@ -84,8 +84,14 @@ def create_lab(lab_environment, course_id):
     try:
         WebDriverWait(driver, 40).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]')))
-        WebDriverWait(driver, 300).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[text()="Create"]'))).click()
+        try:
+            # Not sure why it fails on rol-stage
+            WebDriverWait(driver, 300).until(EC.element_to_be_clickable((By.XPATH, '//*[text()="Create"]'))).click()
+        except:
+            WebDriverWait(driver, 300).until(EC.element_to_be_clickable(
+            (By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[3]/button'))).click()
+
+
         time.sleep(40)
     except:
         print(
@@ -97,6 +103,7 @@ def increase_autostop(lab_environment, course_id):
         WebDriverWait(driver, 200).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
 
+        time.sleep(30)
         increase_autostop = WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
 
         for i in range(30):
@@ -128,6 +135,7 @@ login()
 {% for course in course_id -%}
 
 go_to_course("{{ lab_environment }}", "{{ course }}")
+accept_cookies()
 delete_lab("{{ lab_environment }}", "{{ course }}")
 create_lab("{{ lab_environment }}", "{{ course }}")
 increase_autostop("{{ lab_environment }}", "{{ course }}")
