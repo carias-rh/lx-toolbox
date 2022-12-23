@@ -33,14 +33,15 @@ def go_to_main_site(lab_environment):
 
 
 def go_to_course(lab_environment, course_id):
-    WebDriverWait(driver, 100).until(EC.element_to_be_clickable(
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="avatar"]')))
     driver.get('https://nginx-ole-webapp-olechinaqa.apps.ole-apac152.prod.ole.redhat.com/rol-devel/app/courses/' + course_id)
 
 
 def login():
-    time.sleep(5)
     try:
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="login_button"]')))
         driver.find_element("xpath", '//*[@id="username"]').send_keys("rhls_test_basic_cn_003")
         driver.find_element("xpath", '//*[@id="password"]').send_keys("redhat123")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
@@ -65,11 +66,19 @@ def accept_cookies():
 
 def create_lab(lab_environment, course_id):
     try:
-        WebDriverWait(driver, 120).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-        WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[text()="Create"]'))).click()
+        try:
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="app"]/article/div/div[1]')))
+            available = False
+        except:
+            available = True
 
+        if available:
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[text()="Create"]'))).click()
     except:
         print(
             "An exception occurred during lab creation in " + lab_environment + " environment and course " + course_id)
@@ -92,15 +101,15 @@ def increase_lifespan(lab_environment, course_id):
 ## Main
 
 go_to_main_site("{{ lab_environment }}")
-accept_cookies()
+#accept_cookies()
 login()
-accept_cookies()
+#accept_cookies()
 
 {% for course in course_id -%}
 
 go_to_course("{{ lab_environment }}", "{{ course }}")
 create_lab("{{ lab_environment }}", "{{ course }}")
-increase_lifespan("{{ lab_environment }}", "{{ course }}")
+#increase_lifespan("{{ lab_environment }}", "{{ course }}")
 
 {% endfor -%}
 
