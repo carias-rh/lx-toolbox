@@ -81,7 +81,6 @@ def create_lab(lab_environment, course_id):
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
         WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[text()="Create"]'))).click()
-
     except:
         print(
             "An exception occurred during lab creation in " + lab_environment + " environment and course " + course_id)
@@ -116,4 +115,4 @@ increase_lifespan("{{ lab_environment }}", "{{ course }}")
 
 {% endfor -%}
 
-#driver.quit()
+driver.quit()
