@@ -68,18 +68,19 @@ def accept_cookies():
 
 
 def create_lab(lab_environment, course_id):
+    time.sleep(10)
     try:
-        try:
-            available = False
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="app"]/article/div/div[1]')))
-            logging.error(course_id + " not deployed")
-        except:
-            available = True
+#        try:
+#            available = False
+#            WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+#            (By.XPATH, '//*[@id="app"]/article/div/div[1]')))
+#            logging.error(course_id + " not deployed")
+#        except:
+#            available = True
+#
 
-
-        if available:
-            WebDriverWait(driver, 15).until(EC.element_to_be_clickable(
+#        if available:
+            WebDriverWait(driver, 35).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
 
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
@@ -106,16 +107,11 @@ def increase_lifespan(lab_environment, course_id):
 ## Main
 
 go_to_main_site("{{ lab_environment }}")
-#accept_cookies()
 login()
-#accept_cookies()
+go_to_course("{{ lab_environment }}", "{{ item }}")
+create_lab("{{ lab_environment }}", "{{ item }}")
+time.sleep(300)
+go_to_course("{{ lab_environment }}", "{{ item }}")
+time.sleep(3600)
 
-{% for course in course_id -%}
-
-go_to_course("{{ lab_environment }}", "{{ course }}")
-create_lab("{{ lab_environment }}", "{{ course }}")
-#increase_lifespan("{{ lab_environment }}", "{{ course }}")
-
-{% endfor -%}
-
-#driver.quit()
+driver.quit()

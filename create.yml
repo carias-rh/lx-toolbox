@@ -4,8 +4,8 @@
   vars:
     - lab_environment: rol
     - course_id: 
-        - rh124-9.0
-        - rh134-9.0
+#        - rh124-9.0
+#        - rh134-9.0
         - rh199-9.0
         - rh294-9.0
         - rh342-8.4
@@ -30,8 +30,10 @@
     - name: Generate selenium script
       template:
         src: templates/lab-create.py.j2
-        dest: "/tmp/lab-create.py"
+        dest: "/tmp/lab-create-{{ item }}.py"
+      loop: "{{ course_id }}"
 
     - name: Create courses
-      shell: '/usr/bin/python3 /tmp/lab-create.py'
+      shell: '/usr/bin/python3 /tmp/lab-create-{{ item }}.py &'
       register: selenium
+      loop: "{{ course_id }}"
