@@ -138,7 +138,7 @@ Red Hat Learner Experience Team"""
             driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]').send_keys(ack_response)
 
             # Save
-            #WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
             time.sleep(10)
             # Go back to "RHT - Unassigned T2"
             driver.switch_to.default_content()
