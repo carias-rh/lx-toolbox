@@ -13,6 +13,6 @@
         src: templates/snow-unassigned.py.j2
         dest: "/tmp/snow-unassigned.py"
 
-    - name: Activate intercom
+    - name: Auto-assign snow tickets
       shell: '/usr/bin/python3 /tmp/snow-unassigned.py'
       register: selenium

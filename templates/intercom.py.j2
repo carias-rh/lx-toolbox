@@ -28,25 +28,22 @@ def login():
     try:
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div[3]/a/div[2]'))).click()
-        try:
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
                 (By.XPATH, '//*[@id="view_container"]/div/div/div[2]/div/div[1]/div/form/span/section/div/div/div/div/ul/li[1]/div/div[1]/div/div[2]/div[2]'))).click()
-        except:
-            # Google prompt
-            driver.find_element("xpath", '//*[@id="identifierId"]').send_keys("carias@redhat.com")
-            driver.find_element("xpath", '/html/body/div[1]/div[1]/div[2]/div/div[2]/div/div/div[2]/div/div[2]/div/div[1]/div/div/button/span').click()
-            time.sleep(2)
 
-            # RH SSO
-            driver.find_element("xpath", '//*[@id="username"]').send_keys("carias")
-            counter = os.popen("cat /home/carias/Documents/rol-lab-persistence/counter").read()
-            token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
-            driver.find_element("xpath", '//*[@id="password"]').send_keys(str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
-            driver.find_element("xpath", '//*[@id="submit"]').click()
+        # RH SSO
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+                (By.XPATH, '//*[@id="username"]'))).send_keys("carias")
+        counter = os.popen("cat /home/carias/Documents/rol-lab-persistence/counter").read()
+        token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+                (By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+                (By.XPATH, '//*[@id="submit"]'))).click()
 
-            # Increment SSO token counter
-            counter = int(counter) + 1
-            os.popen("echo " + str(counter) + " > /home/carias/Documents/rol-lab-persistence/counter")
+        # Increment SSO token counter
+        counter = int(counter) + 1
+        os.popen("echo " + str(counter) + " > /home/carias/Documents/rol-lab-persistence/counter")
 
     except:
         print("An exception occurred while accepting during login")

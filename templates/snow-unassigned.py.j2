@@ -13,7 +13,7 @@ from selenium.webdriver.common.by import By
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1200,800")
-
+options.add_argument("--user-data-dir=/home/carias/.config/google-chrome/intercom-profile")
 
 # Define the webdriver to use.
 # Chrome webdriver
@@ -42,8 +42,35 @@ def login():
         print("An exception occurred while accepting during login")
 
 
+def search_name(email):
+    # If there is @ is a customer email
+    if "@" in email:
+        driver.execute_script("window.open('');")
+        driver.switch_to.window(driver.window_handles[1])
+        driver.get('https://app.intercom.com/a/inbox/jeuow7ss/search')
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="reference-ember27"]/div/button/span'))).click()
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="popper-ember27"]/div/div/div/div/div[1]/input'))).send_keys(email)
+        time.sleep(2)
+        first_name = str(driver.find_element("xpath", '/html/body/div[1]/div[2]/div/div/div/div/div[2]/div[1]/div/span[2]/span[1]').text).split(" ")[0]
+
+    # Else is a redhatter
+    else:
+        driver.execute_script("window.open('');")
+        driver.switch_to.window(driver.window_handles[1])
+        driver.get('https://rover.redhat.com/people/profile/' + email)
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="verifyUserButton"]')))
+        full_name = driver.find_element("xpath", '//*[@id="userFullName"]').text
+        first_name = str(full_name).split(" ")[0]
+
+    driver.execute_script("window.close('');")
+    time.sleep(1)
+    driver.switch_to.window(driver.window_handles[0])
+    time.sleep(1)
+
+    return first_name
+
 def auto_assign_tickets():
-    try:
+    #try:
         while True:
 
             WebDriverWait(driver, 40).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
@@ -67,16 +94,22 @@ def auto_assign_tickets():
                 user_name = re.findall("User Name:.*", description)
                 name = user_name[0].split(":  ")[1]
 
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').clear()
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').send_keys(name)
-
                 # Extract user email from description and fill in the field
                 user_email = re.findall("User Email:.*", description)
                 try:
                     email = re.findall("([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
+                    first_name = search_name(email)
                 except:
-                    email = name.replace(" ", "") + "@redhat.com"
+                    first_name = search_name(name.replace(" ", ""))
+                    email = name + "@redhat.com"
 
+                WebDriverWait(driver, 30).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
+
+                # Fill in name
+                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').clear()
+                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').send_keys(first_name)
+
+                # Fill in email
                 driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').clear()
                 driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').send_keys(email)
 
@@ -92,15 +125,27 @@ def auto_assign_tickets():
             except:
                 print("Failed to fill short_description")
 
-            # Save
-            WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            ack_response = "Hi " + first_name + """,
 
+Thanks for submitting your feedback to the Learner Experience Team.
+            
+We are reviewing this issue and will get back to you as soon as possible.
+
+Best Regards,
+Carlos Arias
+Red Hat Learner Experience Team"""
+
+            driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]').send_keys(ack_response)
+
+            # Save
+            #WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            time.sleep(10)
             # Go back to "RHT - Unassigned T2"
             driver.switch_to.default_content()
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[5]/div/div/nav/div/div[3]/div/div/magellan-favorites-list/ul/li[3]/div/div[1]/a'))).click()
 
-    except:
-        print("No more items to assign")
+    #except:
+    #    print("No more items to assign")
 
 # Main
 go_to_main_site()
