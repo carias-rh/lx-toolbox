@@ -65,6 +65,17 @@ def accept_cookies():
     except:
         logging.error("An exception occurred while accepting cookies")
 
+def start_lab(lab_environment, course_id):
+    try:
+        driver.refresh()
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+
+        driver.find_element("xpath", "//*[text()='Start']").click()
+
+    except:
+        print("An exception occurred during lab start in " + lab_environment + " environment and course " + course_id)
+        create_lab(lab_environment, course_id)
 
 
 def create_lab(lab_environment, course_id):
@@ -107,11 +118,11 @@ def increase_lifespan(lab_environment, course_id):
 ## Main
 
 go_to_main_site("{{ lab_environment }}")
+accept_cookies()
 login()
+accept_cookies()
 go_to_course("{{ lab_environment }}", "{{ item }}")
 create_lab("{{ lab_environment }}", "{{ item }}")
-time.sleep(300)
-go_to_course("{{ lab_environment }}", "{{ item }}")
-time.sleep(3600)
+time.sleep(30)
 
-driver.quit()
+#driver.quit()
