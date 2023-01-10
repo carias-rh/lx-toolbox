@@ -62,8 +62,7 @@ def search_name(email):
         full_name = driver.find_element("xpath", '//*[@id="userFullName"]').text
         first_name = str(full_name).split(" ")[0]
 
-    driver.execute_script("window.close('');")
-    time.sleep(1)
+    driver.close()
     driver.switch_to.window(driver.window_handles[0])
     time.sleep(1)
 
@@ -101,7 +100,7 @@ def auto_assign_tickets():
                     first_name = search_name(email)
                 except:
                     first_name = search_name(name.replace(" ", ""))
-                    email = name + "@redhat.com"
+                    email = name.replace(" ", "") + "@redhat.com"
 
                 WebDriverWait(driver, 30).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
 
