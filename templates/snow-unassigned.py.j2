@@ -69,7 +69,7 @@ def search_name(email):
     return first_name
 
 def auto_assign_tickets():
-    #try:
+    try:
         while True:
 
             WebDriverWait(driver, 40).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
@@ -124,7 +124,10 @@ def auto_assign_tickets():
             except:
                 print("Failed to fill short_description")
 
-            ack_response = "Hi " + first_name + """,
+            # If it's a feedback ticket, reply to the user
+            try:
+                if name:
+                    ack_response = "Hi " + first_name + """,
 
 Thanks for submitting your feedback to the Learner Experience Team.
             
@@ -134,7 +137,9 @@ Best Regards,
 Carlos Arias
 Red Hat Learner Experience Team"""
 
-            driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]').send_keys(ack_response)
+                    driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]').send_keys(ack_response)
+            except:
+                print("Failed to reply to the user")
 
             # Save
             WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
@@ -143,8 +148,8 @@ Red Hat Learner Experience Team"""
             driver.switch_to.default_content()
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[5]/div/div/nav/div/div[3]/div/div/magellan-favorites-list/ul/li[3]/div/div[1]/a'))).click()
 
-    #except:
-    #    print("No more items to assign")
+    except:
+        print("No more items to assign")
 
 # Main
 go_to_main_site()
