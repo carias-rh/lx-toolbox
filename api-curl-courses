@@ -1,4 +1,1 @@
-curl -s  'https://rol.redhat.com/rol/api/courses/' \
-  -H 'x-csrftoken: mYV7ANBSuKiItqLicTOM0vlO6SRUk3Lb' \
-   -H 'cookie: csrftoken=mYV7ANBSuKiItqLicTOM0vlO6SRUk3Lb; sessionid=rmm5t64dra7z9tojwfpjpjcxe95ze583' \
-  --compressed | jq -r '.[].path' |uniq |egrep -iv  "^$|_|custom|vc|premium|plus|subscription|sku|gss|boot-camp|enablement|exam|support" | egrep "[a-z][a-z][0-9]*[ea]*-[0-9]\.[0-9]"  > ./courses-list.txt
+curl 'https://rol.redhat.com/rol/api/courses'   -H $'cookie: csrftoken=o1AsnI1kpG5T5TZS1JLjQ3B9rOf23ApM; sessionid=23sjft10dmf8orrdl2tsrwvk5xza3337;'  --compressed | jq -r '.[].path' |uniq |egrep -iv  "^$|_|custom|vc|premium|plus|subscription|sku|gss|boot-camp|enablement|exam|support" | egrep "[a-z][a-z][0-9]*[ea]*-[0-9]\.[0-9]"  > ./courses-list.txt

@@ -12,7 +12,7 @@ from selenium.webdriver.common.by import By
 
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
-options.add_argument("--window-size=1,1")
+options.add_argument("--window-size=1200,800")
 options.add_argument("--user-data-dir=/home/carias/.config/google-chrome/intercom-profile")
 
 # Define the webdriver to use.
@@ -47,11 +47,12 @@ def search_name(email):
     if "@" in email:
         driver.execute_script("window.open('');")
         driver.switch_to.window(driver.window_handles[1])
-        driver.get('https://app.intercom.com/a/inbox/jeuow7ss/search')
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="reference-ember27"]/div/button/span'))).click()
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="popper-ember27"]/div/div/div/div/div[1]/input'))).send_keys(email)
+        driver.get("https://app.intercom.com/a/apps/jeuow7ss/users/segments/all-users:eyJwcmVkaWNhdGVzIjpbeyJhdHRyaWJ1dGUiOiJyb2xlIiwiY29tcGFyaXNvbiI6ImVxIiwidHlwZSI6InJvbGUiLCJ2YWx1ZSI6InVzZXJfcm9sZSJ9LHsiYXR0cmlidXRlIjoiZW1haWwiLCJjb21wYXJpc29uIjoiZXEiLCJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiIifV19")
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[1]/div/div[4]/div/div[2]/div/div[2]/div[2]/div/div/div/span/div[2]/span/div/div/div/div/div'))).click()
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div/div/div/input'))).send_keys(email)
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[2]/a'))).click()
         time.sleep(2)
-        first_name = str(driver.find_element("xpath", '/html/body/div[1]/div[2]/div/div/div/div/div[2]/div[1]/div/span[2]/span[1]').text).split(" ")[0]
+        first_name = str(driver.find_element("xpath", '/html/body/div[1]/div/div[1]/div/div[4]/div/div[2]/div/div[2]/div[3]/div[1]/div/div[1]/table/tbody/tr/td[1]/span/div/span/a').text).split(" ")[0]
 
     # Else is a redhatter
     else:
