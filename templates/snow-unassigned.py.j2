@@ -12,7 +12,7 @@ from selenium.webdriver.common.by import By
 
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
-options.add_argument("--window-size=1200,800")
+options.add_argument("--window-size=1,1")
 options.add_argument("--user-data-dir=/home/carias/.config/google-chrome/intercom-profile")
 
 # Define the webdriver to use.
@@ -28,7 +28,7 @@ def go_to_main_site():
 def login():
     try:
             # RH SSO
-            driver.find_element("xpath", '//*[@id="username"]').send_keys("carias")
+            driver.find_element("xpath", '//*[@id="username"]').send_keys("{{ username }}")
             counter = os.popen("cat /home/carias/Documents/rol-lab-persistence/counter").read()
             token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
             driver.find_element("xpath", '//*[@id="password"]').send_keys(str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))

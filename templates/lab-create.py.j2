@@ -48,7 +48,7 @@ def login():
         # RH SSO
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="submit"]')))
-        driver.find_element("xpath", '//*[@id="username"]').send_keys("carias")
+        driver.find_element("xpath", '//*[@id="username"]').send_keys("{{ username }}")
         counter = os.popen("cat /home/carias/Documents/rol-lab-persistence/counter").read()
         token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
         driver.find_element("xpath", '//*[@id="password"]').send_keys(
