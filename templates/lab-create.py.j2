@@ -113,6 +113,19 @@ def increase_lifespan(lab_environment, course_id):
     except:
         logging.error("An exception occurred during lifespan extension in " + lab_environment + " environment and course " + course_id)
 
+def increase_autostop(lab_environment, course_id):
+    try:
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
+
+        increase_autostop = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
+
+        for i in range(30):
+            increase_autostop.click()
+    except:
+        print(
+            "An exception occurred during lifespan extension in " + lab_environment + " environment and course " + course_id)
 
 
 ## Main
@@ -123,6 +136,8 @@ login()
 accept_cookies()
 go_to_course("{{ lab_environment }}", "{{ item }}")
 create_lab("{{ lab_environment }}", "{{ item }}")
-time.sleep(30)
+start_lab("{{ lab_environment }}", "{{ item }}")
+increase_autostop("{{ lab_environment }}", "{{ course }}")
+increase_lifespan("{{ lab_environment }}", "{{ course }}")
 
 #driver.quit()
