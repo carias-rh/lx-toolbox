@@ -142,6 +142,9 @@ Red Hat Learner Experience Team"""
             except:
                 print("Failed to reply to the user")
 
+            # Clear values
+            del user_name, name, first_name, user_email, email
+
             # Save
             WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
 
