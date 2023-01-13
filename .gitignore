@@ -5,13 +5,9 @@ lab-delete.log
 lab-start.log
 task
 token
-credentials.yml
+playbooks/vars/credentials.yml
 credentials.yml.orig
 counter
 /cookies.pkl
 /.idea
 /geckodriver.log
-/rol-lab.log
-/counter
-/credentials.yml
-

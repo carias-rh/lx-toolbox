@@ -3,17 +3,6 @@
   vars_files: credentials.yml
   vars:
     - lab_environment: rol
-    - course_id: 
-        - rh124-9.0
-        - rh134-9.0
-        - rh199-9.0
-        - rh294-9.0
-        - do180-4.10
-        - do188-4.10
-        - do280-4.10
-        - do288-4.10
-        - do374-2.0
-        - do447-2.8
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
     - counter: 0
@@ -21,9 +10,9 @@
   tasks:
     - name: Generate selenium script
       template:
-        src: templates/lab-create.py.j2
-        dest: "/tmp/lab-create.py"
+        src: templates/rol-lab-start.py.j2
+        dest: "/tmp/start.py"
 
     - name: Create courses
-      shell: '/usr/bin/python3 /tmp/lab-create.py'
+      shell: '/usr/bin/python3 /tmp/start.py'
       register: selenium

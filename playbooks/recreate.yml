@@ -12,9 +12,9 @@
   tasks:
     - name: Generate selenium script
       template:
-        src: templates/lab-recreate.py.j2
-        dest: "/tmp/lab-recreate.py"
+        src: templates/rol-lab-recreate.py.j2
+        dest: "/tmp/recreate.py"
 
     - name: Recreate courses
-      shell: '/usr/bin/python3 /tmp/lab-recreate.py'
+      shell: '/usr/bin/python3 /tmp/recreate.py'
       register: selenium

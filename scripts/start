@@ -5,7 +5,7 @@
 function get_course_from_list()
 # Checks if there is an equivalent course in the list and returns the full name
 {
-	COURSE_LIST=$(cat /home/carias/Documents/rol-lab-persistence/courses-list.txt)
+	COURSE_LIST=$(cat $WORKING_DIR/rol-lab-persistence/courses-list.txt)
 	for course in $COURSE_LIST; do echo $course |grep "$1" >> /tmp/list.txt ; done
 
 	if [[ $(echo $1 |grep ea) != ""  ]]
@@ -46,14 +46,16 @@ function start_course()
 	if [ $# -eq 2 ]
 	  then
 	      if [ "$2" == "rol" ] || [ "$2" == "rol-stage" ]
-		 then /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/start.yml -e "lab_environment=$2"  -e "{'course_id': ['$COURSE_PATH']}" -v
+		 then /usr/bin/ansible-playbook $WORKING_DIR/rol-lab-persistence/start.yml -e "lab_environment=$2"  -e "{'course_id': ['$COURSE_PATH']}" -v
               fi
 	else 
 	      LAB_ENVIRONMENT=rol
-              /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/start.yml -e "lab_environment=$LAB_ENVIRONMENT"  -e "{'course_id': ['$COURSE_PATH']}" -v 
+              /usr/bin/ansible-playbook $WORKING_DIR/rol-lab-persistence/start.yml -e "lab_environment=$LAB_ENVIRONMENT"  -e "{'course_id': ['$COURSE_PATH']}" -v
 	fi
 
 }
+
+WORKING_DIR="~/Documents/rol-lab-persistence/"
 
 if [ $# -eq 0 ]
   then

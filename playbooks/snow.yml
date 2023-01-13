@@ -10,9 +10,9 @@
   tasks:
     - name: Generate selenium script
       template:
-        src: templates/intercom.py.j2
-        dest: "/tmp/intercom.py"
+        src: templates/snow-auto-assign.py.j2
+        dest: "/tmp/snow.py"
 
-    - name: Activate intercom
-      shell: '/usr/bin/python3 /tmp/intercom.py {{ status }}'
+    - name: Auto-assign snow tickets
+      shell: '/usr/bin/python3 /tmp/snow.py'
       register: selenium

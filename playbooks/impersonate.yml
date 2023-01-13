@@ -12,9 +12,9 @@
   tasks:
     - name: Generate selenium script
       template:
-        src: templates/lab-impersonate.py.j2
-        dest: "/tmp/lab-impersonate.py"
+        src: templates/rol-lab-impersonate.py.j2
+        dest: "/tmp/impersonate.py"
 
     - name: Impersonate
-      shell: '/usr/bin/python3 /tmp/lab-impersonate.py'
+      shell: '/usr/bin/python3 /tmp/impersonate.py'
       register: selenium

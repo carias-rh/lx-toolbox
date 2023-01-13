@@ -21,9 +21,9 @@
   tasks:
     - name: Generate selenium script
       template:
-        src: templates/lab-delete.py.j2
-        dest: "/tmp/lab-delete.py"
+        src: templates/rol-lab-delete.py.j2
+        dest: "/tmp/delete.py"
 
     - name: Delete courses
-      shell: '/usr/bin/python3 /tmp/lab-delete.py'
+      shell: '/usr/bin/python3 /tmp/delete.py'
       register: selenium
