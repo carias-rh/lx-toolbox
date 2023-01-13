@@ -10,7 +10,7 @@ from selenium.webdriver.common.by import By
 
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
-options.add_argument("--window-size=800,600")
+options.add_argument("--window-size=1200,800")
 options.add_argument("--user-data-dir=/home/carias/.config/google-chrome/intercom-profile")
 
 # Define the webdriver to use.
@@ -20,12 +20,12 @@ driver = webdriver.Chrome(options=options)
 
 # Go to the website
 def go_to_main_site():
-    driver.get("https://app.intercom.com/a/apps/jeuow7ss")
+    driver.get("https://app.intercom.com/a/inbox/jeuow7ss/inbox/admin/4643910")
     time.sleep(2)
 
 def intercom_login():
     try:
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div[3]/a/div[2]'))).click()
         WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
                 (By.XPATH, '//*[@id="view_container"]/div/div/div[2]/div/div[1]/div/form/span/section/div/div/div/div/ul/li[1]/div/div[1]/div/div[2]/div[2]'))).click()
