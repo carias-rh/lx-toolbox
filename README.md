@@ -14,25 +14,27 @@ It uses ansible-playbook to generate python scripts from templates that will lau
 ## Setup
 ### Associates
 
-Fill in the credentials.yml file with your rol.redhat.com username:
+Fill in the `playbooks/vars/credentials.yml` file with your rol.redhat.com username:
 ```
 username: "yourusername"	                   # without @redhat.com
 pin: "yourpin" 		                           # corresponding to the created token at token.redhat.com
 secret: "4439be1a......................bc2d3ec263" # secret from the generated token
 ```
 
-Generate the secret with the following command, and create a token with it.
+You can generate the `secret` for HOTP with the following command, we will then create a token with this secret.
 ```
 $ dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40
 4439be1a......................bc2d3ec263
 
 ```
 
+Go to token.redhat.com with VPN activated to create a new token with the generated secret.
+
 ![image](https://user-images.githubusercontent.com/80515069/177427661-7a1d9c81-ad96-485c-a31a-376e7dc3c1e5.png)
 
-Make sure that the `./counter` file always matches the `Count` value of the token.
+Make sure that the `./counter` file always matches the `Count` value of the token, **initially set to 1**.
 
-![image](https://user-images.githubusercontent.com/80515069/177428398-59747c8c-1f9e-4904-8c15-7dc66e8c8f06.png)
+![hotp](https://user-images.githubusercontent.com/80515069/212667043-69dd2e9e-c81e-4b75-a5ac-41e1b52b8f27.png)
 
 ### Other learners
 
@@ -43,9 +45,9 @@ password: "yourpassword"
 ``` 
 
 ## Custom courses and environment
-Customize the `lab_environment` and `courses_id` variables in the vars section:
+You can customize the default `lab_environment` and `courses_id` variables in the vars section, so that you can create, start, delete or refresh lifespan period of multiple labs:
 ```
-$ cat create.yaml
+$ cat playbooks/create.yaml
 - name: ROL labs launcher
   hosts: localhost
   vars_files: credentials.yml
@@ -66,22 +68,23 @@ $ cat create.yaml
 - python3
 - selenium libraries
 `pip3 install selenium`
-- [geckodriver](https://github.com/mozilla/geckodriver/releases) under `/usr/bin/`
+- [geckodriver](https://github.com/mozilla/geckodriver/releases) and/or [Chromedriver](https://chromedriver.chromium.org/downloads) under `/usr/bin/`
 
-Run the playbook with ansible-navigator.
+
+Run the playbook:
 ``` 
-$ ansible-playbook create.yml
+$ ansible-playbook playbooks/create.yml
 
 ``` 
 
-Remember that you can override the variables without editing the yaml files by using the extra-vars parameter.
+An example to override the variables without editing the yaml files by using the extra-vars parameter.
 ```
 $ ansible-playbook delete.yml \
         -e 'lab_environment=rol-stage' \
         -e '{"course_id": ["rh124-8.2", "rh134-8.2"]}'
 ```
 
-You can also install the wrapper `./scripts` for easy launch at your convenience:
+The easiest way to use the playbooks is with the wrapper scripts under `./scripts` directory, by default they will use the rol-prod environment:
 ```
 $ which start
 /usr/local/bin/start
@@ -112,8 +115,24 @@ PLAY [ROL labs launcher] *******************************************************
 ...
 ```
 
+## Extended functionality
+The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. To achieve this, I created in my favourites a customized query for `RHT Learner Experience - T2` group. This will correspond to a unique url that can by substituted in the `playbooks/templates/snow-auto-assign.yml` template.       
 
-# Recommendations
-- The *create.yml* playbook will also increase the *Auto-destroy* box of the lab to the maximum available (usually 14 days). I recomend to create a cronjob that runs at least every 2 weeks.
-- Sometimes labs get stuck and don't stop, so it's important to keep an eye on the *Lab hours used* counter to detect any abusive usage.
-- Due to fast changes in lab environment during development phases of a course, I recommend a daily cronjob to create and delete the lab to start each day with a new fresh lab environment.
+![image](https://user-images.githubusercontent.com/80515069/212669278-29f9a09e-9fe0-427e-9ed3-3f25d92bde45.png)
+
+Substitute your filter URL in the `driver.get` function parameter.
+
+![image](https://user-images.githubusercontent.com/80515069/212669964-817f766d-ba67-463b-bf62-7a7124a86158.png)
+
+Customize the email that will be sent to the customer as an ACK in the `auto_assign_tickets()` function.
+
+![image](https://user-images.githubusercontent.com/80515069/212670415-862f3829-9bcb-42f6-8da9-79044584708b.png)
+
+Create a crontab so that the script is periodically launched.
+```bash
+#######################
+# Auto-assign tickets #
+#######################
+
+59 8-13 * * 1-5   export DISPLAY=:1 && SHELL=/usr/bin/bash && source ${HOME}/.bashrc && /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/playbooks/snow.yml
+``
