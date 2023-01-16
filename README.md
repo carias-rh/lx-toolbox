@@ -14,7 +14,7 @@ It uses ansible-playbook to generate python scripts from templates that will lau
 ## Setup
 ### Associates
 
-Fill in the `playbooks/vars/credentials.yml` file with your rol.redhat.com username:
+Fill in the `playbooks/vars/credentials.yml` file with your rol.redhat.com username. I recommend to vault-encrypt this file:
 ```
 username: "yourusername"	                   # without @redhat.com
 pin: "yourpin" 		                           # corresponding to the created token at token.redhat.com
@@ -28,7 +28,7 @@ $ dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40
 
 ```
 
-Go to token.redhat.com with VPN activated to create a new token with the generated secret.
+Go to `token.redhat.com` with the VPN activated to create a new token with the generated secret.
 
 ![image](https://user-images.githubusercontent.com/80515069/177427661-7a1d9c81-ad96-485c-a31a-376e7dc3c1e5.png)
 
@@ -116,7 +116,7 @@ PLAY [ROL labs launcher] *******************************************************
 ```
 
 ## Extended functionality
-The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. To achieve this, I created in my favourites a customized query for `RHT Learner Experience - T2` group. This will correspond to a unique url that can by substituted in the `playbooks/templates/snow-auto-assign.yml` template.       
+The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. To achieve this, I created in my favourites a customized query for `RHT Learner Experience - T2` group. This will correspond to a unique url that needs to be substituted in the `playbooks/templates/snow-auto-assign.yml` selenium template.       
 
 ![image](https://user-images.githubusercontent.com/80515069/212669278-29f9a09e-9fe0-427e-9ed3-3f25d92bde45.png)
 
