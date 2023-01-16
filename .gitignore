@@ -11,3 +11,7 @@ credentials.yml.orig
 /cookies.pkl
 /.idea
 /geckodriver.log
+example.log
+playbooks/geckodriver.log
+playbooks/rol-lab.log
+rol-lab.log
