@@ -1,0 +1,45 @@
+- name: ROL labs installer
+  hosts: localhost
+  become: true
+  vars:
+    pip_install_packages:
+      - name: pip
+
+
+  tasks:
+
+    - name: Ensure dependencies are installed.
+      package:
+        name:
+          - epel-release
+          - python3-pip
+          - chromium-108.0.5359.124-3.el8.x86_64
+        state: present
+      loop:
+
+    - name: Install Selenium with pip
+      ansible.builtin.pip:
+        name: selenium
+
+    - name: Download selenium drivers
+      ansible.builtin.get_url:
+        url: "{{ item }}"
+        dest: "/tmp/{{ item | split('/')| last }}"
+      loop:
+        - "https://github.com/mozilla/geckodriver/releases/download/v0.32.0/geckodriver-v0.32.0-linux64.tar.gz"
+        - "https://chromedriver.storage.googleapis.com/108.0.5359.71/chromedriver_linux64.zip"
+
+    - name: Extract selenium drivers to /usr/bin/
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ item }}"
+        dest: "/usr/bin/"
+      loop:
+        - geckodriver-v0.32.0-linux64.tar.gz
+        - chromedriver_linux64.zip
+
+    - name: Install wrapper scripts
+      ansible.builtin.template:
+        src: "{{ item.src }}"
+        dest: "/usr/local/bin/{{ item.path | splitext | first }}"
+      loop: "{{ lookup('community.general.filetree', 'templates/wrapper-scripts') }}"
+

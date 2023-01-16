@@ -71,7 +71,13 @@ $ cat playbooks/create.yaml
 - [geckodriver](https://github.com/mozilla/geckodriver/releases) and/or [Chromedriver](https://chromedriver.chromium.org/downloads) under `/usr/bin/`
 
 
-Run the playbook:
+Run the setup playbook that will install python requirements and wrapper scripts:
+``` 
+$ ansible-playbook playbooks/setup.yml
+
+``` 
+
+You can directly run the playbooks to start the labs:
 ``` 
 $ ansible-playbook playbooks/create.yml
 
@@ -84,7 +90,7 @@ $ ansible-playbook delete.yml \
         -e '{"course_id": ["rh124-8.2", "rh134-8.2"]}'
 ```
 
-The easiest way to use the playbooks is with the wrapper scripts under `./scripts` directory, by default they will use the rol-prod environment:
+However, the easiest way to use the playbooks is with the wrapper scripts under `./scripts` directory, by default they will use the rol-prod environment. They should be already installed if you ran the `setup.yml` playbook.
 ```
 $ which start
 /usr/local/bin/start

@@ -1,17 +1,18 @@
 #!/bin/bash
 
+#set -x 
 # [carias@carias ~]$ curl 'https://rol.redhat.com/rol/api/courses/'   -H 'x-csrftoken: zE0ErBM4HwjoFz84wSERvoEk3AmsWXYI'    -H 'cookie: csrftoken=zE0ErBM4HwjoFz84wSERvoEk3AmsWXYI; sessionid=zfytlrtl64kam1r6w5dj57nnp63fgq7x'   --compressed | jq '.[].code' > courses-list.txt
 
 function get_course_from_list()
 # Checks if there is an equivalent course in the list and returns the full name
 {
-	COURSE_LIST=$(cat $WORKING_DIR/courses-list.txt)
+	COURSE_LIST=$(cat {{ playbook_dir }}/../courses-list.txt)
 	for course in $COURSE_LIST; do echo $course |grep "$1" >> /tmp/list.txt ; done
 
 	if [[ $(echo $1 |grep ea) != ""  ]]
-	then
-	        COURSE_PATH=$(cat /tmp/list.txt | tail -n1)
-	else
+        then
+                COURSE_PATH=$(cat /tmp/list.txt | tail -n1)
+        else
                 COURSE_LIST=$(cat /tmp/list.txt |grep -v ea | grep -v "[*A-Z]")
                 COURSE_VERSION=0
                 for course in $COURSE_LIST
@@ -35,35 +36,48 @@ function get_course_from_list()
                         fi
                 done
                 COURSE_PATH=$(cat /tmp/list.txt | grep -v ea | grep $COURSE_VERSION.$COURSE_SUBVERSION)
-		
-	fi
+
+        fi
 
         rm /tmp/list.txt
+
 
 }
 
 function start_course()
 {
-        /usr/bin/ansible-playbook $WORKING_DIR/playbooks/impersonate.yml -e impersonate_username=$2  -e "{'course_id': ['$COURSE_PATH']}" -v
+	if [ $# -eq 2 ]
+	  then
+	      if [ $2 == "rol" ] || [ $2 == "rol-stage" ]
+		 then /usr/bin/ansible-playbook {{ playbook_dir }}/recreate.yml -e "lab_environment=$2"  -e "{'course_id': ['$COURSE_PATH']}" -v
+              fi
+	else 
+	      LAB_ENVIRONMENT=rol
+              /usr/bin/ansible-playbook {{ playbook_dir }}/recreate.yml -e "lab_environment=$LAB_ENVIRONMENT"  -e "{'course_id': ['$COURSE_PATH']}" -v
+	fi
 
 }
 
-WORKING_DIR="${HOME}/Documents/rol-lab-persistence/"
-
-if [[ $# -ne 2 ]]
+if [ $# -eq 0 ]
   then
-      echo "Please introduce Course and Username to impersonate, such: "
-      echo "$ impersonate 180 username"
+      echo "No arguments supplied, please introduce course at least, such:"
+      echo "$ recreate 199"
+      echo "or by selecting the environment:"
+      echo "$ recreate 199 rol-stage"
 
   else
       get_course_from_list $1
 
-      echo ""
+            echo ""
       echo "Course starting: $COURSE_PATH"
-      echo "Environment: rol-production"
-      echo "Impersonate: $2"
+      if [ $# -eq 2 ]
+      then
+          echo "Environment: $2"
+      else
+          echo "Environment: rol-production"
+      fi
       echo ""
-      
+
       if [[ $COURSE_PATH != "" ]]
       	then start_course $@
       else

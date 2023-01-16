@@ -11,7 +11,7 @@ from selenium.webdriver.common.by import By
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1200,800")
-options.add_argument("--user-data-dir=/home/carias/.config/google-chrome/intercom-profile")
+options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/intercom-profile")
 
 # Define the webdriver to use.
 # Chrome webdriver
@@ -33,7 +33,7 @@ def intercom_login():
         # RH SSO
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
                 (By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
-        counter = os.popen("cat /home/carias/Documents/rol-lab-persistence/counter").read()
+        counter = os.popen("cat {{ playbook_dir }}/rol-lab-persistence/counter").read()
         token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
                 (By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
@@ -42,7 +42,7 @@ def intercom_login():
 
         # Increment SSO token counter
         counter = int(counter) + 1
-        os.popen("echo " + str(counter) + " > /home/carias/Documents/rol-lab-persistence/counter")
+        os.popen("echo " + str(counter) + " > {{ playbook_dir }}/rol-lab-persistence/counter")
 
     except:
         print("An exception occurred while accepting during login")
