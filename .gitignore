@@ -7,7 +7,7 @@ task
 token
 playbooks/vars/credentials.yml
 credentials.yml.orig
-counter
+/counter
 /cookies.pkl
 /.idea
 /geckodriver.log
