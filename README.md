@@ -45,7 +45,7 @@ password: "yourpassword"
 ``` 
 
 ## Custom courses and environment
-You can customize the default `lab_environment` and `courses_id` variables in the vars section, so that you can create, start, delete or refresh lifespan period of multiple labs:
+You can customize the default `lab_environment` and `courses_id` variables in the vars section, so that you can create, start, delete multiple labs with a single run:
 ```
 $ cat playbooks/create.yaml
 - name: ROL labs launcher
