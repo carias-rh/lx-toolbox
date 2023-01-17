@@ -32,7 +32,8 @@ logging.basicConfig(filename='example.log', level=logging.ERROR)
 
 # Go to the website
 def go_to_main_site(lab_environment):
-    driver.get('https://nginx-ole-webapp-olechinaqa.apps.ole-apac152.prod.ole.redhat.com/rol-devel/app/login/local')
+    #driver.get('https://nginx-ole-webapp-olechinaqa.apps.ole-apac152.prod.ole.redhat.com/rol-devel/app/login/local')
+    driver.get('https://rol-cn-devel.ole.redhat.com/rol-devel/app/login/local')
 
 
 def go_to_course(lab_environment, course_id):
