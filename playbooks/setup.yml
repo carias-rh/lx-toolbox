@@ -13,6 +13,7 @@
         name:
           - epel-release
           - python3-pip
+          - firefox.x86_64
           - chromium-108.0.5359.124-3.el8.x86_64
         state: present
       loop:
