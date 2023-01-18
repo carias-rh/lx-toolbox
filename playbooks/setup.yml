@@ -22,7 +22,8 @@
 
     - name: Install Selenium with pip
       ansible.builtin.pip:
-        name: selenium
+        name: selenium==3.141.0
+        executable: pip3
 
     - name: Download selenium drivers
       ansible.builtin.get_url:
