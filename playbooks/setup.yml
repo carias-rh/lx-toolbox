@@ -7,6 +7,8 @@
 
 
   tasks:
+    - name: Add repository
+      command: dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
 
     - name: Ensure dependencies are installed.
       package:
@@ -17,7 +19,6 @@
           - firefox.x86_64
           - chromium-108.0.5359.124-3.el8.x86_64
         state: present
-      loop:
 
     - name: Install Selenium with pip
       ansible.builtin.pip:
@@ -41,7 +42,13 @@
 
     - name: Install wrapper scripts
       ansible.builtin.template:
-        src: "{{ item.src }}"
-        dest: "/usr/local/bin/{{ item.path | splitext | first }}"
-      loop: "{{ lookup('community.general.filetree', 'templates/wrapper-scripts') }}"
+        src: "./templates/wrapper-scripts/{{ item }}"
+        dest: "/usr/bin/{{ item | splitext | first }}"
+        mode: 0755
+      loop:
+        - start.j2
+        - delete.j2
+        - recreate.j2
+        - impersonate.j2
+      
 
