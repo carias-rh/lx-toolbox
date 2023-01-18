@@ -11,6 +11,7 @@
     - name: Ensure dependencies are installed.
       package:
         name:
+          - oathtool
           - epel-release
           - python3-pip
           - firefox.x86_64
