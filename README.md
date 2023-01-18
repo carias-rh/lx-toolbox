@@ -73,7 +73,7 @@ $ cat playbooks/create.yaml
 
 Run the setup playbook that will install python requirements and wrapper scripts:
 ``` 
-$ ansible-playbook playbooks/setup.yml
+$ ansible-playbook playbooks/setup.yml -K
 
 ``` 
 
