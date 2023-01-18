@@ -7,7 +7,7 @@
 
 
   tasks:
-    - name: Add repository
+    - name: Install epel repository
       command: dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
 
     - name: Ensure dependencies are installed.
@@ -33,7 +33,7 @@
         - "https://github.com/mozilla/geckodriver/releases/download/v0.32.0/geckodriver-v0.32.0-linux64.tar.gz"
         - "https://chromedriver.storage.googleapis.com/108.0.5359.71/chromedriver_linux64.zip"
 
-    - name: Extract selenium drivers to /usr/bin/
+    - name: Extract selenium drivers into /usr/bin/
       ansible.builtin.unarchive:
         src: "/tmp/{{ item }}"
         dest: "/usr/bin/"
@@ -41,7 +41,7 @@
         - geckodriver-v0.32.0-linux64.tar.gz
         - chromedriver_linux64.zip
 
-    - name: Install wrapper scripts
+    - name: Install wrapper scripts into /usr/bin/
       ansible.builtin.template:
         src: "./templates/wrapper-scripts/{{ item }}"
         dest: "/usr/bin/{{ item | splitext | first }}"
