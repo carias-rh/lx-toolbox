@@ -83,6 +83,7 @@ def search_name(email):
     else:
         driver.execute_script("window.open('');")
         driver.switch_to.window(driver.window_handles[1])
+        email = email.split("@")[0]
         driver.get('https://rover.redhat.com/people/profile/' + email)
         WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="verifyUserButton"]')))
         full_name = driver.find_element("xpath", '//*[@id="userFullName"]').text
@@ -121,6 +122,7 @@ def auto_assign_tickets():
 
                 # Extract user email from description and fill in the field
                 user_email = re.findall("User Email:.*", description)
+                    # RedHatters' issues usually come without email, just their RHNID in "User Name: " field, so it will fail the following email regex being empty and will jump to the except
                 try:
                     email = re.findall("([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
                     first_name = search_name(email)
