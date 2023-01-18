@@ -39,7 +39,8 @@ def go_to_main_site(lab_environment):
 def go_to_course(lab_environment, course_id):
     WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="avatar"]')))
-    driver.get('https://nginx-ole-webapp-olechinaqa.apps.ole-apac152.prod.ole.redhat.com/rol-devel/app/courses/' + course_id)
+    #driver.get('https://nginx-ole-webapp-olechinaqa.apps.ole-apac152.prod.ole.redhat.com/rol-devel/app/courses/' + course_id)
+    driver.get('https://rol-cn-devel.ole.redhat.com/rol-devel/app/courses/' + course_id)
 
 
 def login():
@@ -57,10 +58,10 @@ def login():
 
 def accept_cookies():
     try:
-        WebDriverWait(driver, 30).until(
+        WebDriverWait(driver, 5).until(
             EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
         time.sleep(1)
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
             (By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
         driver.refresh()
     except:
