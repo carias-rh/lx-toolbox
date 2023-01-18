@@ -28,14 +28,14 @@ def login():
     try:
             # RH SSO
             driver.find_element("xpath", '//*[@id="username"]').send_keys("{{ username }}")
-            counter = os.popen("cat {{ playbook_dir }}/rol-lab-persistence/counter").read()
+            counter = os.popen("cat {{ playbook_dir }}/../counter").read()
             token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
             driver.find_element("xpath", '//*[@id="password"]').send_keys(str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
             driver.find_element("xpath", '//*[@id="submit"]').click()
 
             # Increment SSO token counter
             counter = int(counter) + 1
-            os.popen("echo " + str(counter) + " > {{ playbook_dir }}/rol-lab-persistence/counter")
+            os.popen("echo " + str(counter) + " > {{ playbook_dir }}/../counter")
 
     except:
         print("An exception occurred while accepting during login")
@@ -50,7 +50,7 @@ def intercom_login():
         # RH SSO
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
                 (By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
-        counter = os.popen("cat {{ playbook_dir }}/rol-lab-persistence/counter").read()
+        counter = os.popen("cat {{ playbook_dir }}/../counter").read()
         token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
                 (By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
@@ -59,7 +59,7 @@ def intercom_login():
 
         # Increment SSO token counter
         counter = int(counter) + 1
-        os.popen("echo " + str(counter) + " > {{ playbook_dir }}/rol-lab-persistence/counter")
+        os.popen("echo " + str(counter) + " > {{ playbook_dir }}/../counter")
 
     except:
         print("An exception occurred while accepting during login")
@@ -67,7 +67,7 @@ def intercom_login():
 
 def search_name(email):
     # If there is @ is a customer email
-    if "@" in email:
+    if "@" in email and "redhat" not in email:
         driver.execute_script("window.open('');")
         driver.switch_to.window(driver.window_handles[1])
         driver.get("https://app.intercom.com/a/apps/jeuow7ss/users/segments/all-users:eyJwcmVkaWNhdGVzIjpbeyJhdHRyaWJ1dGUiOiJyb2xlIiwiY29tcGFyaXNvbiI6ImVxIiwidHlwZSI6InJvbGUiLCJ2YWx1ZSI6InVzZXJfcm9sZSJ9LHsiYXR0cmlidXRlIjoiZW1haWwiLCJjb21wYXJpc29uIjoiZXEiLCJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiIifV19")
