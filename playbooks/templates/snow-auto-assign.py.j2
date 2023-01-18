@@ -13,7 +13,7 @@ from selenium.webdriver.common.by import By
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1200,800")
-options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/intercom-profile")
+options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/rh-sso")
 
 # Define the webdriver to use.
 # Chrome webdriver
@@ -44,7 +44,14 @@ def intercom_login():
     try:
         WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div[3]/a/div[2]'))).click()
-        WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+        try:
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="identifierId"]'))).send_keys("{{ username }}" + "@redhat.com")
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+                (By.XPATH, '/html/body/div[1]/div[1]/div[2]/div/div[2]/div/div/div[2]/div/div[2]/div/div[1]/div/div/button/span'))).click()
+            WebDriverWait(driver, 60).until(EC.element_to_be_clickable(
+                (By.XPATH, ''))).click()
+        except:
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
                 (By.XPATH, '//*[@id="view_container"]/div/div/div[2]/div/div[1]/div/form/span/section/div/div/div/div/ul/li[1]/div/div[1]/div/div[2]/div[2]'))).click()
 
         # RH SSO
@@ -72,7 +79,6 @@ def search_name(email):
         driver.switch_to.window(driver.window_handles[1])
         driver.get("https://app.intercom.com/a/apps/jeuow7ss/users/segments/all-users:eyJwcmVkaWNhdGVzIjpbeyJhdHRyaWJ1dGUiOiJyb2xlIiwiY29tcGFyaXNvbiI6ImVxIiwidHlwZSI6InJvbGUiLCJ2YWx1ZSI6InVzZXJfcm9sZSJ9LHsiYXR0cmlidXRlIjoiZW1haWwiLCJjb21wYXJpc29uIjoiZXEiLCJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiIifV19")
         intercom_login()
-
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[1]/div/div[4]/div/div[2]/div/div[2]/div[2]/div/div/div/span/div[2]/span/div/div/div/div/div'))).click()
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div/div/div/input'))).send_keys(email)
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[2]/a'))).click()
