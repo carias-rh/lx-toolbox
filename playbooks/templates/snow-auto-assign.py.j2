@@ -103,18 +103,18 @@ def auto_assign_tickets():
     try:
         while True:
 
-            WebDriverWait(driver, 40).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
+            WebDriverWait(driver, 10).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
 
             # Select the first item on the list
-            WebDriverWait(driver, 40).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/span/div/div[5]/table/tbody/tr/td/div/table/tbody/tr[1]/td[3]/a'))).click()
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/span/div/div[5]/table/tbody/tr/td/div/table/tbody/tr[1]/td[3]/a'))).click()
 
             # Fill the boxes and save
-            Select(WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.state"]')))).select_by_visible_text('In Progress')
-            Select(WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.category"]')))).select_by_visible_text('RHLS Basic External Support')
+            Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.state"]')))).select_by_visible_text('In Progress')
+            Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.category"]')))).select_by_visible_text('RHLS Basic External Support')
             time.sleep(0.5)
-            Select(WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.subcategory"]')))).select_by_visible_text('Course Content')
+            Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.subcategory"]')))).select_by_visible_text('Course Content')
             time.sleep(0.5)
-            Select(WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.issue"]')))).select_by_visible_text('Other')
+            Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.issue"]')))).select_by_visible_text('Other')
 
             # Get description
             description = driver.find_element("xpath", '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]').get_attribute('value')
@@ -134,7 +134,7 @@ def auto_assign_tickets():
                     first_name = search_name(name.replace(" ", ""))
                     email = name.replace(" ", "") + "@redhat.com"
 
-                WebDriverWait(driver, 30).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
+                WebDriverWait(driver, 10).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
 
                 # Fill in name
                 driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').clear()
@@ -151,8 +151,11 @@ def auto_assign_tickets():
             try:
                 short_description = re.findall("Description:.*", description)
                 summary = short_description[0].split(":  ")[1]
+                course = re.findall("Course:.*", description)
+                version = re.findall("Version:.*", description)
+
                 driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').clear()
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').send_keys(summary[:100] + "...")
+                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').send_keys(course[0].split(":  ")[1].upper().replace(" ", "") + "-" + version[0].split(":  ")[1] + " FEEDBACK: " + summary[:100] + "...")
             except:
                 print("Failed to fill short_description")
 
@@ -179,8 +182,12 @@ Red Hat Learner Experience Team"""
             except:
                 print("No variables to delete")
 
+            # Add 1 minute to work
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tmr_d0e59f9087e82198a92b4156cebb3573_min"]'))).clear()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tmr_d0e59f9087e82198a92b4156cebb3573_min"]'))).send_keys('1')
+
             # Save
-            WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
 
             # Go back to "RHT - Unassigned T2"
             driver.switch_to.default_content()
