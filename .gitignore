@@ -6,8 +6,8 @@ lab-start.log
 task
 token
 playbooks/vars/credentials.yml
-credentials.yml.orig
-/counter
+credentials.yml
+counter
 /cookies.pkl
 /.idea
 /geckodriver.log
