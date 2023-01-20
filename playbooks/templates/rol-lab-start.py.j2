@@ -144,7 +144,7 @@ increase_autodestroy("{{ lab_environment }}", "{{ course }}")
 
 while True:
     increase_autostop("{{ lab_environment }}", "{{ course }}")
-    time.sleep(5)
+    time.sleep(3600)
 
 {% endfor -%}
 
