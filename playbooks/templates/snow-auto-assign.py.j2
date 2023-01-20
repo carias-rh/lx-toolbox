@@ -12,7 +12,7 @@ from selenium.webdriver.common.by import By
 
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
-options.add_argument("--window-size=1200,800")
+options.add_argument("--window-size=1600,1200")
 options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/intercom-profile")
 
 # Define the webdriver to use.
@@ -70,15 +70,15 @@ def intercom_login():
         print("An exception occurred while accepting during login")
 
 
-def search_name(email):
-    # If there is @ is a customer email
+def search_name(username, email):
+    # If there is @ and not redhat.com it is a customer email
     if "@" in email and "redhat" not in email:
         driver.execute_script("window.open('');")
         driver.switch_to.window(driver.window_handles[1])
-        driver.get("https://app.intercom.com/a/apps/jeuow7ss/users/segments/all-users:eyJwcmVkaWNhdGVzIjpbeyJhdHRyaWJ1dGUiOiJyb2xlIiwiY29tcGFyaXNvbiI6ImVxIiwidHlwZSI6InJvbGUiLCJ2YWx1ZSI6InVzZXJfcm9sZSJ9LHsiYXR0cmlidXRlIjoiZW1haWwiLCJjb21wYXJpc29uIjoiZXEiLCJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiIifV19")
+        driver.get("https://app.intercom.com/a/apps/jeuow7ss/users/segments/all-users:eyJwcmVkaWNhdGVzIjpbeyJhdHRyaWJ1dGUiOiJyb2xlIiwiY29tcGFyaXNvbiI6ImVxIiwidHlwZSI6InJvbGUiLCJ2YWx1ZSI6InVzZXJfcm9sZSJ9LHsiYXR0cmlidXRlIjoiY3VzdG9tX2RhdGEudXNlcm5hbWUiLCJjb21wYXJpc29uIjoiZXEiLCJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiIifV19")
         intercom_login()
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[1]/div/div[4]/div/div[2]/div/div[2]/div[2]/div/div/div/span/div[2]/span/div/div/div/div/div'))).click()
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div/div/div/input'))).send_keys(email)
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div/div/div/input'))).send_keys(username)
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[2]/a'))).click()
         time.sleep(2)
         first_name = str(driver.find_element("xpath", '/html/body/div[1]/div/div[1]/div/div[4]/div/div[2]/div/div[2]/div[3]/div[1]/div/div[1]/table/tbody/tr/td[1]/span/div/span/a').text).split(" ")[0]
@@ -121,18 +121,18 @@ def auto_assign_tickets():
 
             # Extract user name from description and fill in the field
             try:
-                user_name = re.findall("User Name:.*", description)
-                name = user_name[0].split(":  ")[1]
+                username = re.findall("User Name:.*", description)
+                username = username[0].split(":  ")[1]
 
                 # Extract user email from description and fill in the field
                 user_email = re.findall("User Email:.*", description)
                     # RedHatters' issues usually come without email, just their RHNID in "User Name: " field, so it will fail the following email regex being empty and will jump to the except
                 try:
                     email = re.findall("([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
-                    first_name = search_name(email)
+                    first_name = search_name(username.replace(" ", ""), email)
                 except:
-                    first_name = search_name(name.replace(" ", ""))
-                    email = name.replace(" ", "") + "@redhat.com"
+                    first_name = search_name(username.replace(" ", ""), "")
+                    email = username.replace(" ", "") + "@redhat.com"
 
                 WebDriverWait(driver, 10).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
 
@@ -161,7 +161,7 @@ def auto_assign_tickets():
 
             # If it's a feedback ticket, reply to the user
             try:
-                if name:
+                if username:
                     ack_response = "Hi " + first_name + """,
 
 Thanks for submitting your feedback to the Learner Experience Team.
@@ -178,13 +178,13 @@ Red Hat Learner Experience Team"""
 
             # Clear values
             try:
-                del user_name, name, first_name, user_email, email
+                del username, first_name, user_email, email
             except:
                 print("No variables to delete")
 
             # Add 1 minute to work
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tmr_d0e59f9087e82198a92b4156cebb3573_min"]'))).clear()
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tmr_d0e59f9087e82198a92b4156cebb3573_min"]'))).send_keys('1')
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).clear()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).send_keys('1')
 
             # Save
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
