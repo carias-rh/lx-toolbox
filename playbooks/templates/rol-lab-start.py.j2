@@ -8,68 +8,71 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 
-driver = webdriver.Firefox()
+options = webdriver.ChromeOptions()
+options.add_argument('--ignore-certificate-errors')
+options.add_argument("--window-size=1200,800")
+options.add_argument("--user-data-dir=/home/carias/.config/google-chrome/rh-sso")
+#options.add_argument("headless")
+driver = webdriver.Chrome(options=options)
 
-driver.install_addon(os.path.expanduser('{{ playbook_dir }}/../copy_on_select-1.0-an+fx.xpi'), temporary=True)
-driver.maximize_window()
+#driver = webdriver.Firefox()
+
+#driver.install_addon(os.path.expanduser('/home/carias/Documents/rol-lab-persistence/playbooks/../copy_on_select-1.0-an+fx.xpi'), temporary=True)
+#driver.maximize_window()
 
 
 # Go to the website
 def go_to_main_site(lab_environment):
-    driver.get('https://rol.redhat.com/' + lab_environment + '/app')
+    driver.get('https://rol-factory.ole.redhat.com/rol-devel/app/')
 
 
 def go_to_course(lab_environment, course_id):
     WebDriverWait(driver, 100).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="avatar"]')))
-    driver.get('https://rol.redhat.com/' + lab_environment + '/app/courses/' + course_id)
-
+    driver.get('https://rol-factory.ole.redhat.com/rol-devel/app/courses/' + course_id)
 
 def login():
 
     try:
-        driver.find_element("xpath", "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input").send_keys("{{ rh_username }}@redhat.com")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="login-show-step2"]'))).click()
+            (By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click()
 
+        driver.find_element("xpath", '//*[@id="login_field"]').send_keys("{{ github_username }}")
+        driver.find_element("xpath", '//*[@id="password"]').send_keys("{{ github_password }}")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
-
-        # RH SSO
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="submit"]')))
-        driver.find_element("xpath", '//*[@id="username"]').send_keys("{{ username }}")
-        counter = os.popen("cat {{ playbook_dir }}/../counter").read()
-        token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
-        driver.find_element("xpath", '//*[@id="password"]').send_keys(
-            str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
-        driver.find_element("xpath", '//*[@id="submit"]').click()
-
-        # Increment SSO token counter
-        counter = int(counter) + 1
-        os.popen("echo " + str(counter) + " > {{ playbook_dir }}/../counter")
+            (By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/form/div/input[11]'))).click()
 
     except:
         print("An exception occurred while accepting during login")
 
 def accept_cookies():
     try:
-        WebDriverWait(driver, 10).until(
+        WebDriverWait(driver, 5).until(
             EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
         time.sleep(1)
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
             (By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
-        driver.refresh()
+        #driver.refresh()
     except:
         print("An exception occurred while accepting cookies")
 
 
 def create_lab(lab_environment, course_id):
     try:
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+        #if course_id == 'do374-2.2':
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[text()="Create"]'))).click()
+             (By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[2]/div/button'))).click()
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/div[2]/div/ul/li[2]/a'))).click()
+        time.sleep(5)
+        try:
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+                (By.XPATH, '//*[text()="Create"]'))).click()
+        except:
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[2]/button'))).click()
 
     except:
         print(
@@ -78,17 +81,19 @@ def create_lab(lab_environment, course_id):
 
 def start_lab(lab_environment, course_id):
     try:
-        driver.refresh()
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        #driver.refresh()
+        time.sleep(10)
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+
         # Click on Start lab
         try:
             # Not sure why it fails on rol-stage
-            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
                 (By.XPATH, "//*[text()='Start']"))).click()
         except:
-            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-                (By.XPATH, "/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[3]/button[2]"))).click()
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+                (By.XPATH, "/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[2]/button[2]"))).click()
 
     except:
         print("An exception occurred during lab start in " + lab_environment + " environment and course " + course_id)
@@ -97,10 +102,9 @@ def start_lab(lab_environment, course_id):
 
 def increase_autostop(lab_environment, course_id):
     try:
+        time.sleep(30)
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
-
-        time.sleep(30)
         increase_autostop = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
 
@@ -108,27 +112,27 @@ def increase_autostop(lab_environment, course_id):
             increase_autostop.click()
     except:
         print(
-            "An exception occurred during lifespan extension in " + lab_environment + " environment and course " + course_id)
+            "An exception occurred during auto-destroy extension in " + lab_environment + " environment and course " + course_id)
 
 
-def increase_lifespan(lab_environment, course_id):
+def increase_autodestroy(lab_environment, course_id):
     try:
         time.sleep(30)
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
 
-        increase_lifespan = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+        increase_autodestroy = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')))
 
         for i in range(30):
-            increase_lifespan.click()
+            increase_autodestroy.click()
     except:
-        print("An exception occurred during lifespan extension in " + lab_environment + " environment and course " + course_id)
+        print("An exception occurred during auto-stop extension in " + lab_environment + " environment and course " + course_id)
+
 
 ## Main
 
-go_to_main_site("{{ lab_environment }}")
-accept_cookies()
+go_to_main_site("rol")
 login()
 
 {% for course in course_id -%}
@@ -136,8 +140,11 @@ login()
 go_to_course("{{ lab_environment }}", "{{ course }}")
 accept_cookies()
 start_lab("{{ lab_environment }}", "{{ course }}")
-increase_autostop("{{ lab_environment }}", "{{ course }}")
-increase_lifespan("{{ lab_environment }}", "{{ course }}")
+increase_autodestroy("{{ lab_environment }}", "{{ course }}")
+
+while True:
+    increase_autostop("{{ lab_environment }}", "{{ course }}")
+    time.sleep(5)
 
 {% endfor -%}
 
