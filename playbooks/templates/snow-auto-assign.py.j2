@@ -187,7 +187,7 @@ Red Hat Learner Experience Team"""
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).send_keys('1')
 
             # Save
-            #WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
 
             # Go back to "RHT - Unassigned T2"
             driver.switch_to.default_content()
