@@ -72,6 +72,8 @@ The `setup.yml` playbook has placed in your `/usr/local/bin/` dir some wrapper s
 
 The wrapper script will look into the list of courses and match the latest version of the course if you write only the number of the course.
 
+[rol-start-render.webm](https://user-images.githubusercontent.com/80515069/214608957-41e14cd4-1084-45fc-bd4a-3e08cc34cf84.webm)
+
 ```
 $ which start
 /usr/local/bin/start

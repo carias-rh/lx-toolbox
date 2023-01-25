@@ -1,5 +1,6 @@
 - name: ROL labs launcher
   hosts: localhost
+  gather_facts: no
   vars_files: credentials.yml
   vars:
     - lab_environment: rol
