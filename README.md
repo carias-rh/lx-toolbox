@@ -22,34 +22,32 @@ It uses ansible-playbook to generate python scripts from templates that will lau
 - [geckodriver](https://github.com/mozilla/geckodriver/releases) and/or [Chromedriver](https://chromedriver.chromium.org/downloads) under `/usr/bin/`
 
 
-Run the setup playbook that will install the requirements and wrapper scripts to create the labs:
+Run the `setup.yml` playbook that will install the requirements and wrapper scripts to create the labs:
 ``` 
 $ ansible-playbook playbooks/setup.yml -K
 ```
 
 ### SSO for Associates
-As you may have seen, the setup.yml playbook generated a `secret` that we will use to create our SSO token. 
+As you may have seen, the `setup.yml` playbook generated a `secret` that we will use to create our SSO token. 
 ```
-$ dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40
 
 TASK [Use this secret string to create your token.redhat.com] *************************************************************************************************************************************************************************************************************************************************************
 ok: [localhost] => {
     "generated_secret.stdout": "4439be1a......................bc2d3ec263"
 }
-
-
+...output omitted...
 ```
 
-Fill in the `playbooks/vars/credentials.yml` file with your rol.redhat.com username. Vault-encrypt this file is recommended:
+Fill in the `playbooks/vars/credentials.yml` file with your `rol.redhat.com` username. Vault-encrypt this file is recommended:
 ```
 username: "yourusername"	                        # without @redhat.com
-pin: "yourpin" 		                                # corresponding to the created token at token.redhat.com
 secret: "4439be1a......................bc2d3ec263"      # OTP Key to generate the SSO token
+pin: "yourpin" 		                                # PIN for the OTP Key
 ```
 
 
 
-Go to `token.redhat.com` with the VPN activated to create the new token with the given secret. Uncheck the "Generate OTP Key on the Server" box and paste there your secret.
+Go to `token.redhat.com` with the VPN activated to create the new token with the given secret. Uncheck the "Generate OTP Key on the Server" box, paste there your secret and chose a PIN.
 
 ![image](https://user-images.githubusercontent.com/80515069/177427661-7a1d9c81-ad96-485c-a31a-376e7dc3c1e5.png)
 
