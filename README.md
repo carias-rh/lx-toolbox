@@ -42,12 +42,11 @@ Fill in the `playbooks/vars/credentials.yml` file with your `rol.redhat.com` use
 ```
 username: "yourusername"	                        # without @redhat.com
 secret: "4439be1a......................bc2d3ec263"      # OTP Key to generate the SSO token
-pin: "yourpin" 		                                # PIN for the OTP Key
+pin: "yourpin" 		                                # Create a PIN for the OTP Key
 ```
 
 
-
-Go to `token.redhat.com` with the VPN activated to create the new token with the given secret. Uncheck the "Generate OTP Key on the Server" box, paste there your secret and chose a PIN.
+Go to `token.redhat.com` with the VPN activated to create the new token with the given secret. Uncheck the ☑️ `Generate OTP Key on the Server` box, paste your secret, and choose a PIN.
 
 ![image](https://user-images.githubusercontent.com/80515069/177427661-7a1d9c81-ad96-485c-a31a-376e7dc3c1e5.png)
 
