@@ -1,6 +1,6 @@
 - name: ROL labs installer
   hosts: localhost
-  become: true
+  #become: true
   vars:
     pip_install_packages:
       - name: pip
@@ -9,6 +9,7 @@
   tasks:
     - name: Install epel repository
       command: dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
+      ignore_errors: true
 
     - name: Ensure dependencies are installed.
       package:
@@ -17,12 +18,12 @@
           - epel-release
           - python3-pip
           - firefox.x86_64
-          - chromium-108.0.5359.124-3.el8.x86_64
+          - chromium.x86_64
         state: present
 
     - name: Install Selenium with pip
       ansible.builtin.pip:
-        name: selenium==3.141.0
+        name: selenium
         executable: pip3
 
     - name: Download selenium drivers
@@ -51,5 +52,21 @@
         - delete.j2
         - recreate.j2
         - impersonate.j2
-      
 
+    - name: generate secret and
+      shell: 'dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40'
+      register: generated_secret
+      tags: secret
+
+
+    - name: place secret in playbooks/vars/credentials.yml file
+      ansible.builtin.lineinfile:
+        path: '{{ playbook_dir }}/vars/credentials.yml'
+        regexp: '^secret'
+        line: 'secret: {{ generated_secret.stdout }}'
+      tags: secret
+
+    - name: Use this secret string to create your token.redhat.com
+      debug:
+        var: generated_secret.stdout
+      tags: secret
