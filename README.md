@@ -3,10 +3,10 @@ This project uses ansible and selenium to create, delete, and extend life of mos
   - rh124-9.0
   - rh134-9.0
   - rh199-9.0
-  - rh294-8.4
+  - rh294-9.0
   - do180-4.10
   - do280-4.10
-  - do288-4.6
+  - do288-4.10
   - do447-2.8
 
 It uses ansible-playbook to generate python scripts from templates that will launch a browser by using selenium.
@@ -62,22 +62,6 @@ username: "youruser@mail.com"
 password: "yourpassword"
 ``` 
 
-## Custom courses and environment
-You can customize the default `lab_environment` and `courses_id` variables in the vars section, so that you can create, start, delete multiple labs with a single run:
-```
-$ cat playbooks/create.yaml
-- name: ROL labs launcher
-  hosts: localhost
-  vars_files: credentials.yml
-  vars:
-    - lab_environment: rol 	# Valid options are: rol / rol-stage
-    - course_id:  		# Get the course_id from the URL, such https://rol.redhat.com/rol/app/courses/rh124-8.2
-        - rh124-9.0
-        - rh134-9.0
-        - rh294-8.4
-        ...
-```
-
 ## Running the thing
 
 The `setup.yml` playbook has placed in your `/usr/local/bin/` dir some wrapper scripts that use the `rol-prod` environment by default. So if you want to use stage, append `rol-stage` as the second parameter.
@@ -131,8 +115,27 @@ $ ansible-playbook delete.yml \
         -e '{"course_id": ["rh124-8.2", "rh134-8.2"]}'
 ```
 
+## Custom courses and environment
+You can customize the default `lab_environment` and `courses_id` variables in the vars section, so that you can create, start, delete multiple labs with a single run:
+```
+$ cat playbooks/create.yaml
+- name: ROL labs launcher
+  hosts: localhost
+  vars_files: credentials.yml
+  vars:
+    - lab_environment: rol 	# Valid options are: rol / rol-stage
+    - course_id:  		# Get the course_id from the URL, such https://rol.redhat.com/rol/app/courses/rh124-8.2
+        - rh124-9.0
+        - rh134-9.0
+        - rh294-9.0
+        ...
+```
+
 ## Extended functionality
-The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. To achieve this, I created in my favourites a customized query for `RHT Learner Experience - T2` group. This will correspond to a unique url that needs to be substituted in the `playbooks/templates/snow-auto-assign.yml` selenium template.       
+The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. The need for this script emerged from the time-consuming task of filling all the field of each ticket, which came without the name, email, and summary filled.
+I could have make this script simpler, but I finally decided to automate the whole thing to auto-assign the tickets to my queue as they come and automatically reply to the users.
+
+To achieve this, I created in my favourites a customized query for `RHT Learner Experience - T2` group. This will correspond to a unique url that needs to be substituted in the `playbooks/templates/snow-auto-assign.yml` selenium template.       
 
 ![image](https://user-images.githubusercontent.com/80515069/212669278-29f9a09e-9fe0-427e-9ed3-3f25d92bde45.png)
 
@@ -144,7 +147,7 @@ Customize the email that will be sent to the customer as an ACK in the `auto_ass
 
 ![image](https://user-images.githubusercontent.com/80515069/212670415-862f3829-9bcb-42f6-8da9-79044584708b.png)
 
-I created a crontab to periodically run the script.
+I created a crontab to periodically run the script every hour during my shift.
 ```bash
 #######################
 # Auto-assign tickets #
