@@ -50,7 +50,7 @@ Go to `token.redhat.com` with the VPN activated to create the new token with the
 
 ![image](https://user-images.githubusercontent.com/80515069/177427661-7a1d9c81-ad96-485c-a31a-376e7dc3c1e5.png)
 
-Make sure that the `./counter` file always matches the `Count` value of the token, **initially set to 1**.
+Make sure that the `./counter` file always matches the `Count` value of the token, **initially set to 1**. It will increase the value each time you login.
 
 ![hotp](https://user-images.githubusercontent.com/80515069/212667043-69dd2e9e-c81e-4b75-a5ac-41e1b52b8f27.png)
 
