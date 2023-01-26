@@ -1,6 +1,6 @@
 - name: ROL labs installer
   hosts: localhost
-  #become: true
+  become: true
   vars:
     pip_install_packages:
       - name: pip
@@ -52,6 +52,7 @@
         - delete.j2
         - recreate.j2
         - impersonate.j2
+      tags: scripts
 
     - name: generate secret and
       shell: 'dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40'

@@ -1,0 +1,6 @@
+selenium_driver: "firefox"
+rh_username: "{{ username | default('') }}"
+rh_password: "{{ password | default('') }}"
+counter: 0
+action: ""
+impersonate_username: ""

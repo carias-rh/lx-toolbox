@@ -49,11 +49,11 @@ function start_course()
 	if [ $# -eq 2 ]
 	  then
 	      if [ $2 == "rol" ] || [ $2 == "rol-stage" ]
-		 then /usr/bin/ansible-playbook {{ playbook_dir }}/delete.yml -e "lab_environment=$2"  -e "{'course_id': ['$COURSE_PATH']}" -v
+		 then /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="delete"  -e "lab_environment=$2"  -e "{'course_id': ['$COURSE_PATH']}" -v
               fi
 	else 
 	      LAB_ENVIRONMENT=rol
-              /usr/bin/ansible-playbook {{ playbook_dir }}/delete.yml -e "lab_environment=$LAB_ENVIRONMENT"  -e "{'course_id': ['$COURSE_PATH']}" -v
+              /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="delete"  -e "lab_environment=$LAB_ENVIRONMENT"  -e "{'course_id': ['$COURSE_PATH']}" -v
 	fi
 
 }

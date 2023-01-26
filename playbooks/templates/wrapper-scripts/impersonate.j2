@@ -44,7 +44,7 @@ function get_course_from_list()
 
 function start_course()
 {
-        /usr/bin/ansible-playbook {{ playbook_dir }}/impersonate.yml -e impersonate_username=$2  -e "{'course_id': ['$COURSE_PATH']}" -v
+        /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="impersonate" -e impersonate_username=$2  -e "{'course_id': ['$COURSE_PATH']}" -v
 
 }
 
