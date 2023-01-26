@@ -1,15 +1,11 @@
 - name: ROL labs launcher
   hosts: localhost
-  vars_files: credentials.yml
+  vars_files:
+    - credentials.yml
+    - defaults.yml
   vars:
-    - selenium_driver: "firefox"
-    - lab_environment: rol
-    - rh_username: "{{ username | default('') }}"
-    - rh_password: "{{ password | default('') }}"
-    - counter: 0
-    - action: ""
-    - impersonate_username: ""
-    - course_id:
+    - lab_environment: rol 	# Valid options are: rol / rol-stage
+    - course_id:            # Get the course_id from the URL, such https://rol.redhat.com/rol/app/courses/rh124-8.2
       - rh124-9.0
       - rh134-9.0
       - rh199-9.0
