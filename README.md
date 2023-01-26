@@ -40,9 +40,15 @@ ok: [localhost] => {
 
 Fill in the `playbooks/vars/credentials.yml` file with your `rol.redhat.com` username. Vault-encrypt this file is recommended:
 ```
-username: "yourusername"	                        # without @redhat.com
-secret: "4439be1a......................bc2d3ec263"      # OTP Key to generate the SSO token
-pin: "yourpin" 		                                # Create a PIN for the OTP Key
+# SSO Red Hat credentials
+username: "yourusername"                           # without @redhat.com
+pin: "yourpin"                                     # corresponding to the created token at token.redhat.com
+secret: "4439be1a......................bc2d3ec263" # secret from the generated token
+
+# Github credentials
+github_username: ""
+github_password: ""
+
 ```
 
 
@@ -78,10 +84,10 @@ The wrapper script will look into the list of courses and match the latest versi
 $ which start
 /usr/local/bin/start
 
-$ start 180 
+$ start 180 rol-stage
 
 Course starting: do180-4.10
-Environment: rol-production
+Environment: rol-stage
 
 Using /etc/ansible/ansible.cfg as config file
 [WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'

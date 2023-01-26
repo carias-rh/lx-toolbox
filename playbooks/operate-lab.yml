@@ -1,0 +1,32 @@
+- name: ROL labs launcher
+  hosts: localhost
+  vars_files: credentials.yml
+  vars:
+    - selenium_driver: "firefox"
+    - lab_environment: rol
+    - rh_username: "{{ username | default('') }}"
+    - rh_password: "{{ password | default('') }}"
+    - counter: 0
+    - action: ""
+    - impersonate_username: ""
+    - course_id:
+      - rh124-9.0
+      - rh134-9.0
+      - rh199-9.0
+      - rh294-9.0
+      - do180-4.10
+      - do188-4.10
+      - do280-4.10
+      - do288-4.10
+      - do374-2.0
+      - do447-2.8
+        
+  tasks:
+    - name: Generate selenium script
+      template:
+        src: templates/operate-lab.py.j2
+        dest: "/tmp/operate-lab.py"
+
+    - name: Create courses
+      shell: '/usr/bin/python3 /tmp/operate-lab.py'
+      register: selenium
