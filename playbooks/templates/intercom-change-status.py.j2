@@ -10,7 +10,7 @@ from selenium.webdriver.common.by import By
 
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
-options.add_argument("--window-size=1200,800")
+options.add_argument("--window-size=1600,1200")
 options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/rh-sso")
 
 # Define the webdriver to use.
@@ -54,11 +54,10 @@ def intercom_login():
 
 
 def intercom_change_status(change_status_to):
-    try:
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
-            (By.XPATH, '/html/body/div[1]/div/div[1]/div[2]/div/div/div/div[1]/div[5]/div[2]/div/div'))).click()
+            (By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div/div/div/div[1]/div[5]/div[2]/div/div'))).click()
         # Get attributes from the gravatar
-        status_raw = driver.find_element("xpath",'/html/body/div[1]/div/div[1]/div[2]/div/div/div/div[1]/div[5]/div[2]/div/div').get_attribute("class")
+        status_raw = driver.find_element("xpath",'/html/body/div[1]/div/div[1]/div[3]/div/div/div/div[1]/div[5]/div[2]/div/div').get_attribute("class")
         status_away = re.findall("o__away", status_raw)
         status_active = re.findall("o__active", status_raw)
 
@@ -72,8 +71,6 @@ def intercom_change_status(change_status_to):
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div[2]/div/div/button/span'))).click()
 
-    except:
-        print("An exception occurred while activating intercom")
 
 
 # Main
