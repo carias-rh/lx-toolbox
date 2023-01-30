@@ -55,9 +55,9 @@ def intercom_login():
 
 def intercom_change_status(change_status_to):
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
-            (By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div/div/div/div[1]/div[5]/div[2]/div/div'))).click()
+            (By.XPATH, '/html/body/div[1]/div/div[1]/div[2]/div/div/div/div[1]/div[5]/div[2]/div/div'))).click()
         # Get attributes from the gravatar
-        status_raw = driver.find_element("xpath",'/html/body/div[1]/div/div[1]/div[3]/div/div/div/div[1]/div[5]/div[2]/div/div').get_attribute("class")
+        status_raw = driver.find_element("xpath",'/html/body/div[1]/div/div[1]/div[2]/div/div/div/div[1]/div[5]/div[2]/div/div').get_attribute("class")
         status_away = re.findall("o__away", status_raw)
         status_active = re.findall("o__active", status_raw)
 
