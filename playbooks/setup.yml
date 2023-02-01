@@ -1,10 +1,6 @@
 - name: ROL labs installer
   hosts: localhost
   become: true
-  vars:
-    pip_install_packages:
-      - name: pip
-
 
   tasks:
     - name: Install epel repository

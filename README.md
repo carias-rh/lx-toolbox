@@ -38,7 +38,7 @@ ok: [localhost] => {
 ...output omitted...
 ```
 
-Fill in the `playbooks/vars/credentials.yml` file with your `rol.redhat.com` username. Vault-encrypt this file is recommended:
+Fill in the `playbooks/vars/credentials.yml` file with your `rol.redhat.com` username. Vault-encrypting this file is recommended:
 ```
 # SSO Red Hat credentials
 username: "rh-username"	                            # without @redhat.com
