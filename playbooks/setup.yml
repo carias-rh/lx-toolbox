@@ -48,6 +48,7 @@
         - delete.j2
         - recreate.j2
         - impersonate.j2
+        - snow.j2
       tags: scripts
 
     - name: generate secret and
