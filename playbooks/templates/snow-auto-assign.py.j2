@@ -86,11 +86,13 @@ def search_name(username, email):
 
     # Else is a redhatter
     else:
+        if "@" in email and "redhat" in email:
+            username = email.split("@")[0]
+
         driver.execute_script("window.open('');")
         driver.switch_to.window(driver.window_handles[1])
-        email = email.split("@")[0]
         driver.get('https://rover.redhat.com/people/profile/' + username)
-        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="verifyUserButton"]')))
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="verifyUserButton"]')))
         full_name = driver.find_element("xpath", '//*[@id="userFullName"]').text
         first_name = str(full_name).split(" ")[0]
 
