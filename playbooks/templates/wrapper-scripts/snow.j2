@@ -1,11 +1,11 @@
 #!/bin/bash
 for process in $(ps -ef |egrep "snow.yml|intercom-profile" |egrep -v 'grep|bash' |awk '{print $2}'); do kill $process; done
 
-if [ $# -ne 1 ]
+if [ $# -ne 2 ]
   then
       echo "Please introduce the full name of the teammate as it appears in SNOW field 'Assigned to':"
       echo ""
-      echo "$ snow  'Carlos Arias'"
+      echo "$ snow Carlos Arias"
   else
-    /usr/bin/ansible-playbook {{ playbook_dir }}/snow.yml -e lx_teammate_name="$1"
+    /usr/bin/ansible-playbook {{ playbook_dir }}/snow.yml -e lx_teammate_name="$1 $2"
 fi
