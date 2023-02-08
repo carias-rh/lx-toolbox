@@ -157,7 +157,7 @@ def auto_assign_tickets():
                 version = re.findall("Version:.*", description)
 
                 driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').clear()
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').send_keys(course[0].split(":  ")[1].upper().replace(" ", "") + "-" + version[0].split(":  ")[1] + " FEEDBACK: " + summary[:100] + "...")
+                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').send_keys(course[0].split(":  ")[1].upper().replace(" ", "") + "-" + version[0].split(":  ")[1] + " Feedback: " + summary[:100] + "...")
             except:
                 print("Failed to fill short_description")
 
@@ -168,7 +168,7 @@ def auto_assign_tickets():
 
 Thanks for submitting your feedback to the Learner Experience Team.
             
-We are reviewing this issue and will get back to you as soon as possible.
+We are reviewing your message and will get back to you as soon as possible.
 
 Best Regards,
 {{ lx_teammate_name }}
