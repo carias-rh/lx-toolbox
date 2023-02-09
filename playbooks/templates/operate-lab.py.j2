@@ -177,9 +177,11 @@ def impersonate():
         driver.find_element("xpath", "/html/body/div[3]/div[2]/div/div/div[2]/form/button").click()
         time.sleep(5)
 
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,'/html/body/div[1]/div[2]')))
+
     except:
         print("An exception occurred while impersonating {{ impersonate_username }}")
-
+        impersonate()
 
 ## Main
 
