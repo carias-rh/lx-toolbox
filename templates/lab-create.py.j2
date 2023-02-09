@@ -1,7 +1,7 @@
 #!/usr/local/bin/python3
 ### Maintained by carias@redhat.com
 
-import time, os.path
+import time, re, os.path
 from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.support import expected_conditions as EC
@@ -14,7 +14,7 @@ import logging
 options = webdriver.ChromeOptions()
 #options.add_argument('headless')
 options.add_argument("--window-size=1920,1080")
-options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/lx-qa")
+options.add_argument("--user-data-dir=/home/carias/.config/google-chrome/lx-qa")
 
 # Define the webdriver to use.
 driver = webdriver.Chrome(executable_path="/usr/bin/chromedriver", chrome_options=options)
@@ -145,9 +145,18 @@ def start_qa():
     driver.switch_to.window(newHandle)
 
 def get_commands(chapter_url):
-    driver.get(chapter_url)
-    section_html = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[3]/div/section'))).get_attribute("outerHTML")
-    commands = os.popen("echo '" + section_html + "' | xq -x //userinput").read()
+    #driver.get(chapter_url)
+    #WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
+    #task_prerequisite_html = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[3]/div/section/div[2]/div/div[2]/div/div[4]/div[2]/div[2]/div[2]'))).get_attribute("outerHTML")
+    task_prerequisite_html = """<div class="taskprerequisites">
+<p>As the <code class="code">student</code> user on the <code class="code">workstation</code> machine, use the <code class="code">lab</code> command to prepare your system for this exercise.</p>
+<pre class="screen">[student@workstation ~]$ <strong class="userinput"><code>lab start baseline-monitoring</code></strong></pre>
+<p>This command confirms that the required hosts for this exercise are accessible and creates the <code class="code">consultant</code> user.</p>
+</div>"""
+    task_prerequisite_html = 1
+    lab_script = re.findall("lab start.*code", task_prerequisite_html)[0].split('<')[0].split(" ")[2]
+    commands = os.popen("cat $(grep -ri " + lab_script + " * |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
+
     print(str(commands))
     return str(commands)
 
@@ -203,6 +212,8 @@ def introduce_commands(commands):
 
 
 ## Main
+commands = get_commands("{{ chapter_url }}")
+print(commands)
 
 go_to_main_site("{{ lab_environment }}")
 accept_cookies()
