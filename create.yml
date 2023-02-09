@@ -32,6 +32,8 @@
         src: templates/lab-create.py.j2
         dest: "/tmp/lab-create-{{ item }}.py"
       loop: "{{ course_id }}"
+      tags:
+        - generate
 
     - name: Create courses
       shell: '/usr/bin/python3 /tmp/lab-create-{{ item }}.py &'

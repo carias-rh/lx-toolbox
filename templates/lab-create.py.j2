@@ -7,40 +7,37 @@ from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 import logging
 
 # Chromedriver options
-#options = webdriver.ChromeOptions()
-#options.add_argument('--ignore-certificate-errors')
+options = webdriver.ChromeOptions()
 #options.add_argument('headless')
-#options.add_argument('--no-sandbox')
-#options.add_argument("--window-size=1920,1080")
+options.add_argument("--window-size=1920,1080")
+options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/lx-qa")
 
-## Define the webdriver to use.
-#driver = webdriver.Chrome(executable_path="/usr/bin/chromedriver", chrome_options=options)
+# Define the webdriver to use.
+driver = webdriver.Chrome(executable_path="/usr/bin/chromedriver", chrome_options=options)
 
-# Firefox options
-firefox_options = Options()
-#firefox_options.add_argument("--headless")
+## Firefox options
+#firefox_options = Options()
+##firefox_options.add_argument("--headless")
+#
+## Firefox webdriver
+#driver = webdriver.Firefox(options=firefox_options)
+#driver.maximize_window()
 
-# Firefox webdriver
-driver = webdriver.Firefox(options=firefox_options)
-driver.maximize_window()
-
-logging.basicConfig(filename='example.log', level=logging.ERROR)
 
 
 # Go to the website
 def go_to_main_site(lab_environment):
-    #driver.get('https://nginx-ole-webapp-olechinaqa.apps.ole-apac152.prod.ole.redhat.com/rol-devel/app/login/local')
-    driver.get('https://rol-cn-devel.ole.redhat.com/rol-devel/app/login/local')
+    driver.get('https://rol-cn.ole.redhat.com/rol/app/login/local')
 
 
 def go_to_course(lab_environment, course_id):
     WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="avatar"]')))
-    #driver.get('https://nginx-ole-webapp-olechinaqa.apps.ole-apac152.prod.ole.redhat.com/rol-devel/app/courses/' + course_id)
-    driver.get('https://rol-cn-devel.ole.redhat.com/rol-devel/app/courses/' + course_id)
+    driver.get('https://rol-cn.ole.redhat.com/rol/app/courses/' + course_id)
 
 
 def login():
@@ -129,6 +126,81 @@ def increase_autostop(lab_environment, course_id):
         print(
             "An exception occurred during lifespan extension in " + lab_environment + " environment and course " + course_id)
 
+def start_qa():
+    driver.refresh()
+    time.sleep(3)
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
+        (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '/html/body/div[1]/section/div/div[3]/div/section/div[2]/div/div[3]/div/div/div[3]/table/tbody/tr[6]/td[3]/button'))).click()
+
+    time.sleep(10)
+
+    handles = driver.window_handles
+    for handle in handles:
+        print(handle)
+
+    newHandle = handles[1]
+    driver.switch_to.window(newHandle)
+
+def get_commands(chapter_url):
+    driver.get(chapter_url)
+    section_html = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[3]/div/section'))).get_attribute("outerHTML")
+    commands = os.popen("echo '" + section_html + "' | xq -x //userinput").read()
+    print(str(commands))
+    return str(commands)
+
+
+def introduce_commands(commands):
+    send_text_option_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="showSendTextDialog"]')))
+    show_keyboard_toggle = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '//*[@id="showKeyboard"]')))
+
+
+#    commands = """lab start strategy-scientificmethod
+#ssh student@servera
+#ssh root@servera
+#whoami
+#su - student
+#whoami
+#lastlog -u student
+#getent passwd student
+#chsh -s /bin/bash student
+#ssh student@servera
+#exit
+#lab finish strategy-scientificmethod
+#lab strategy-scientificmethod finish
+#"""
+
+    commands_array = commands.split("\n")
+
+    for line in commands_array:
+        print(line)
+
+        # Open text dialog
+        send_text_option_button.click()
+        # Paste command into text box
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="sendTextInput"]'))).send_keys(line)
+        # Click Send button to send the command
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="sendTextButton"]'))).click()
+        # wait to paste
+        time.sleep(4)
+        # Show keyboard and click enter
+        show_keyboard_toggle.click()
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'))).click()
+        # Hide keyboard
+        show_keyboard_toggle.click()
+
+        if "lab" in line:
+            time.sleep(10)
+        else:
+            time.sleep(3)
+
 
 ## Main
 
@@ -137,6 +209,12 @@ accept_cookies()
 login()
 accept_cookies()
 go_to_course("{{ lab_environment }}", "{{ item }}")
+
+commands = get_commands("{{ chapter_url }}")
+
+start_qa()
+introduce_commands(commands)
+
 create_lab("{{ lab_environment }}", "{{ item }}")
 start_lab("{{ lab_environment }}", "{{ item }}")
 increase_autostop("{{ lab_environment }}", "{{ item }}")
