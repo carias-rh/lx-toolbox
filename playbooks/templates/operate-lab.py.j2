@@ -1,6 +1,6 @@
 #!/usr/local/bin/python3
 ### Maintained by carias@redhat.com
-
+import re
 import time, os.path
 from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
@@ -183,6 +183,146 @@ def impersonate():
         print("An exception occurred while impersonating {{ impersonate_username }}")
         impersonate()
 
+# Looks for the workstation console button and opens the console in a new tab
+def open_workstation():
+    driver.refresh()
+    time.sleep(3)
+    # Open the Lab Environment tab
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
+        (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+    # Open the workstation console;
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, "//*[text()='workstation']/../td[3]/button"))).click()
+    # Wait for the console to open
+    time.sleep(10)
+    handles = driver.window_handles
+    newHandle = handles[1]
+
+    driver.switch_to.window(newHandle)
+
+# Gets a list of the commands from the current section
+def get_commands(chapter_url):
+    driver.get(chapter_url)
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
+
+    time.sleep(4)
+    # Get the lab name and grep it in the project git directory to find the xml file
+    lab_script_name = driver.find_element_by_xpath("//*[contains(text(),'lab start')]").text
+    commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
+
+    print("Commands from exercise " + str(re.findall("ch[0-9]*s[0-9]*", chapter_url)[0]))
+    print("---------------------------------------")
+    print(commands)
+    print("---------------------------------------")
+
+    return str(commands)
+
+# Uses the Text button function to paste and the Digital Keyboard UI to execute it
+def introduce_command(command, send_text_option_button, show_keyboard_toggle):
+    # Open text dialog
+    send_text_option_button.click()
+    # Paste command into text box
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '//*[@id="sendTextInput"]'))).send_keys(command)
+    # Click Send button to send the command
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '//*[@id="sendTextButton"]'))).click()
+    # time.sleep depending on the length of the command
+    wait_for_command_to_paste(command)
+    # Show keyboard and click Enter
+    show_keyboard_toggle.click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'))).click()
+    # Hide keyboard
+    show_keyboard_toggle.click()
+
+# Prompts for user input to continue the execution of the QA
+def prompt_user_enter_to_continue(custom_message):
+    print("")
+    input("Press Enter to continue " + custom_message + "\n")
+
+# This function includes the whole list of exceptions that are not just enter a command and press enter
+def manage_special_commands(command, send_text_option_button, show_keyboard_toggle):
+
+    if "lab start" in command or "lab finish" in command or "lab grade" in command:
+        command = "date; time " + command
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        # Wait for user to continue after the lab script has executed
+        prompt_user_enter_to_continue("with the exercise")
+    elif "ssh" in command:
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        prompt_user_enter_to_continue("after the ssh")
+    elif "ansible" in command:
+        # Wait for user to continue after the playbook has been reviewed/created
+        prompt_user_enter_to_continue("if you did review/create the playbook")
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        prompt_user_enter_to_continue("if playbook finished")
+    elif "ok=" in command or "failed=" in command:
+        print("skipping output")
+    elif "vim" in command:
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        prompt_user_enter_to_continue("if you did review/create the file")
+    elif "Enter" in command:
+        command = "\n"
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+    elif "less" in command:
+        command = command.replace("less", "cat")
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+    elif "systemctl status" in command:
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        command = "q\n"
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+    elif "systemctl restart" in command or "daemon-reload" in command:
+        prompt_user_enter_to_continue(
+            "if you made sure that the new configuration is in place to 'systemctl restart service'")
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+    elif "ping" in command and not "ansible" in command:
+        if not "-c" in command:
+            command = command + " -c2"
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+    elif "yum install" in command or "yum reinstall" in command:
+        if not "-y" in command:
+            command = command + " -y"
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        # Wait for user to continue after yum has executed
+        prompt_user_enter_to_continue("when the installation has finished")
+    elif "vgcfgrestore -f" in command:
+        prompt_user_enter_to_continue("when you have selected the desired .vg file")
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+    elif "/etc/hosts" in command or "/etc/resolv.conf" in command:
+        prompt_user_enter_to_continue("when you have fixed the /etc/hosts or /etc/resolv.conf files")
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+    elif "iscsiadm -m discovery" in command:
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        prompt_user_enter_to_continue("when discovery command has executed")
+    else:
+        return 1
+
+# Waits a proportional time with the number of characters of the command to be pasted
+def wait_for_command_to_paste(command):
+    time.sleep(len(command) * 0.1)
+
+
+
+# Receives a list of the commands of the section
+def qa(commands):
+    send_text_option_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="showSendTextDialog"]')))
+    show_keyboard_toggle = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '//*[@id="showKeyboard"]')))
+
+    commands_array = commands.split("\n")
+
+    for line in commands_array:
+        print(line)
+
+        if not manage_special_commands(line, send_text_option_button, show_keyboard_toggle):
+            introduce_command(line, send_text_option_button, show_keyboard_toggle)
+
+        # Standard time for command to execute
+        time.sleep(3)
+
+
 ## Main
 
 go_to_course("rh124-9.0")
@@ -225,6 +365,15 @@ go_to_course("{{ course }}")
 WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
 {% endif %}
+
+{% if action == "qa" %}
+start_lab("{{ course }}")
+increase_autostop("{{ course }}")
+increase_lifespan("{{ course }}")
+
+commands = get_commands("{{ chapter_url }}")
+open_workstation()
+qa(commands)
 
 {% endfor %}
 
