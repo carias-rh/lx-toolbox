@@ -12,7 +12,7 @@ import logging
 
 # Chromedriver options
 options = webdriver.ChromeOptions()
-#options.add_argument('headless')
+options.add_argument('headless')
 options.add_argument("--window-size=1920,1080")
 #options.add_argument("--user-data-dir=/home/carias/.config/google-chrome/lx-qa")
 
@@ -128,19 +128,17 @@ def increase_autostop(lab_environment, course_id):
 def open_workstation():
     driver.refresh()
     time.sleep(3)
+    # Open the Lab Environment tab
     WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-
+    # Open the workstation console;
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '/html/body/div[1]/section/div/div[3]/div/section/div[2]/div/div[3]/div/div/div[3]/table/tbody/tr[6]/td[3]/button'))).click()
-
+            (By.XPATH, "//*[text()='workstation']/../td[3]/button"))).click()
+    # Wait for the console to open
     time.sleep(10)
-
     handles = driver.window_handles
-    for handle in handles:
-        print(handle)
-
     newHandle = handles[1]
+
     driver.switch_to.window(newHandle)
 
 def get_commands(chapter_url):
@@ -181,6 +179,9 @@ def manage_special_commands(command):
 def wait_for_command_to_paste(command):
     time.sleep(len(command) * 0.1)
 
+def prompt_user_enter_to_continue(custom_message):
+    print("")
+    input("Press Enter to continue " + custom_message + "\n")
 
 def qa(commands):
     send_text_option_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
@@ -197,20 +198,20 @@ def qa(commands):
             line = "date; time " + line
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
             # Wait for user to continue after the lab script has executed
-            input("Press Enter to continue with the exercise")
+            prompt_user_enter_to_continue("with the exercise")
         elif "ssh" in line:
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
-            input("Press Enter to continue the ssh")
+            prompt_user_enter_to_continue("after the ssh")
         elif "ansible" in line:
             # Wait for user to continue after the playbook has been reviewed/created
-            input("Press Enter to continue if you did review/create the playbook")
+            prompt_user_enter_to_continue("if you did review/create the playbook")
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
-            input("Press Enter to continue if playbook finished")
+            prompt_user_enter_to_continue("if playbook finished")
         elif "ok=" in line or "failed=" in line:
             print("skipping output")
         elif "vim" in line:
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
-            input("Press Enter to continue if you did review/create the file")
+            prompt_user_enter_to_continue("if you did review/create the file")
         elif "Enter" in line:
             line = "\n"
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
@@ -222,18 +223,27 @@ def qa(commands):
             line = "q\n"
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
         elif "systemctl restart" in line or "daemon-reload" in line:
-            input("Press Enter to continue if you made sure that the new configuration is in place to 'systemctl restart service'")
+            prompt_user_enter_to_continue("if you made sure that the new configuration is in place to 'systemctl restart service'")
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
         elif "ping" in line and not "ansible" in line:
             if not "-c" in line:
                 line = line + " -c2"
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
-        elif "yum install" in line:
+        elif "yum install" in line or "yum reinstall" in line:
             if not "-y" in line:
                 line = line + " -y"
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
             # Wait for user to continue after yum has executed
-            input("Press Enter to continue")
+            prompt_user_enter_to_continue("when the installation has finished")
+        elif "vgcfgrestore -f" in line:
+            prompt_user_enter_to_continue("when you have selected the desired .vg file")
+            introduce_command(line, send_text_option_button, show_keyboard_toggle)
+        elif "/etc/hosts" in line or "/etc/resolv.conf" in line:
+            prompt_user_enter_to_continue("when you have fixed the /etc/hosts or /etc/resolv.conf files")
+            introduce_command(line, send_text_option_button, show_keyboard_toggle)
+        elif "iscsiadm -m discovery" in line:
+            introduce_command(line, send_text_option_button, show_keyboard_toggle)
+            prompt_user_enter_to_continue("when discovery command has executed")
         else:
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
 
@@ -250,8 +260,10 @@ accept_cookies()
 go_to_course("{{ lab_environment }}", "{{ item }}")
 
 commands = get_commands("{{ chapter_url }}")
+print("Commands in the exercise")
+print("---------------------------------------")
 print(commands)
-
+print("---------------------------------------")
 open_workstation()
 qa(commands)
 
