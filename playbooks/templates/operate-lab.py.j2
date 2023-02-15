@@ -191,7 +191,7 @@ def open_workstation():
     WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
     # Open the workstation console;
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+    WebDriverWait(driver, 300).until(EC.element_to_be_clickable(
             (By.XPATH, "//*[text()='workstation']/../td[3]/button"))).click()
     # Wait for the console to open
     time.sleep(10)
@@ -207,7 +207,7 @@ def get_commands(chapter_url):
 
     time.sleep(4)
     # Get the lab name and grep it in the project git directory to find the xml file
-    lab_script_name = driver.find_element_by_xpath("//*[contains(text(),'lab start')]").text
+    lab_script_name = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, "//*[contains(text(),'lab start')]"))).text
     commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
 
     print("Commands from exercise " + str(re.findall("ch[0-9]*s[0-9]*", chapter_url)[0]))
@@ -296,7 +296,9 @@ def manage_special_commands(command, send_text_option_button, show_keyboard_togg
         introduce_command(command, send_text_option_button, show_keyboard_toggle)
         prompt_user_enter_to_continue("when discovery command has executed")
     else:
-        return 1
+        return 0
+
+    return 1
 
 # Waits a proportional time with the number of characters of the command to be pasted
 def wait_for_command_to_paste(command):
@@ -315,7 +317,7 @@ def qa(commands):
 
     for line in commands_array:
         print(line)
-
+        # Manage if the command has an exception, if there is not, just introduce_command normaly
         if not manage_special_commands(line, send_text_option_button, show_keyboard_toggle):
             introduce_command(line, send_text_option_button, show_keyboard_toggle)
 
@@ -367,13 +369,16 @@ WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
 {% endif %}
 
 {% if action == "qa" %}
+go_to_course("{{ course }}")
 start_lab("{{ course }}")
 increase_autostop("{{ course }}")
 increase_lifespan("{{ course }}")
 
 commands = get_commands("{{ chapter_url }}")
 open_workstation()
+prompt_user_enter_to_continue("when the terminal is ready to receive the commands")
 qa(commands)
+{% endif %}
 
 {% endfor %}
 

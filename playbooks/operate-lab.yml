@@ -22,6 +22,8 @@
       template:
         src: templates/operate-lab.py.j2
         dest: "/tmp/operate-lab.py"
+      tags:
+        - generate_template
 
     - name: Create courses
       shell: '/usr/bin/python3 /tmp/operate-lab.py'
