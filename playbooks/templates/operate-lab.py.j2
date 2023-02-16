@@ -30,6 +30,8 @@ def go_to_course(course_id):
     driver.get('https://rol.redhat.com/rol/app/courses/' + course_id)
 {% elif lab_environment == "rol-stage" %}
     driver.get('https://rol-factory.ole.redhat.com/rol-devel/app/courses/' + course_id)
+{% elif lab_environment == "china" %}
+        driver.get('https://rol-cn.ole.redhat.com/rol/app/courses/' + course_id)
 {% endif %}
 
 
@@ -67,6 +69,17 @@ def login():
         driver.find_element("xpath", '//*[@id="password"]').send_keys("{{ github_password }}")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/form/div/input[11]'))).click()
+
+{% elif lab_environment == "china" %}
+
+        driver.get('https://rol-cn.ole.redhat.com/rol/app/login/local')
+        login_button = WebDriverWait(driver, 200).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="login_button"]')))
+
+        WebDriverWait(driver, 200).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("rhls_test_basic_cn_003")
+        WebDriverWait(driver, 200).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys("redhat123")
+        login_button.click()
+
 {% endif %}
 
     except:
@@ -101,7 +114,7 @@ def start_lab(course_id):
         # Click on Start lab
         try:
             # Not sure why it fails on rol-stage
-            WebDriverWait(driver, 2).until(EC.element_to_be_clickable(
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
                 (By.XPATH, "//*[text()='Start']"))).click()
         except:
             WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
@@ -119,7 +132,7 @@ def delete_lab(course_id):
             (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
         try:
             # Not sure why it fails on rol-stage
-            WebDriverWait(driver, 2).until(EC.element_to_be_clickable(
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
                 (By.XPATH, '//*[text()="Delete"]'))).click()
         except:
             WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
@@ -196,13 +209,16 @@ def open_workstation():
     # Wait for the console to open
     time.sleep(10)
     handles = driver.window_handles
-    newHandle = handles[1]
+    driver.switch_to.window(handles[1])
 
-    driver.switch_to.window(newHandle)
+    # Open virtual keyboard
+    time.sleep(5)
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '//*[@id="showKeyboard"]'))).click()
 
 # Gets a list of the commands from the current section
-def get_commands(chapter_url):
-    driver.get(chapter_url)
+def get_commands(course, chapter_and_section):
+    go_to_course(course + "/pages/" + chapter_and_section)
     WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
 
     time.sleep(4)
@@ -210,7 +226,7 @@ def get_commands(chapter_url):
     lab_script_name = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, "//*[contains(text(),'lab start')]"))).text
     commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
 
-    print("Commands from exercise " + str(re.findall("ch[0-9]*s[0-9]*", chapter_url)[0]))
+    print("Commands from exercise " + chapter_and_section)
     print("---------------------------------------")
     print(commands)
     print("---------------------------------------")
@@ -219,22 +235,24 @@ def get_commands(chapter_url):
 
 # Uses the Text button function to paste and the Digital Keyboard UI to execute it
 def introduce_command(command, send_text_option_button, show_keyboard_toggle):
-    # Open text dialog
-    send_text_option_button.click()
-    # Paste command into text box
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-        (By.XPATH, '//*[@id="sendTextInput"]'))).send_keys(command)
-    # Click Send button to send the command
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-        (By.XPATH, '//*[@id="sendTextButton"]'))).click()
-    # time.sleep depending on the length of the command
-    wait_for_command_to_paste(command)
-    # Show keyboard and click Enter
-    show_keyboard_toggle.click()
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-        (By.XPATH, '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'))).click()
-    # Hide keyboard
-    show_keyboard_toggle.click()
+    if command != '':
+        # Open text dialog
+        send_text_option_button.click()
+        # Paste command into text box
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="sendTextInput"]'))).send_keys(command)
+        # Click Send button to send the command
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="sendTextButton"]'))).click()
+        # time.sleep depending on the length of the command
+        wait_for_command_to_paste(command)
+        # Show keyboard
+        #show_keyboard_toggle.click()
+        # Click Enter
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'))).click()
+        # Hide keyboard
+        #show_keyboard_toggle.click()
 
 # Prompts for user input to continue the execution of the QA
 def prompt_user_enter_to_continue(custom_message):
@@ -290,7 +308,7 @@ def manage_special_commands(command, send_text_option_button, show_keyboard_togg
         prompt_user_enter_to_continue("when you have selected the desired .vg file")
         introduce_command(command, send_text_option_button, show_keyboard_toggle)
     elif "/etc/hosts" in command or "/etc/resolv.conf" in command:
-        prompt_user_enter_to_continue("when you have fixed the /etc/hosts or /etc/resolv.conf files")
+        prompt_user_enter_to_continue("when you have reviewed/fixed the /etc/hosts or /etc/resolv.conf files")
         introduce_command(command, send_text_option_button, show_keyboard_toggle)
     elif "iscsiadm -m discovery" in command:
         introduce_command(command, send_text_option_button, show_keyboard_toggle)
@@ -304,7 +322,27 @@ def manage_special_commands(command, send_text_option_button, show_keyboard_togg
 def wait_for_command_to_paste(command):
     time.sleep(len(command) * 0.1)
 
+def get_ge_and_labs(course):
+    go_to_course(course)
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
+    time.sleep(1)
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-1"]'))).click()
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-1"]'))).click()
+    chapter_and_section_list = []
 
+    num_rows = len(driver.find_elements('xpath', '//*[@id="tab-course-toc"]/tbody/tr'))
+
+    for t_row in range(1, (num_rows + 1)):
+        title = driver.find_element('xpath', '//*[@id="tab-course-toc"]/tbody/tr[' + str(t_row) + ']/td').text
+        title_href = driver.find_element('xpath', '//*[@id="tab-course-toc"]/tbody/tr[' + str(t_row) + ']/td/div/a').get_attribute("href")
+
+        if "Guided Exercise: " in title or "Lab: " in title:
+            print(title)
+            chapter_and_section = str(re.findall("ch[0-9]*s[0-9]*", title_href)[0])
+            print("Section: " + chapter_and_section)
+            chapter_and_section_list.append(chapter_and_section)
+
+    return chapter_and_section_list
 
 # Receives a list of the commands of the section
 def qa(commands):
@@ -315,27 +353,41 @@ def qa(commands):
 
     commands_array = commands.split("\n")
 
-    for line in commands_array:
-        print(line)
+    for i in range(len(commands_array)):
+        print("Introducing: " + commands_array[i])
+        if i + 1 < len(commands_array):
+            print("Next command: " + commands_array[i + 1])
+            print('-------------------------------------------------')
         # Manage if the command has an exception, if there is not, just introduce_command normaly
-        if not manage_special_commands(line, send_text_option_button, show_keyboard_toggle):
-            introduce_command(line, send_text_option_button, show_keyboard_toggle)
+        if not manage_special_commands(commands_array[i], send_text_option_button, show_keyboard_toggle):
+            introduce_command(commands_array[i], send_text_option_button, show_keyboard_toggle)
 
         # Standard time for command to execute
         time.sleep(3)
 
+def toggle_tab(tab):
+    handles = driver.window_handles
+    if tab == "console":
+        driver.switch_to.window(handles[1])
+    elif tab == "guide":
+        driver.switch_to.window(handles[0])
 
 ## Main
-
+{% if lab_environment == "rol" or lab_environment == "rol-stage" %}
 go_to_course("rh124-9.0")
 accept_cookies()
 login()
+{% endif %}
 
 {% for course in course_id -%}
-
+{% if lab_environment == "rol" or lab_environment == "rol-stage" %}
 accept_cookies()
+{% endif %}
 
 {% if action == "start" %}
+{% if lab_environment == "china" %}
+login()
+{% endif %}
 go_to_course("{{ course }}")
 start_lab("{{ course }}")
 increase_autostop("{{ course }}")
@@ -343,17 +395,26 @@ increase_lifespan("{{ course }}")
 {% endif %}
 
 {% if action == "create" %}
+{% if lab_environment == "china" %}
+login()
+{% endif %}
 go_to_course("{{ course }}")
 create_lab("{{ course }}")
 increase_lifespan("{{ course }}")
 {% endif %}
 
 {% if action == "delete" %}
+{% if lab_environment == "china" %}
+login()
+{% endif %}
 go_to_course("{{ course }}")
 delete_lab("{{ course }}")
 {% endif %}
 
 {% if action == "recreate" %}
+{% if lab_environment == "china" %}
+login()
+{% endif %}
 go_to_course("{{ course }}")
 delete_lab("{{ course }}")
 create_lab("{{ course }}")
@@ -369,15 +430,43 @@ WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
 {% endif %}
 
 {% if action == "qa" %}
-go_to_course("{{ course }}")
-start_lab("{{ course }}")
-increase_autostop("{{ course }}")
-increase_lifespan("{{ course }}")
 
-commands = get_commands("{{ chapter_url }}")
-open_workstation()
-prompt_user_enter_to_continue("when the terminal is ready to receive the commands")
-qa(commands)
+{% if lab_environment == "china" %}
+login()
+WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
+{% endif %}
+
+ge_and_labs_list = get_ge_and_labs("{{ course }}")
+
+WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+try:
+    lab_button_status = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[3]/button[2]'))).text
+except:
+    lab_button_status = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[3]/div/section/div[2]/div/div[3]/div/div/div[2]/button[2]'))).text
+
+# If button shows Stop, it's started
+if lab_button_status != "STOP":
+    start_lab("{{ course }}")
+    increase_autostop("{{ course }}")
+    increase_lifespan("{{ course }}")
+
+on_track = False
+for section in ge_and_labs_list:
+    # If section is current execute the qa
+    if section == "{{ chapter_and_section }}":
+        on_track = True
+        open_workstation()
+    if on_track:
+        toggle_tab("guide")
+        commands = get_commands("{{ course }}", section)
+        toggle_tab("console")
+        print("CURRENT SECTION: " + section)
+        prompt_user_enter_to_continue("when the terminal is ready to receive the commands")
+        qa(commands)
+        prompt_user_enter_to_continue("to continue with the next exercise")
+
+
+
 {% endif %}
 
 {% endfor %}
