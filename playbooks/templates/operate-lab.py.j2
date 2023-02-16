@@ -207,12 +207,12 @@ def open_workstation():
     WebDriverWait(driver, 300).until(EC.element_to_be_clickable(
             (By.XPATH, "//*[text()='workstation']/../td[3]/button"))).click()
     # Wait for the console to open
-    time.sleep(10)
+    time.sleep(5)
     handles = driver.window_handles
     driver.switch_to.window(handles[1])
 
     # Open virtual keyboard
-    time.sleep(5)
+    time.sleep(2)
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="showKeyboard"]'))).click()
 
@@ -224,7 +224,7 @@ def get_commands(course, chapter_and_section):
     time.sleep(4)
     # Get the lab name and grep it in the project git directory to find the xml file
     lab_script_name = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, "//*[contains(text(),'lab start')]"))).text
-    course_no_version = course.split("-", course)[0]
+    course_no_version = course.split("-")[0]
     commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/" + course_no_version + "/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
 
     print("Commands from exercise " + chapter_and_section)
@@ -440,13 +440,11 @@ WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="
 ge_and_labs_list = get_ge_and_labs("{{ course }}")
 
 WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-try:
-    lab_button_status = WebDriverWait(driver, 90).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[3]/button[2]'))).text
-except:
-    lab_button_status = WebDriverWait(driver, 90).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[3]/div/section/div[2]/div/div[3]/div/div/div[2]/button[2]'))).text
+
+lab_button_status = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Create") or contains(text(), "Start") or contains(text(), "Stop")]'))).text
 
 # If button shows Stop, it's started
-if lab_button_status != "STOP":
+if lab_button_status == "CREATE" or lab_button_status == "START":
     start_lab("{{ course }}")
     increase_autostop("{{ course }}")
     increase_lifespan("{{ course }}")
