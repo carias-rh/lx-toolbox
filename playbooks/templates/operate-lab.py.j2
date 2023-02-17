@@ -136,7 +136,7 @@ def select_lab_environment_tab():
 def check_lab_status_button():
     # Check lab status and start it if stopped or not created
     select_lab_environment_tab()
-    lab_status_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Create") or contains(text(), "Start") or contains(text(), "Stop")]'))).text
+    lab_status_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Create") or contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
     return lab_status_button
 
 def create_lab(course_id):
@@ -180,7 +180,7 @@ def increase_autostop(course_id):
     try:
         select_lab_environment_tab()
         # Wait until lab has been created and is running
-        time.sleep(20)
+        time.sleep(30)
 
         increase_autostop = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
@@ -259,10 +259,8 @@ def get_commands(course, chapter_and_section):
     course_no_version = course.split("-")[0]
     commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/" + course_no_version + "/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
 
-
-    print("-----------------------------------------")
     print(commands)
-    print("-----------------------------------------")
+    print("#####################################")
 
     return str(commands)
 
@@ -295,11 +293,15 @@ def prompt_user_enter_to_continue(custom_message):
 # This function includes the whole list of exceptions that are not just enter a command and press enter
 def manage_special_commands(command, send_text_option_button, show_keyboard_toggle):
 
-    if "lab start" in command or "lab finish" in command or "lab grade" in command:
+    if "lab start" in command or "lab grade" in command:
         command = "date; time " + command
         introduce_command(command, send_text_option_button, show_keyboard_toggle)
         # Wait for user to continue after the lab script has executed
         prompt_user_enter_to_continue("with the exercise")
+    elif "lab finish" in command:
+        command = "date; time " + command
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        print("##############  Exercise completed ##############")
     elif "ssh" in command:
         introduce_command(command, send_text_option_button, show_keyboard_toggle)
         prompt_user_enter_to_continue("after the ssh")
@@ -326,6 +328,10 @@ def manage_special_commands(command, send_text_option_button, show_keyboard_togg
     elif "systemctl restart" in command or "daemon-reload" in command:
         prompt_user_enter_to_continue(
             "if you made sure that the new configuration is in place to 'systemctl restart service'")
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+    elif "journalctl" in command:
+        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        command = " \n"
         introduce_command(command, send_text_option_button, show_keyboard_toggle)
     elif "ping" in command and not "ansible" in command:
         if not "-c" in command:
@@ -391,16 +397,17 @@ def qa(commands):
     commands_array = commands.split("\n")
 
     for i in range(len(commands_array)):
-        print("Introducing: " + commands_array[i])
-        if i + 1 < len(commands_array):
-            print("Next command: " + commands_array[i + 1])
-            print('-------------------------------------------------')
-        # Manage if the command has an exception, if there is not, just introduce_command normaly
-        if not manage_special_commands(commands_array[i], send_text_option_button, show_keyboard_toggle):
-            introduce_command(commands_array[i], send_text_option_button, show_keyboard_toggle)
+        if commands_array[i] != '':
+            print("Introducing: " + commands_array[i])
+            if i + 1 < len(commands_array):
+                print("Next command: " + commands_array[i + 1])
+                print('-------------------------------------------------')
+            # Manage if the command has an exception, if there is not, just introduce_command normaly
+            if not manage_special_commands(commands_array[i], send_text_option_button, show_keyboard_toggle):
+                introduce_command(commands_array[i], send_text_option_button, show_keyboard_toggle)
 
-        # Standard time for command to execute
-        time.sleep(3)
+            # Standard time for command to execute
+            time.sleep(3)
 
 def toggle_tab(tab):
     handles = driver.window_handles
@@ -500,7 +507,7 @@ if lab_status_button == "START":
 elif lab_status_button == "CREATE":
     create_lab("{{ course }}")
 
-if lab_status_button != "STOP":
+if lab_status_button == "STOP" or lab_status_button == "STARTING":
     increase_autostop("{{ course }}")
     increase_lifespan("{{ course }}")
 
