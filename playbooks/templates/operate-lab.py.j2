@@ -11,6 +11,7 @@ from selenium.webdriver.common.by import By
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1600,1200")
+options.add_argument("headless")
 options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/intercom-profile")
 
 # Define the webdriver to use.
@@ -24,6 +25,16 @@ driver.install_addon(os.path.expanduser('{{ playbook_dir }}/../copy_on_select-1.
 driver.maximize_window()
 {% endif -%}
 
+counter = 1
+# Prints the current step
+def step(step_str, patience = 1):
+    global counter
+    print('#####################################')
+    print(str(counter) + ": " + step_str)
+    print('#####################################')
+    counter += 1
+    time.sleep(patience)
+
 # Go to the course site
 def go_to_course(course_id):
 {% if lab_environment == "rol" %}
@@ -31,11 +42,12 @@ def go_to_course(course_id):
 {% elif lab_environment == "rol-stage" %}
     driver.get('https://rol-factory.ole.redhat.com/rol-devel/app/courses/' + course_id)
 {% elif lab_environment == "china" %}
-        driver.get('https://rol-cn.ole.redhat.com/rol/app/courses/' + course_id)
+    driver.get('https://rol-cn.ole.redhat.com/rol/app/courses/' + course_id)
 {% endif %}
 
 
 def login():
+    step("Login into '{{ lab_environment }}' environment")
     try:
 {% if lab_environment == "rol" %}
 
@@ -73,11 +85,10 @@ def login():
 {% elif lab_environment == "china" %}
 
         driver.get('https://rol-cn.ole.redhat.com/rol/app/login/local')
-        login_button = WebDriverWait(driver, 200).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="login_button"]')))
-
         WebDriverWait(driver, 200).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("rhls_test_basic_cn_003")
-        WebDriverWait(driver, 200).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys("redhat123")
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys("redhat123")
+        login_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[1]/div/div/form/button')))
+        time.sleep(0.5)
         login_button.click()
 
 {% endif %}
@@ -86,6 +97,7 @@ def login():
         print("An exception occurred while accepting during login")
 
 def accept_cookies():
+    step("Accepting cookies")
     try:
         WebDriverWait(driver, 10).until(
             EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
@@ -95,30 +107,35 @@ def accept_cookies():
     except:
         print("An exception occurred while accepting cookies")
 
+def select_lab_environment_tab():
+    try:
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
+                (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+    except:
+        print("Lab environment tab not found")
+
+def check_lab_status_button():
+    # Check lab status and start it if stopped or not created
+    select_lab_environment_tab()
+    lab_status_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Create") or contains(text(), "Start") or contains(text(), "Stop")]'))).text
+    return lab_status_button
 
 def create_lab(course_id):
+    step("Creating lab")
     try:
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-        WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[text()="Create"]'))).click()
+        select_lab_environment_tab()
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Create")]'))).click()
     except:
         print(
             "An exception occurred during lab creation in course " + course_id)
 
 
 def start_lab(course_id):
+    step("Starting lab")
     try:
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+        select_lab_environment_tab()
         # Click on Start lab
-        try:
-            # Not sure why it fails on rol-stage
-            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-                (By.XPATH, "//*[text()='Start']"))).click()
-        except:
-            WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
-                (By.XPATH, "/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[3]/button[2]"))).click()
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Start")]'))).click()
 
     except:
         print("An exception occurred during lab start in course " + course_id)
@@ -126,18 +143,11 @@ def start_lab(course_id):
 
 
 def delete_lab(course_id):
+    step("Deleting lab")
     try:
-        driver.refresh()
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-        try:
-            # Not sure why it fails on rol-stage
-            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-                (By.XPATH, '//*[text()="Delete"]'))).click()
-        except:
-            WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
-                (By.XPATH, "/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[2]/button"))).click()
-
+        select_lab_environment_tab()
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Delete")]'))).click()
+        # Confirm deletion
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[3]/div[2]/div/div/div[2]/button[1]'))).click()
         time.sleep(20)
@@ -147,9 +157,10 @@ def delete_lab(course_id):
         print("An exception occurred during lab deletion in course " + course_id)
 
 def increase_autostop(course_id):
+    step("Increasing auto-stop counter")
     try:
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
+        select_lab_environment_tab()
+        # Wait until lab has been created and is running
         time.sleep(20)
 
         increase_autostop = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
@@ -163,11 +174,9 @@ def increase_autostop(course_id):
 
 
 def increase_lifespan(course_id):
+    step("Increasing auto-destroy counter")
     try:
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-        time.sleep(2)
-
+        select_lab_environment_tab()
         increase_lifespan = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')))
 
@@ -178,6 +187,7 @@ def increase_lifespan(course_id):
 
 
 def impersonate():
+    step("Impersonating user '{{ impersonate_username }}'")
     try:
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[text()="Switch user"]'))).click()
@@ -194,10 +204,12 @@ def impersonate():
 
     except:
         print("An exception occurred while impersonating {{ impersonate_username }}")
+        time.sleep(10)
         impersonate()
 
 # Looks for the workstation console button and opens the console in a new tab
 def open_workstation():
+    step("Opening workstation console")
     driver.refresh()
     time.sleep(3)
     # Open the Lab Environment tab
@@ -207,7 +219,7 @@ def open_workstation():
     WebDriverWait(driver, 300).until(EC.element_to_be_clickable(
             (By.XPATH, "//*[text()='workstation']/../td[3]/button"))).click()
     # Wait for the console to open
-    time.sleep(5)
+    time.sleep(10)
     handles = driver.window_handles
     driver.switch_to.window(handles[1])
 
@@ -218,19 +230,20 @@ def open_workstation():
 
 # Gets a list of the commands from the current section
 def get_commands(course, chapter_and_section):
+    step("Getting commands from exercise " + chapter_and_section)
     go_to_course(course + "/pages/" + chapter_and_section)
-    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
-
+    # Wait for the site to be ready
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
     time.sleep(4)
     # Get the lab name and grep it in the project git directory to find the xml file
     lab_script_name = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, "//*[contains(text(),'lab start')]"))).text
     course_no_version = course.split("-")[0]
     commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/" + course_no_version + "/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
 
-    print("Commands from exercise " + chapter_and_section)
-    print("---------------------------------------")
+
+    print("-----------------------------------------")
     print(commands)
-    print("---------------------------------------")
+    print("-----------------------------------------")
 
     return str(commands)
 
@@ -324,11 +337,14 @@ def wait_for_command_to_paste(command):
     time.sleep(len(command) * 0.1)
 
 def get_ge_and_labs(course):
+    step("Getting the list of Guided Exercises and Labs")
     go_to_course(course)
-    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
-    time.sleep(1)
-    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-1"]'))).click()
-    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-1"]'))).click()
+
+    # Wait for the site to be ready
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
+
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-1"]'))).click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-1"]'))).click()
     chapter_and_section_list = []
 
     num_rows = len(driver.find_elements('xpath', '//*[@id="tab-course-toc"]/tbody/tr'))
@@ -347,8 +363,9 @@ def get_ge_and_labs(course):
 
 # Receives a list of the commands of the section
 def qa(commands):
+    step("Starting QA")
     send_text_option_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="showSendTextDialog"]')))
+        (By.XPATH, '//*[@id="showSendTextDialog"]')))
     show_keyboard_toggle = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="showKeyboard"]')))
 
@@ -390,9 +407,11 @@ accept_cookies()
 login()
 {% endif %}
 go_to_course("{{ course }}")
-start_lab("{{ course }}")
-increase_autostop("{{ course }}")
-increase_lifespan("{{ course }}")
+lab_status_button = check_lab_status_button()
+if lab_status_button == "CREATE" or lab_status_button == "START":
+    start_lab("{{ course }}")
+    increase_autostop("{{ course }}")
+    increase_lifespan("{{ course }}")
 {% endif %}
 
 {% if action == "create" %}
@@ -400,8 +419,10 @@ increase_lifespan("{{ course }}")
 login()
 {% endif %}
 go_to_course("{{ course }}")
-create_lab("{{ course }}")
-increase_lifespan("{{ course }}")
+lab_status_button = check_lab_status_button()
+if lab_status_button == "CREATE":
+    create_lab("{{ course }}")
+    increase_lifespan("{{ course }}")
 {% endif %}
 
 {% if action == "delete" %}
@@ -409,7 +430,9 @@ increase_lifespan("{{ course }}")
 login()
 {% endif %}
 go_to_course("{{ course }}")
-delete_lab("{{ course }}")
+lab_status_button = check_lab_status_button()
+if lab_status_button != "CREATE":
+    delete_lab("{{ course }}")
 {% endif %}
 
 {% if action == "recreate" %}
@@ -417,39 +440,44 @@ delete_lab("{{ course }}")
 login()
 {% endif %}
 go_to_course("{{ course }}")
-delete_lab("{{ course }}")
-create_lab("{{ course }}")
-increase_autostop("{{ course }}")
-increase_lifespan("{{ course }}")
+lab_status_button = check_lab_status_button()
+if lab_status_button == "STOP" or lab_status_button == "START":
+    delete_lab("{{ course }}")
+    create_lab("{{ course }}")
+    increase_autostop("{{ course }}")
+    increase_lifespan("{{ course }}")
+elif lab_status_button == "CREATE":
+    create_lab("{{ course }}")
+    increase_autostop("{{ course }}")
+    increase_lifespan("{{ course }}")
 {% endif %}
 
 {% if action == "impersonate" %}
 impersonate()
 go_to_course("{{ course }}")
-WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+select_lab_environment_tab()
 {% endif %}
 
 {% if action == "qa" %}
 
 {% if lab_environment == "china" %}
 login()
-WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
+# Wait for the site to be ready
+WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
+go_to_course("{{ course }}")
 {% endif %}
 
-ge_and_labs_list = get_ge_and_labs("{{ course }}")
-
-WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-
-lab_button_status = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Create") or contains(text(), "Start") or contains(text(), "Stop")]'))).text
-
-# If button shows Stop, it's started
-if lab_button_status == "CREATE" or lab_button_status == "START":
+lab_status_button = check_lab_status_button()
+if lab_status_button == "CREATE" or lab_status_button == "START":
     start_lab("{{ course }}")
     increase_autostop("{{ course }}")
     increase_lifespan("{{ course }}")
 
+
+ge_and_labs_list = get_ge_and_labs("{{ course }}")
+
 on_track = False
+print("Starting Section: {{ chapter_and_section }}")
 for section in ge_and_labs_list:
     # If section is current execute the qa
     if section == "{{ chapter_and_section }}":
@@ -459,10 +487,10 @@ for section in ge_and_labs_list:
         toggle_tab("guide")
         commands = get_commands("{{ course }}", section)
         toggle_tab("console")
-        print("CURRENT SECTION: " + section)
+        print("Current Section: " + section)
         prompt_user_enter_to_continue("when the terminal is ready to receive the commands")
         qa(commands)
-        prompt_user_enter_to_continue("to continue with the next exercise")
+        prompt_user_enter_to_continue("to continue with the NEXT exercise ")
 
 
 

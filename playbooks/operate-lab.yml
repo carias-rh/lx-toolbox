@@ -21,10 +21,13 @@
     - name: Generate selenium script
       template:
         src: templates/operate-lab.py.j2
-        dest: "/tmp/operate-lab.py"
+        dest: "/tmp/{{ action }}-{{ item }}.py"
+      loop: "{{ course_id }}"
+
       tags:
         - generate_template
 
     - name: Create courses
-      shell: '/usr/bin/python3 /tmp/operate-lab.py'
-      register: selenium
+      shell: '/usr/bin/python3 /tmp/{{ action }}-{{ item }}.py'
+      loop: "{{ course_id }}"
+      when: '"qa" != action'
