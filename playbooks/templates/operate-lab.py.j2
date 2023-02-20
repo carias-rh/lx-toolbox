@@ -11,7 +11,9 @@ from selenium.webdriver.common.by import By
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1600,1200")
+{% if action == "qa" %}
 options.add_argument("headless")
+{% endif %}
 options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/intercom-profile")
 
 # Define the webdriver to use.
@@ -31,7 +33,6 @@ def step(step_str, patience = 1):
     global counter
     print('#####################################')
     print(str(counter) + ": " + step_str)
-    print('#####################################')
     counter += 1
     time.sleep(patience)
 
@@ -44,6 +45,7 @@ def go_to_course(course_id):
 {% elif lab_environment == "china" %}
     driver.get('https://rol-cn.ole.redhat.com/rol/app/courses/' + course_id)
 {% endif %}
+    time.sleep(2)
 
 
 def login():
@@ -100,17 +102,6 @@ def accept_cookies():
     step("Accepting cookies")
     try:
         WebDriverWait(driver, 10).until(
-            EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Consent Manager Frame"]')))
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
-        driver.refresh()
-    except:
-        print("An exception occurred while accepting cookies")
-
-def accept_cookies_stage():
-    step("Accepting cookies on rol-stage")
-    try:
-        WebDriverWait(driver, 10).until(
             EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
@@ -121,45 +112,68 @@ def accept_cookies_stage():
 def wait_for_site_to_be_ready():
 {% if lab_environment == "rol" or lab_environment == "china" %}
     WebDriverWait(driver, 40).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
-{% endif %}
-{% if lab_environment == "rol-stage" %}
+{% elif lab_environment == "rol-stage" %}
     WebDriverWait(driver, 40).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
 {% endif %}
 
+def check_lab_status_button():
+    # Check lab status and start it if stopped or not created. The exception is needed because some courses don't work with the function contains(text(),"")
+    try:
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"][contains(text(), "Create") or contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Delete")]'))).text
+    except:
+{% if lab_environment == "rol" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div/div[3]/button'))).text
+{% elif lab_environment == "rol-stage" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[2]/button'))).text
+{% elif lab_environment == "china" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div/div[2]/button'))).text
+{% endif %}
+
+    return lab_status_button
+
 def select_lab_environment_tab():
     try:
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
-                (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
-    except:
-        print("Lab environment tab not found")
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
+        time.sleep(0.1)
+        lab_environment_tab_status = WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-8"]'))).get_attribute("aria-selected")
 
-def check_lab_status_button():
-    # Check lab status and start it if stopped or not created
-    select_lab_environment_tab()
-    lab_status_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Create") or contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
-    return lab_status_button
+        # If tab Lab Environment is not selected, retry
+        if not lab_environment_tab_status == "true":
+            time.sleep(0.1)
+            select_lab_environment_tab()
+    except:
+        print("Lab environment tab not selected succesfully")
+
 
 def create_lab(course_id):
     step("Creating lab")
     try:
         select_lab_environment_tab()
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Create")]'))).click()
+        WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Create")]'))).click()
     except:
-        print(
-            "An exception occurred during lab creation in course " + course_id)
-
+{% if lab_environment == "rol" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div/div[3]/button'))).click()
+{% elif lab_environment == "rol-stage" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[2]/button'))).click()
+{% elif lab_environment == "china" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div/div[2]/button'))).click()
+{% endif %}
+    time.sleep(5)
 
 def start_lab(course_id):
     step("Starting lab")
     try:
         select_lab_environment_tab()
-        # Click on Start lab
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Start")]'))).click()
-
     except:
-        print("An exception occurred during lab start in course " + course_id)
-        create_lab(course_id)
-
+{% if lab_environment == "rol" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div/div[3]/button[2]'))).click()
+{% elif lab_environment == "rol-stage" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[2]/button[2]'))).click()
+{% elif lab_environment == "china" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[1]/div[2]/button[2]'))).click()
+{% endif %}
+    time.sleep(5)
 
 def delete_lab(course_id):
     step("Deleting lab")
@@ -170,9 +184,14 @@ def delete_lab(course_id):
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[3]/div[2]/div/div/div[2]/button[1]'))).click()
         time.sleep(20)
-
-
     except:
+{% if lab_environment == "rol" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[1]/div[3]/button[1]'))).click()
+{% elif lab_environment == "rol-stage" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[3]/button[1]'))).click()
+{% elif lab_environment == "china" %}
+        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[2]/div/section/div[2]/div/div[3]/div/div/div[1]/div[2]/button[1]'))).click()
+{% endif %}
         print("An exception occurred during lab deletion in course " + course_id)
 
 def increase_autostop(course_id):
@@ -188,8 +207,7 @@ def increase_autostop(course_id):
         for i in range(30):
             increase_autostop.click()
     except:
-        print(
-            "An exception occurred during lifespan extension in course " + course_id)
+        pass
 
 
 def increase_lifespan(course_id):
@@ -198,16 +216,18 @@ def increase_lifespan(course_id):
         select_lab_environment_tab()
         increase_lifespan = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')))
+        time.sleep(3)
 
         for i in range(30):
             increase_lifespan.click()
     except:
-        print("An exception occurred during lifespan extension in course " + course_id)
+        pass
 
 
 def impersonate():
     step("Impersonating user '{{ impersonate_username }}'")
     try:
+        driver.refresh()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[text()="Switch user"]'))).click()
 
@@ -219,11 +239,10 @@ def impersonate():
         driver.find_element("xpath", "/html/body/div[3]/div[2]/div/div/div[2]/form/button").click()
         time.sleep(5)
 
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,'/html/body/div[1]/div[2]')))
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/button')))
 
     except:
         print("An exception occurred while impersonating {{ impersonate_username }}")
-        time.sleep(10)
         impersonate()
 
 # Looks for the workstation console button and opens the console in a new tab
@@ -235,8 +254,10 @@ def open_workstation():
     WebDriverWait(driver, 30).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="course-tabs-tab-8"]/span[2]'))).click()
     # Open the workstation console;
-    WebDriverWait(driver, 300).until(EC.element_to_be_clickable(
-            (By.XPATH, "//*[text()='workstation']/../td[3]/button"))).click()
+    open_workstation_console = WebDriverWait(driver, 300).until(EC.element_to_be_clickable(
+            (By.XPATH, "//*[text()='workstation']/../td[3]/button")))
+    time.sleep(3)
+    open_workstation_console.click()
     # Wait for the console to open
     time.sleep(10)
     handles = driver.window_handles
@@ -265,7 +286,7 @@ def get_commands(course, chapter_and_section):
     return str(commands)
 
 # Uses the Text button function to paste and the Digital Keyboard UI to execute it
-def introduce_command(command, send_text_option_button, show_keyboard_toggle):
+def introduce_command(command, send_text_option_button):
     if command != '':
         # Open text dialog
         send_text_option_button.click()
@@ -277,13 +298,9 @@ def introduce_command(command, send_text_option_button, show_keyboard_toggle):
             (By.XPATH, '//*[@id="sendTextButton"]'))).click()
         # time.sleep depending on the length of the command
         wait_for_command_to_paste(command)
-        # Show keyboard
-        #show_keyboard_toggle.click()
         # Click Enter
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'))).click()
-        # Hide keyboard
-        #show_keyboard_toggle.click()
 
 # Prompts for user input to continue the execution of the QA
 def prompt_user_enter_to_continue(custom_message):
@@ -291,66 +308,69 @@ def prompt_user_enter_to_continue(custom_message):
     input("Press Enter to continue " + custom_message + "\n")
 
 # This function includes the whole list of exceptions that are not just enter a command and press enter
-def manage_special_commands(command, send_text_option_button, show_keyboard_toggle):
+def manage_special_commands(command, send_text_option_button):
 
     if "lab start" in command or "lab grade" in command:
         command = "date; time " + command
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
         # Wait for user to continue after the lab script has executed
         prompt_user_enter_to_continue("with the exercise")
+    elif "lab grade" in command:
+        command = "date; time " + command
+        introduce_command(command, send_text_option_button)
     elif "lab finish" in command:
         command = "date; time " + command
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
         print("##############  Exercise completed ##############")
     elif "ssh" in command:
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
         prompt_user_enter_to_continue("after the ssh")
     elif "ansible" in command:
         # Wait for user to continue after the playbook has been reviewed/created
         prompt_user_enter_to_continue("if you did review/create the playbook")
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
         prompt_user_enter_to_continue("if playbook finished")
     elif "ok=" in command or "failed=" in command:
         print("skipping output")
-    elif "vim" in command:
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+    elif "vim " in command or "vi " in command:
+        introduce_command(command, send_text_option_button)
         prompt_user_enter_to_continue("if you did review/create the file")
     elif "Enter" in command:
         command = "\n"
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
     elif "less" in command:
         command = command.replace("less", "cat")
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
     elif "systemctl status" in command:
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
         command = "q\n"
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
     elif "systemctl restart" in command or "daemon-reload" in command:
         prompt_user_enter_to_continue(
             "if you made sure that the new configuration is in place to 'systemctl restart service'")
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
     elif "journalctl" in command:
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
         command = " \n"
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
     elif "ping" in command and not "ansible" in command:
         if not "-c" in command:
             command = command + " -c2"
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
-    elif "yum install" in command or "yum reinstall" in command:
+        introduce_command(command, send_text_option_button)
+    elif "yum install" in command or "yum reinstall" in command or "yum remove" in command:
         if not "-y" in command:
             command = command + " -y"
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
         # Wait for user to continue after yum has executed
         prompt_user_enter_to_continue("when the installation has finished")
     elif "vgcfgrestore -f" in command:
         prompt_user_enter_to_continue("when you have selected the desired .vg file")
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
     elif "/etc/hosts" in command or "/etc/resolv.conf" in command:
         prompt_user_enter_to_continue("when you have reviewed/fixed the /etc/hosts or /etc/resolv.conf files")
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
     elif "iscsiadm -m discovery" in command:
-        introduce_command(command, send_text_option_button, show_keyboard_toggle)
+        introduce_command(command, send_text_option_button)
         prompt_user_enter_to_continue("when discovery command has executed")
     else:
         return 0
@@ -369,7 +389,9 @@ def get_ge_and_labs(course):
     wait_for_site_to_be_ready()
 
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-1"]'))).click()
+    time.sleep(2)
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-tab-1"]'))).click()
+
     chapter_and_section_list = []
 
     num_rows = len(driver.find_elements('xpath', '//*[@id="tab-course-toc"]/tbody/tr'))
@@ -417,32 +439,37 @@ def toggle_tab(tab):
         driver.switch_to.window(handles[0])
 
 ## Main
-{% if lab_environment == "rol" or lab_environment == "rol-stage" %}
+# Rol prod, rol-stage and china environments are different on login and cookies
+{% if lab_environment == "rol" %}
 go_to_course("rh124-9.0")
 accept_cookies()
 login()
+accept_cookies()
+{% endif %}
+
+{% if lab_environment == "rol-stage" %}
+go_to_course("rh124-9.0")
+login()
+accept_cookies()
 {% endif %}
 
 {% for course in course_id -%}
-{% if lab_environment == "rol" %}
-accept_cookies()
-{% endif %}
-{% if lab_environment == "rol-stage" %}
-accept_cookies_stage()
-{% endif %}
 
 {% if action == "start" %}
 
 {% if lab_environment == "china" %}
 login()
-
 {% endif %}
+wait_for_site_to_be_ready()
 go_to_course("{{ course }}")
+select_lab_environment_tab()
 lab_status_button = check_lab_status_button()
-if lab_status_button == "CREATE" or lab_status_button == "START":
+if lab_status_button == "CREATE":
+    create_lab("{{ course }}")
+elif lab_status_button == "START" or lab_status_button == "DELETE":
     start_lab("{{ course }}")
-    increase_autostop("{{ course }}")
-    increase_lifespan("{{ course }}")
+increase_autostop("{{ course }}")
+increase_lifespan("{{ course }}")
 {% endif %}
 
 {% if action == "create" %}
@@ -450,19 +477,22 @@ if lab_status_button == "CREATE" or lab_status_button == "START":
 {% if lab_environment == "china" %}
 login()
 {% endif %}
-
+wait_for_site_to_be_ready()
 go_to_course("{{ course }}")
+select_lab_environment_tab()
 lab_status_button = check_lab_status_button()
 if lab_status_button == "CREATE":
     create_lab("{{ course }}")
-    increase_lifespan("{{ course }}")
+increase_lifespan("{{ course }}")
 {% endif %}
 
 {% if action == "delete" %}
 {% if lab_environment == "china" %}
 login()
 {% endif %}
+wait_for_site_to_be_ready()
 go_to_course("{{ course }}")
+select_lab_environment_tab()
 lab_status_button = check_lab_status_button()
 if lab_status_button != "CREATE":
     delete_lab("{{ course }}")
@@ -472,20 +502,21 @@ if lab_status_button != "CREATE":
 {% if lab_environment == "china" %}
 login()
 {% endif %}
+wait_for_site_to_be_ready()
 go_to_course("{{ course }}")
+select_lab_environment_tab()
 lab_status_button = check_lab_status_button()
 if lab_status_button == "STOP" or lab_status_button == "START":
     delete_lab("{{ course }}")
     create_lab("{{ course }}")
-    increase_autostop("{{ course }}")
-    increase_lifespan("{{ course }}")
 elif lab_status_button == "CREATE":
     create_lab("{{ course }}")
-    increase_autostop("{{ course }}")
-    increase_lifespan("{{ course }}")
+increase_autostop("{{ course }}")
+increase_lifespan("{{ course }}")
 {% endif %}
 
 {% if action == "impersonate" %}
+wait_for_site_to_be_ready()
 impersonate()
 go_to_course("{{ course }}")
 select_lab_environment_tab()
@@ -499,19 +530,19 @@ login()
 # Wait for the site to be ready
 wait_for_site_to_be_ready()
 go_to_course("{{ course }}")
+ge_and_labs_list = get_ge_and_labs("{{ course }}")
 
+select_lab_environment_tab()
 lab_status_button = check_lab_status_button()
-
 if lab_status_button == "START":
     start_lab("{{ course }}")
 elif lab_status_button == "CREATE":
     create_lab("{{ course }}")
 
-if lab_status_button == "STOP" or lab_status_button == "STARTING":
+lab_status_button = check_lab_status_button()
+if lab_status_button == "STOP" or lab_status_button == "STARTING" or lab_status_button == "CREATING":
     increase_autostop("{{ course }}")
     increase_lifespan("{{ course }}")
-
-ge_and_labs_list = get_ge_and_labs("{{ course }}")
 
 on_track = False
 print("Starting Section: {{ chapter_and_section }}")
@@ -527,10 +558,6 @@ for section in ge_and_labs_list:
         print("Current Section: " + section)
         prompt_user_enter_to_continue("when the terminal is ready to receive the commands")
         qa(commands)
-        prompt_user_enter_to_continue("to continue with the NEXT exercise ")
-
-
-
 {% endif %}
 
 {% endfor %}
