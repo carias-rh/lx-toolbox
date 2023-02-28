@@ -1,5 +1,5 @@
 #!/bin/bash
-for process in $(ps -ef |egrep "snow.yml|intercom-profile" |egrep -v 'grep|bash' |awk '{print $2}'); do kill $process; done
+for process in $(ps -ef |egrep "snow.yml|intercom-profile|chromedriver" |egrep -v 'grep|bash' |awk '{print $2}'); do kill $process; done
 
 if [ $# -ne 2 ]
   then
