@@ -11,10 +11,13 @@ from selenium.webdriver.common.by import By
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1600,1200")
+options.add_experimental_option("debuggerAddress", "localhost:8989")
+# Run first in terminal: google-chrome  --remote-debugging-port=8989 --user-data-dir="/home/carias/.config/google-chrome/debug"
+#options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/debug")
 {% if action == "qa" %}
 options.add_argument("headless")
 {% endif %}
-options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/intercom-profile")
+options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/rh-sso")
 
 # Define the webdriver to use.
 # Chrome webdriver
@@ -541,6 +544,9 @@ for section in ge_and_labs_list:
         print("Current Section: " + section)
         prompt_user_enter_to_continue("when the terminal is ready to receive the commands")
         qa(commands)
+print("#####################################")
+print("Finished QA")
+print("#####################################")
 {% endif %}
 
 {% endfor %}
