@@ -14,7 +14,7 @@ options.add_argument("--window-size=1600,1200")
 {% if action == "qa" %}
 options.add_argument("headless")
 {% endif %}
-options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/rh-sso")
+#options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/rh-sso")
 # DEBUG: Run in terminal: google-chrome --remote-debugging-port=8989 --user-data-dir="/home/carias/.config/google-chrome/debug"
 #options.add_experimental_option("debuggerAddress", "localhost:8989")
 #options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/debug")

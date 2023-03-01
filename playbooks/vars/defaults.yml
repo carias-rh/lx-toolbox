@@ -1,4 +1,4 @@
-selenium_driver: "firefox"
+selenium_driver: "chrome"
 rh_username: "{{ username | default('') }}"
 rh_password: "{{ password | default('') }}"
 counter: 0
