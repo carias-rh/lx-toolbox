@@ -54,9 +54,10 @@ def go_to_course(course_id):
 def login():
     step("Login into '{{ lab_environment }}' environment")
     try:
+        check_cookies()
 {% if lab_environment == "rol" %}
-
-        driver.find_element("xpath", "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input").send_keys("{{ rh_username }}@redhat.com")
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input"))).send_keys("{{ rh_username }}@redhat.com")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="login-show-step2"]'))).click()
 
@@ -97,38 +98,47 @@ def login():
         login_button.click()
 
 {% endif %}
-
+        wait_for_site_to_be_ready()
     except:
         print("An exception occurred during login")
 
-
-def accept_cookies():
-    step("Accepting cookies")
+def check_cookies():
     try:
-        WebDriverWait(driver, 10).until(
-            EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
-        driver.refresh()
+        WebDriverWait(driver, 2).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
+        accept_cookies()
     except:
         pass
 
+def accept_cookies():
+        try:
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
+        except:
+            pass
+
+
 def wait_for_site_to_be_ready():
+    try:
 {% if lab_environment == "rol" or lab_environment == "china" %}
-    WebDriverWait(driver, 40).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
 {% elif lab_environment == "rol-stage" %}
-    WebDriverWait(driver, 40).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
 {% endif %}
+    except:
+        time.sleep(3)
+        check_cookies()
+        wait_for_site_to_be_ready()
 
 
 def check_lab_status_button():
     # Check lab status and start it if stopped or not created. The exception is needed because some courses don't work with the function contains(text(),"")
     try:
         # Try with first button first
-        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][1][contains(text(), "Create") or contains(text(), "Delete") or contains(text(), "Deleting") or contains(text(), "Creating")]'))).text
+        lab_status_button = WebDriverWait(driver, 2).until(EC.presence_of_element_located((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][1][contains(text(), "Create") or contains(text(), "Delete") or contains(text(), "Deleting") or contains(text(), "Creating")]'))).text
     except:
         # Else try with second button
-        lab_status_button = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+        lab_status_button = WebDriverWait(driver, 2).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
     #print("Lab button is: " + lab_status_button)
     return lab_status_button
 
@@ -265,13 +275,15 @@ def open_workstation():
 def get_commands(course, chapter_and_section):
     step("Getting commands from exercise " + chapter_and_section)
     go_to_course(course + "/pages/" + chapter_and_section)
-    # Wait for the site to be ready
-    wait_for_site_to_be_ready()
     select_lab_environment_tab("course")
     time.sleep(4)
     # Get the lab name and grep it in the project git directory to find the xml file
     lab_script_name = WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-pane-2"]//div[@class="taskprerequisites"]//strong[@class="userinput"]//code'))).text
     course_no_version = course.split("-")[0]
+    course_version = course.split("-")[1]
+    # checkout the current course version branch
+    os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git checkout $(git branch -a |grep " + course_version +" |head -n1) &>/dev/null").read()
+    # get the commands from source
     commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/" + course_no_version + "/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
 
     print(commands)
@@ -357,6 +369,10 @@ def manage_special_commands(command, send_text_option_button):
         introduce_command(command, send_text_option_button)
         # Wait for user to continue after yum has executed
         prompt_user_enter_to_continue("when the installation has finished")
+    elif "podman login registry.redhat.io" in command:
+        introduce_command(command, send_text_option_button)
+        # Wait for user to continue after yum has executed
+        prompt_user_enter_to_continue("when login is completed")
     elif "vgcfgrestore -f" in command:
         prompt_user_enter_to_continue("when you have selected the desired .vg file")
         introduce_command(command, send_text_option_button)
@@ -379,9 +395,6 @@ def get_ge_and_labs(course):
     step("Getting the list of Guided Exercises and Labs")
     go_to_course(course)
 
-    # Wait for the site to be ready
-    wait_for_site_to_be_ready()
-
     time.sleep(2)
     select_lab_environment_tab("index")
 
@@ -394,10 +407,13 @@ def get_ge_and_labs(course):
         title_href = driver.find_element('xpath', '//*[@id="tab-course-toc"]/tbody/tr[' + str(t_row) + ']/td/div/a').get_attribute("href")
 
         if "Guided Exercise: " in title or "Lab: " in title:
-            print(title)
-            chapter_and_section = str(re.findall("ch[0-9]*s[0-9]*", title_href)[0])
-            print("Section: " + chapter_and_section)
-            chapter_and_section_list.append(chapter_and_section)
+            try:
+                print(title)
+                chapter_and_section = str(re.findall("ch[0-9]*s[0-9]*", title_href)[0])
+                print("Section: " + chapter_and_section)
+                chapter_and_section_list.append(chapter_and_section)
+            except:
+                pass
 
     return chapter_and_section_list
 
@@ -435,15 +451,12 @@ def toggle_tab(tab):
 # Rol prod, rol-stage and china environments are different on login and cookies
 {% if lab_environment == "rol" %}
 go_to_course("rh124-9.0")
-accept_cookies()
 login()
-accept_cookies()
-{% endif %}
+{% endif -%}
 
 {% if lab_environment == "rol-stage" %}
 go_to_course("rh124-9.0")
 login()
-accept_cookies()
 {% endif %}
 
 {% for course in course_id -%}
@@ -453,7 +466,7 @@ accept_cookies()
 {% if lab_environment == "china" %}
 login()
 {% endif %}
-wait_for_site_to_be_ready()
+
 go_to_course("{{ course }}")
 select_lab_environment_tab("lab")
 lab_status_button = check_lab_status_button()
@@ -470,7 +483,6 @@ increase_lifespan("{{ course }}")
 {% if lab_environment == "china" %}
 login()
 {% endif %}
-wait_for_site_to_be_ready()
 go_to_course("{{ course }}")
 select_lab_environment_tab("lab")
 lab_status_button = check_lab_status_button()
@@ -483,7 +495,6 @@ increase_lifespan("{{ course }}")
 {% if lab_environment == "china" %}
 login()
 {% endif %}
-wait_for_site_to_be_ready()
 go_to_course("{{ course }}")
 select_lab_environment_tab("lab")
 lab_status_button = check_lab_status_button()
@@ -495,7 +506,6 @@ if lab_status_button != "CREATE":
 {% if lab_environment == "china" %}
 login()
 {% endif %}
-wait_for_site_to_be_ready()
 go_to_course("{{ course }}")
 select_lab_environment_tab("lab")
 lab_status_button = check_lab_status_button()
@@ -509,19 +519,17 @@ increase_lifespan("{{ course }}")
 {% endif %}
 
 {% if action == "impersonate" %}
-wait_for_site_to_be_ready()
 impersonate()
 go_to_course("{{ course }}")
 select_lab_environment_tab("lab")
 {% endif %}
 
-{% if action == "qa" %}
+{%- if action == "qa" -%}
 
-{% if lab_environment == "china" %}
+{%- if lab_environment == "china" -%}
 login()
-{% endif %}
+{%- endif %}
 # Wait for the site to be ready
-wait_for_site_to_be_ready()
 go_to_course("{{ course }}")
 ge_and_labs_list = get_ge_and_labs("{{ course }}")
 
@@ -538,7 +546,6 @@ if lab_status_button == "STOP" or lab_status_button == "STARTING" or lab_status_
     increase_lifespan("{{ course }}")
 
 on_track = False
-print("Starting Section: {{ chapter_and_section }}")
 for section in ge_and_labs_list:
     # If section is current execute the qa
     if section == "{{ chapter_and_section }}":
