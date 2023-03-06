@@ -1,15 +1,9 @@
-# Automated lab environment creation
-This project uses ansible and selenium to create, delete, and extend life of most used labs in rol.redhat.com:
-  - rh124-9.0
-  - rh134-9.0
-  - rh199-9.0
-  - rh294-9.0
-  - do180-4.10
-  - do280-4.10
-  - do288-4.10
-  - do447-2.8
+This project contains a series of web automation scripts for the daily tasks of the Learner Experience Team at Red Hat. 
+- Automated lab environment creation
+- Semi-automated QA for RHxxx courses
+- SNOW auto-assign tickets
+- Intercom status change
 
-It uses ansible-playbook to generate python scripts from templates that will launch a browser by using selenium.
 
 ## Setup
 
@@ -66,6 +60,20 @@ Fill in the credentials.yml file with your rol.redhat.com credentials:
 username: "youruser@mail.com"
 password: "yourpassword"
 ``` 
+
+
+# Automated lab environment creation
+This script uses ansible and selenium to create, delete, and extend life of most used labs in rol.redhat.com:
+  - rh124-9.0
+  - rh134-9.0
+  - rh199-9.0
+  - rh294-9.0
+  - do180-4.10
+  - do280-4.10
+  - do288-4.10
+  - do447-2.8
+
+It uses ansible-playbook to generate python scripts from templates that will launch a browser by using selenium.
 
 ## Running the thing
 
@@ -138,7 +146,7 @@ $ cat playbooks/create.yaml
         ...
 ```
 
-## Extended functionality
+# SNOW auto-assign tickets
 The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. The need for this script emerged from the time-consuming task of filling all the field of each ticket, which came without the name, email, and summary filled.
 I could have make this script simpler, but I finally decided to automate the whole thing to auto-assign the tickets to my queue as they come and automatically reply to the users.
 
@@ -161,4 +169,13 @@ I created a crontab to periodically run the script every hour during my shift.
 #######################
 
 59 8-13 * * 1-5   export DISPLAY=:1 && SHELL=/usr/bin/bash && source ${HOME}/.bashrc && /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/playbooks/snow.yml
-``
+```
+
+# Intercom status change
+This script will switch your status on intercom to Away/Active
+`ansible-playbook playbooks/intercom.yml -e status="Away"`
+
+
+
+
+
