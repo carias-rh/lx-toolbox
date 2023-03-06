@@ -145,6 +145,32 @@ $ cat playbooks/create.yaml
         - rh294-9.0
         ...
 ```
+# Semi-automated QA for RHxxx courses
+This script will assist you in the introduction of the commands during any QA of the RH series, which are mostly done using the command line interface. It has some limitations, such those exercise where it's asked the user to open a new terminal tab, or that commands may need to be introduced directly into a different host without sshing it first, or with commands that require some custom user input. 
+
+Despite these limitations, the script has proven to serve of great help during E2E QAs, reducing the human work to merely check that the output of the commands correspond to the steps in the guide.
+
+It's possible to start the QA from any chapter and the script will continue from that point until the end. 
+
+`ansible-playbook playbooks/operate-lab.yml -e action='qa' -e lab_environment='rol' -e '{"course_id": ["do180-4.10"]}' -e chapter_and_section='ch03s07'`
+
+This will only create the script, that must be run manually. 
+`python3 /tmp/qa-do180-4.10-rol.py`
+![image](https://user-images.githubusercontent.com/80515069/223105629-ad222ab3-db3f-483e-a096-cca121fd5edd.png)
+
+`[...]`
+
+![image](https://user-images.githubusercontent.com/80515069/223100817-611e988b-35c6-477f-b19c-f82af01d0da3.png)
+
+`[...]`
+
+![image](https://user-images.githubusercontent.com/80515069/223100891-15e241a7-37a8-4966-bff9-b8320118cd23.png)
+
+At this point of the script, the lab is up and running, but needs 2 manual steps before hitting Enter to start the introduction of the commands: 
+ - opening a terminal
+ - disabling key repetition on `Settings > Universal Access > Typing > Repeat Keys = Off`
+
+Note that this script is run in headless mode to avoid any manual interruption of the user in the automation tool, so you will need to open a new session with (i.e.)  `start 180` to have your monitoring workstation terminal.
 
 # SNOW auto-assign tickets
 The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. The need for this script emerged from the time-consuming task of filling all the field of each ticket, which came without the name, email, and summary filled.
@@ -172,9 +198,10 @@ I created a crontab to periodically run the script every hour during my shift.
 ```
 
 # Intercom status change
-This script will switch your status on intercom to Away/Active
+This script will switch your status on intercom to Away/Active.
 `ansible-playbook playbooks/intercom.yml -e status="Away"`
 
+![image](https://user-images.githubusercontent.com/80515069/223106095-6628576d-ba36-4c86-b258-856eca079b73.png)
 
 
 

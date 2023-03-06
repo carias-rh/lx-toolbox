@@ -25,9 +25,15 @@ driver = webdriver.Chrome(options=options)
 {% endif -%}
 
 {% if selenium_driver == "firefox" %}
+{% if action == "qa" %}
+options = webdriver.FirefoxOptions()
+options.set_headless()
+driver = webdriver.Firefox(firefox_options=options)
+{% else %}
 driver = webdriver.Firefox()
 driver.install_addon(os.path.expanduser('{{ playbook_dir }}/../copy_on_select-1.0-an+fx.xpi'), temporary=True)
 driver.maximize_window()
+{% endif %}
 {% endif -%}
 
 counter = 1
