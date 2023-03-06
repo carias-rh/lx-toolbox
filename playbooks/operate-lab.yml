@@ -28,6 +28,15 @@
       tags:
         - generate_template
 
+    - name: Clone git repo for qa
+      ansible.builtin.git:
+        repo: "git@github.com:RedHatTraining/{{ item | split('-') | first }}.git"
+        dest: "playbooks/files/{{ item | split('-') | first }}"
+      loop: "{{ course_id }}"
+      when: '"qa" == action'
+      tags: test
+
+
     - name: Running scripts
       shell: '/usr/bin/python3 /tmp/{{ action }}-{{ item }}-{{ lab_environment }}.py'
       loop: "{{ course_id }}"

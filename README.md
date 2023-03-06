@@ -154,8 +154,10 @@ It's possible to start the QA from any chapter and the script will continue from
 
 `ansible-playbook playbooks/operate-lab.yml -e action='qa' -e lab_environment='rol' -e '{"course_id": ["do180-4.10"]}' -e chapter_and_section='ch03s07'`
 
-This will only create the script, that must be run manually. 
+This will only create the script, that must be run manually.
+
 `python3 /tmp/qa-do180-4.10-rol.py`
+
 ![image](https://user-images.githubusercontent.com/80515069/223105629-ad222ab3-db3f-483e-a096-cca121fd5edd.png)
 
 `[...]`
