@@ -200,11 +200,13 @@ I created a crontab to periodically run the script every hour during my shift.
 ```
 
 # Jira ticket from SNOW Feedback
-This script will fill a new jira that needs to be created from an SNOW feedback ticket. Review that everything is fine according to priority, categorization and a proper summary and description.
+This script create a new jira from a SNOW feedback ticket. Review that everything is fine according to priority, categorization and a proper summary and description.
+
 `ansible-playbook playbooks/jira.yml -e snow_id='RHT1915340'`
 
 # Intercom status change
 This script will switch your status on intercom to Away/Active.
+
 `ansible-playbook playbooks/intercom.yml -e status="Away"`
 
 ![image](https://user-images.githubusercontent.com/80515069/223106095-6628576d-ba36-4c86-b258-856eca079b73.png)
