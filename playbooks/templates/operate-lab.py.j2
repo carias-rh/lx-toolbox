@@ -64,21 +64,17 @@ def login():
 {% if lab_environment == "rol" %}
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input"))).send_keys("{{ rh_username }}@redhat.com")
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="login-show-step2"]'))).click()
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
 
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
 
         # RH SSO
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[@id="submit"]')))
-        driver.find_element("xpath", '//*[@id="username"]').send_keys("{{ username }}")
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
         counter = os.popen("cat {{ playbook_dir }}/../counter").read()
         token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
-        driver.find_element("xpath", '//*[@id="password"]').send_keys(
-            str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
-        driver.find_element("xpath", '//*[@id="submit"]').click()
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="finishLoginLink"]'))).click()
 
         # Increment SSO token counter if everything went well
         counter = int(counter) + 1
