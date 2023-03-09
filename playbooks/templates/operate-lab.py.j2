@@ -56,6 +56,23 @@ def go_to_course(course_id):
 {% endif %}
     time.sleep(2)
 
+def check_cookies():
+    try:
+        WebDriverWait(driver, 2).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
+        accept_cookies()
+    except:
+        pass
+
+def accept_cookies():
+        try:
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
+            driver.refresh()
+        except:
+            driver.refresh()
+            pass
+
 
 def login():
     step("Login into '{{ lab_environment }}' environment")
@@ -102,47 +119,40 @@ def login():
 {% endif %}
         wait_for_site_to_be_ready()
     except:
-        print("An exception occurred during login")
-
-def check_cookies():
-    try:
-        WebDriverWait(driver, 2).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
-        accept_cookies()
-    except:
-        pass
-
-def accept_cookies():
-        try:
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
-            driver.refresh()
-        except:
-            driver.refresh()
-            pass
+        check_cookies()
 
 
 def wait_for_site_to_be_ready():
     try:
+        check_cookies()
 {% if lab_environment == "rol" or lab_environment == "china" %}
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
+        WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
 {% elif lab_environment == "rol-stage" %}
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
+        WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]')))
 {% endif %}
+        print("Site is ready")
     except:
-        time.sleep(3)
+        time.sleep(0.5)
         check_cookies()
         wait_for_site_to_be_ready()
 
 
-def check_lab_status_button():
-    # Check lab status and start it if stopped or not created. The exception is needed because some courses don't work with the function contains(text(),"")
-    try:
-        # Try with first button first
-        lab_status_button = WebDriverWait(driver, 2).until(EC.presence_of_element_located((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][1][contains(text(), "Create") or contains(text(), "Delete") or contains(text(), "Deleting") or contains(text(), "Creating")]'))).text
-    except:
-        # Else try with second button
-        lab_status_button = WebDriverWait(driver, 2).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+def check_lab_status_button(first_or_second_button):
+    if first_or_second_button == "first":
+        # Check lab status and start it if stopped or not created. The exception is needed because some courses don't work with the function contains(text(),"")
+        try:
+            # Try with first button first
+            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][1][contains(text(), "Create") or contains(text(), "Delete") or contains(text(), "Deleting") or contains(text(), "Creating")]'))).text
+        except:
+            # Else try with second button
+            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+    elif first_or_second_button == "second":
+        try:
+            # Try with second button first
+            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+        except:
+            # Else try with first button
+            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
     #print("Lab button is: " + lab_status_button)
     return lab_status_button
 
@@ -165,8 +175,8 @@ def select_lab_environment_tab(tab_name):
             select_lab_environment_tab(tab_name)
     except:
         print("Lab environment tab not selected succesfully. Retrying...")
-        driver.refresh()
-        time.sleep(10)
+        check_cookies()
+        time.sleep(2)
         select_lab_environment_tab(tab_name)
 
 
@@ -205,12 +215,10 @@ def increase_autostop(course_id):
     try:
         select_lab_environment_tab("lab")
         # Wait until lab has been created and is running
-        lab_status_button = check_lab_status_button()
+        if check_lab_status_button("first") == "CREATING": time.sleep(30)
+        elif check_lab_status_button("second") == "STARTING": time.sleep(15)
 
-        if lab_status_button == "CREATING": time.sleep(30)
-        elif lab_status_button == "STARTING": time.sleep(15)
-
-        increase_autostop = WebDriverWait(driver, 0).until(EC.element_to_be_clickable(
+        increase_autostop = WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
 
         for i in range(30):
@@ -223,7 +231,7 @@ def increase_lifespan(course_id):
     step("Increasing auto-destroy counter")
     try:
         select_lab_environment_tab("lab")
-        increase_lifespan = WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
+        increase_lifespan = WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')))
 
         for i in range(30):
@@ -256,22 +264,18 @@ def impersonate():
 # Looks for the workstation console button and opens the console in a new tab
 def open_workstation():
     step("Opening workstation console")
-    driver.refresh()
-    time.sleep(3)
     # Open the Lab Environment tab
     select_lab_environment_tab("lab")
     # Open the workstation console;
     open_workstation_console = WebDriverWait(driver, 300).until(EC.element_to_be_clickable(
-            (By.XPATH, "//*[text()='workstation']/../td[3]/button")))
-    time.sleep(3)
-    open_workstation_console.click()
+            (By.XPATH, "//*[text()='workstation']/../td[3]/button"))).click()
     # Wait for the console to open
-    time.sleep(10)
+    time.sleep(6)
     handles = driver.window_handles
     driver.switch_to.window(handles[1])
 
     # Open virtual keyboard
-    time.sleep(2)
+    time.sleep(3)
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="showKeyboard"]'))).click()
 
@@ -473,7 +477,7 @@ login()
 
 go_to_course("{{ course }}")
 select_lab_environment_tab("lab")
-lab_status_button = check_lab_status_button()
+lab_status_button = check_lab_status_button("first")
 if lab_status_button == "CREATE":
     create_lab("{{ course }}")
 elif lab_status_button == "START" or lab_status_button == "DELETE":
@@ -489,7 +493,7 @@ login()
 {% endif %}
 go_to_course("{{ course }}")
 select_lab_environment_tab("lab")
-lab_status_button = check_lab_status_button()
+lab_status_button = check_lab_status_button("first")
 if lab_status_button == "CREATE":
     create_lab("{{ course }}")
 increase_lifespan("{{ course }}")
@@ -501,7 +505,7 @@ login()
 {% endif %}
 go_to_course("{{ course }}")
 select_lab_environment_tab("lab")
-lab_status_button = check_lab_status_button()
+lab_status_button = check_lab_status_button("first")
 if lab_status_button != "CREATE":
     delete_lab("{{ course }}")
 {% endif %}
@@ -512,11 +516,11 @@ login()
 {% endif %}
 go_to_course("{{ course }}")
 select_lab_environment_tab("lab")
-lab_status_button = check_lab_status_button()
+lab_status_button = check_lab_status_button("second")
 if lab_status_button == "STOP" or lab_status_button == "START":
     delete_lab("{{ course }}")
     create_lab("{{ course }}")
-elif lab_status_button == "CREATE":
+elif check_lab_status_button("first") == "CREATE":
     create_lab("{{ course }}")
 increase_autostop("{{ course }}")
 increase_lifespan("{{ course }}")
@@ -535,17 +539,19 @@ login()
 {%- endif %}
 # Wait for the site to be ready
 go_to_course("{{ course }}")
+commands = get_commands("{{ course }}", "{{ chapter_and_section }}")
 ge_and_labs_list = get_ge_and_labs("{{ course }}")
 
 select_lab_environment_tab("lab")
-lab_status_button = check_lab_status_button()
+lab_status_button = check_lab_status_button("second")
 if lab_status_button == "START":
     start_lab("{{ course }}")
 elif lab_status_button == "CREATE":
     create_lab("{{ course }}")
 
-lab_status_button = check_lab_status_button()
-if lab_status_button == "STOP" or lab_status_button == "STARTING" or lab_status_button == "CREATING" or lab_status_button == "DELETE":
+lab_status_first_button = check_lab_status_button("first")
+lab_status_second_button = check_lab_status_button("second")
+if lab_status_second_button == "STOP" or lab_status_second_button == "STARTING" or lab_status_first_button == "CREATING" or lab_status_first_button == "DELETE":
     increase_autostop("{{ course }}")
     increase_lifespan("{{ course }}")
 
@@ -557,11 +563,13 @@ for section in ge_and_labs_list:
         open_workstation()
     if on_track:
         toggle_tab("guide")
-        commands = get_commands("{{ course }}", section)
+        if commands == '':
+            commands = get_commands("{{ course }}", section)
         toggle_tab("console")
         print("Current Section: " + section)
         prompt_user_enter_to_continue("when the terminal is ready to receive the commands")
         qa(commands)
+        commands = ''
 print("#####################################")
 print("Finished QA")
 print("#####################################")
