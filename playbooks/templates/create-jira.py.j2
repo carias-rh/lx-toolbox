@@ -15,7 +15,7 @@ options.add_experimental_option("debuggerAddress", "localhost:9000")
 options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/jira")
 
 def open_profile():
-    os.popen('google-chrome --remote-debugging-port=9000 --user-data-dir="{{ ansible_env.HOME}}.config/google-chrome/jira" &')
+    os.popen('google-chrome --remote-debugging-port=9000 --user-data-dir="{{ ansible_env.HOME}}/.config/google-chrome/jira" &')
 
 
 def check_running_session():
