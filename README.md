@@ -150,11 +150,13 @@ This script will assist you in the introduction of the commands during any QA of
 
 Despite these limitations, the script has proven to serve of great help during E2E QAs, reducing the human work to merely check that the output of the commands correspond to the steps in the guide.
 
-It's possible to start the QA from any chapter and the script will continue from that point until the end. 
+You will need the SSH key access to [github](https://www.freecodecamp.org/news/git-ssh-how-to/) configured to checkout the version of the course from repo to get the commands.
+
+It's possible to start the QA from any chapter and the script will continue from that point until the end.  
 
 `ansible-playbook playbooks/operate-lab.yml -e action='qa' -e lab_environment='rol' -e '{"course_id": ["do180-4.10"]}' -e chapter_and_section='ch03s07'`
 
-This will only create the script, that must be run manually.
+This will only create the script, that must be run manually. 
 
 `python3 /tmp/qa-do180-4.10-rol.py`
 
