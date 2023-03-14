@@ -27,16 +27,19 @@
         url: "{{ item }}"
         dest: "/tmp/{{ item | split('/')| last }}"
       loop:
-        - "https://github.com/mozilla/geckodriver/releases/download/v0.32.0/geckodriver-v0.32.0-linux64.tar.gz"
-        - "https://chromedriver.storage.googleapis.com/108.0.5359.71/chromedriver_linux64.zip"
+        - "https://github.com/mozilla/geckodriver/releases/download/v0.32.2/geckodriver-v0.32.2-linux64.tar.gz"
+        - "https://chromedriver.storage.googleapis.com/110.0.5481.77/chromedriver_linux64.zip"
 
     - name: Extract selenium drivers into /usr/bin/
       ansible.builtin.unarchive:
         src: "/tmp/{{ item }}"
         dest: "/usr/bin/"
       loop:
-        - geckodriver-v0.32.0-linux64.tar.gz
+        - geckodriver-v0.32.2-linux64.tar.gz
         - chromedriver_linux64.zip
+
+    - name: Install xq
+      shell: 'curl -sSL https://bit.ly/install-xq | sudo bash'
 
     - name: Install wrapper scripts into /usr/bin/
       ansible.builtin.template:

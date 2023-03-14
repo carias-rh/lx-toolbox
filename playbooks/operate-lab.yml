@@ -31,7 +31,7 @@
     - name: Clone git repo for qa
       ansible.builtin.git:
         repo: "git@github.com:RedHatTraining/{{ item | split('-') | first }}.git"
-        dest: "files/{{ item | split('-') | first }}"
+        dest: "files/{{ item | split('-') | first | lower }}"
       loop: "{{ course_id }}"
       when: '"qa" == action'
       tags: test
