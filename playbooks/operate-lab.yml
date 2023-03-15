@@ -1,8 +1,8 @@
 - name: ROL labs launcher
   hosts: localhost
   vars_files:
-    - credentials.yml
-    - defaults.yml
+    - vars/credentials.yml
+    - vars/defaults.yml
   vars:
     - lab_environment: rol 	# Valid options are: rol / rol-stage
     - course_id:            # Get the course_id from the URL, such https://rol.redhat.com/rol/app/courses/rh124-8.2
