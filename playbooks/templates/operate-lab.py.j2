@@ -382,14 +382,17 @@ def manage_special_commands(command, send_text_option_button):
         prompt_user_enter_to_continue("if playbook finished")
     elif "ok=" in command or "failed=" in command:
         print("skipping output")
+    elif "podman build" in command:
+        introduce_command(command, send_text_option_button)
+        prompt_user_enter_to_continue("if podman build finished")
     elif "vim " in command or "vi " in command:
         introduce_command(command, send_text_option_button)
         prompt_user_enter_to_continue("if you did review/create the file")
     elif "Enter" in command:
         command = "\n"
         introduce_command(command, send_text_option_button)
-    elif "less" in command:
-        command = command.replace("less", "cat")
+    elif "less " in command:
+        command = command.replace("less ", "cat ")
         introduce_command(command, send_text_option_button)
     elif "systemctl status" in command:
         introduce_command(command, send_text_option_button)
