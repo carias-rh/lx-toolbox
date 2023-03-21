@@ -383,6 +383,7 @@ def manage_special_commands(command, send_text_option_button):
     elif "ok=" in command or "failed=" in command:
         print("skipping output")
     elif "podman build" in command:
+        prompt_user_enter_to_continue("if the Containerfile is ready to build")
         introduce_command(command, send_text_option_button)
         prompt_user_enter_to_continue("if podman build finished")
     elif "vim " in command or "vi " in command:
