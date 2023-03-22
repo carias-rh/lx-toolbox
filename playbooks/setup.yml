@@ -52,6 +52,7 @@
         - delete.j2
         - recreate.j2
         - impersonate.j2
+        - qa.j2
       tags: scripts
 
     - name: generate secret and
