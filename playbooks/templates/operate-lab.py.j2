@@ -593,7 +593,10 @@ commands = filter_commands_list(raw_commands)
 ge_and_labs_list = get_ge_and_labs("{{ course }}")
 
 select_lab_environment_tab("lab")
-lab_status_button = check_lab_status_button("second")
+try:
+    lab_status_button = check_lab_status_button("second")
+except:
+    lab_status_button = check_lab_status_button("first")
 if lab_status_button == "START":
     start_lab("{{ course }}")
 elif lab_status_button == "CREATE":
