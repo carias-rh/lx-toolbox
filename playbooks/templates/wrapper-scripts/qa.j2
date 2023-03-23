@@ -42,11 +42,11 @@ function get_course_from_list()
 function start_qa()
 {
   if [ "$ENV" == "rol" ] || [ "$ENV" == "rol-stage" ]  || [ "$ENV" == "china" ]
-		 then /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV"  -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION"
+		 then /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV"  -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION" -e selenium_driver="chrome"
 
 	else
 	    ENV=rol
-      /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV"  -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION"
+      /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV"  -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION" -e selenium_driver="chrome"
 	fi
 
 }

@@ -12,16 +12,14 @@ options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1600,1200")
 {% if action == "qa" %}
-options.add_argument("headless")
-{% endif %}
-#options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/rh-sso")
-# DEBUG: Run in terminal: google-chrome --remote-debugging-port=8989 --user-data-dir="/home/carias/.config/google-chrome/debug"
-#options.add_experimental_option("debuggerAddress", "localhost:8989")
-#options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/debug")
-
+#DEBUG: Run in terminal: google-chrome --remote-debugging-port=8999 --user-data-dir="/home/carias/.config/google-chrome/quality-assurance"
+options.add_experimental_option("debuggerAddress", "localhost:8999")
+options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/quality-assurance")
+{% else %}
 # Define the webdriver to use.
 # Chrome webdriver
 driver = webdriver.Chrome(options=options)
+{% endif %}
 {% endif -%}
 
 {% if selenium_driver == "firefox" %}
@@ -44,6 +42,17 @@ def step(step_str, patience = 1):
     print(str(counter) + ": " + step_str)
     counter += 1
     time.sleep(patience)
+
+# Open a google-chrome profile for qa
+def open_profile():
+    os.popen('google-chrome --remote-debugging-port=8999 --user-data-dir="{{ ansible_env.HOME}}/.config/google-chrome/quality-assurance" &> /dev/null')
+
+# Check if there is an already running open google-chrome profile
+def check_running_session():
+    pid = os.popen("ps -ef | grep google-chrome/quality-assurance | grep 8999 |grep -v grep| head -n1 | awk {'print $2'}").read()
+    if pid: return int(pid)
+    else: return 0
+
 
 # Go to the course site
 def go_to_course(course_id):
@@ -303,6 +312,7 @@ def get_commands(course, chapter_and_section):
     # get the commands from source
     commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/" + course_no_version + "/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
 
+    print("\n")
     print(commands)
     print("#####################################")
 
@@ -495,6 +505,17 @@ def toggle_tab(tab):
         driver.switch_to.window(handles[0])
 
 ## Main
+
+{% if action == "qa" %}
+if not check_running_session():
+    open_profile()
+    driver = webdriver.Chrome(options=options)
+    login()
+else:
+    driver = webdriver.Chrome(options=options)
+{% endif %}
+
+
 # Rol prod, rol-stage and china environments are different on login and cookies
 {% if lab_environment == "rol" %}
 go_to_course("rh124-9.0")
@@ -585,7 +606,6 @@ select_lab_environment_tab("lab")
 {%- if action == "qa" -%}
 
 {%- if lab_environment == "china" -%}
-login()
 {%- endif %}
 # Wait for the site to be ready
 go_to_course("{{ course }}")
@@ -617,13 +637,13 @@ for section in ge_and_labs_list:
         open_workstation()
     if on_track:
         toggle_tab("guide")
-        if commands == '':
-            commands = get_commands("{{ course }}", section)
+        if commands == []:
+            commands = filter_commands_list(get_commands("{{ course }}", section))
         toggle_tab("console")
         print("Current Section: " + section)
         prompt_user_enter_to_continue("when the terminal is ready to receive the commands")
         qa(commands)
-        commands = ''
+        commands = []
 print("#####################################")
 print("Finished QA")
 print("#####################################")
