@@ -77,8 +77,9 @@ def accept_cookies():
 def login():
     step("Login into '{{ lab_environment }}' environment")
     try:
-        check_cookies()
+
 {% if lab_environment == "rol" %}
+        check_cookies()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input"))).send_keys("{{ rh_username }}@redhat.com")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
@@ -97,7 +98,7 @@ def login():
         os.popen("echo " + str(counter) + " > {{ playbook_dir }}/../counter")
 
 {% elif lab_environment == "rol-stage" %}
-
+        check_cookies()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click()
 
@@ -109,16 +110,16 @@ def login():
 {% elif lab_environment == "china" %}
 
         driver.get('https://rol-cn.ole.redhat.com/rol/app/login/local')
+        check_cookies()
         WebDriverWait(driver, 200).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("rhls_test_basic_cn_003")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys("redhat123")
-        login_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/section/div/div[1]/div/div/form/button')))
-        time.sleep(0.5)
-        login_button.click()
+        login_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_button"]'))).click()
 
 {% endif %}
         wait_for_site_to_be_ready()
     except:
         check_cookies()
+        print("Login failed")
 
 
 def wait_for_site_to_be_ready():

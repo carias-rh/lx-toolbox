@@ -96,6 +96,7 @@ done
 
 get_course_from_list $COURSE
 
+echo ""
 if [[ $COURSE_PATH != "" ]]
 then
     echo "Course: $COURSE_PATH"
@@ -119,7 +120,7 @@ else
     echo "Environment: rol-production"
     ENV='rol'
 fi
-
+echo ""
 start_qa $@
 echo "---> Starting selenium script <---"
 /usr/bin/python /tmp/qa-$COURSE_PATH-$ENV.py
