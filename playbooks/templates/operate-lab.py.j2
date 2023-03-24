@@ -506,7 +506,7 @@ def toggle_tab(tab):
 
 ## Main
 
-{% if action == "qa" %}
+{% if action == "qa" and selenium_driver == "chrome" %}
 if not check_running_session():
     open_profile()
     driver = webdriver.Chrome(options=options)
@@ -605,7 +605,8 @@ select_lab_environment_tab("lab")
 
 {%- if action == "qa" -%}
 
-{%- if lab_environment == "china" -%}
+{%- if lab_environment == "china" and selenium_driver == "firefox" -%}
+login()
 {%- endif %}
 # Wait for the site to be ready
 go_to_course("{{ course }}")

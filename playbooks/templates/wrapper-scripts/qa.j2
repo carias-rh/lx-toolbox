@@ -42,17 +42,17 @@ function get_course_from_list()
 function start_qa()
 {
   if [ "$ENV" == "rol" ] || [ "$ENV" == "rol-stage" ]  || [ "$ENV" == "china" ]
-		 then /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV"  -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION" -e selenium_driver="chrome"
+		 then /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV"  -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION" -e selenium_driver="$DRIVER"
 
 	else
 	    ENV=rol
-      /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV"  -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION" -e selenium_driver="chrome"
+      /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV"  -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION" -e selenium_driver="$DRIVER"
 	fi
 
 }
 
 
-VALID_ARGS=$(getopt -o :e:c:s:h --long env:,course:,section:,help: -- "$@")
+VALID_ARGS=$(getopt -o :d:e:c:s:h --long driver:,env:,course:,section:,help: -- "$@")
 if [[ $? -ne 0 ]]; then
     exit 1;
 fi
@@ -73,7 +73,10 @@ while [ : ]; do
         SECTION=$2
         shift 2
         ;;
-
+    -d | --driver)
+        DRIVER=$2
+        shift 2
+        ;;
     --) shift;
         break
         ;;
@@ -120,6 +123,15 @@ else
     echo "Environment: rol-production"
     ENV='rol'
 fi
+
+if [[ $DRIVER != '' ]]
+then
+    echo "Selenium driver: $DRIVER"
+else
+    echo "Selenium driver: geckodriver(firefox)"
+    DRIVER='firefox'
+fi
+
 echo ""
 start_qa $@
 echo "---> Starting selenium script <---"
