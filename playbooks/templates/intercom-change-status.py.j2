@@ -52,13 +52,13 @@ def intercom_login():
 
 def intercom_change_status(change_status_to):
     try:
-        avatar = WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+        avatar = WebDriverWait(driver, 15).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[1]/div/div[1]/div[2]/div/div/div/div[1]/div[5]/div[2]/div/div')))
         avatar.click()
         status_raw = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[1]/div[2]/div/div/div/div[1]/div[5]/div[2]/div/div').get_attribute(
             "class")
     except:
-        avatar = WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+        avatar = WebDriverWait(driver, 15).until(EC.element_to_be_clickable(
             (By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div/div/div/div[1]/div[5]/div[2]/div/div')))
         avatar.click()
         status_raw = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div/div/div/div[1]/div[5]/div[2]/div/div').get_attribute(
