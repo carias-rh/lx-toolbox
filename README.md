@@ -88,9 +88,6 @@ The wrapper script will look into the list of courses and match the latest versi
 [rol-start-render.webm](https://user-images.githubusercontent.com/80515069/214608957-41e14cd4-1084-45fc-bd4a-3e08cc34cf84.webm)
 
 ```
-$ which start
-/usr/local/bin/start
-
 $ start 180 rol-stage
 
 Course starting: do180-4.10
@@ -154,27 +151,36 @@ You will need the SSH key access to [github](https://www.freecodecamp.org/news/g
 
 It's possible to start the QA from any chapter and the script will continue from that point until the end.  
 
-`ansible-playbook playbooks/operate-lab.yml -e action='qa' -e lab_environment='rol' -e '{"course_id": ["do180-4.10"]}' -e chapter_and_section='ch03s07'`
+`qa -c 180 -s ch02s02 -e china`
 
-This will only create the script, that must be run manually. 
-
-`python3 /tmp/qa-do180-4.10-rol.py`
-
-![image](https://user-images.githubusercontent.com/80515069/223105629-ad222ab3-db3f-483e-a096-cca121fd5edd.png)
+![image](https://user-images.githubusercontent.com/80515069/233403992-3e15964b-32c9-4f6a-95a3-ec0efa5bac42.png)
 
 `[...]`
 
-![image](https://user-images.githubusercontent.com/80515069/223100817-611e988b-35c6-477f-b19c-f82af01d0da3.png)
+The script will get the commands from the indicated section, or from the first guided exercise if not indicated 
+
+![image](https://user-images.githubusercontent.com/80515069/233404289-9ca4540e-4b00-4081-a8be-08f2bf5d7cf2.png)
+
 
 `[...]`
 
-![image](https://user-images.githubusercontent.com/80515069/223100891-15e241a7-37a8-4966-bff9-b8320118cd23.png)
+![image](https://user-images.githubusercontent.com/80515069/233405072-26d7810c-0148-4841-9fb9-bbcaed416895.png)
+
 
 At this point of the script, the lab is up and running, but needs 2 manual steps before hitting Enter to start the introduction of the commands: 
  - opening a terminal
  - disabling key repetition on `Settings > Universal Access > Typing > Repeat Keys = Off`
 
 Note that this script is run in headless mode to avoid any manual interruption of the user in the automation tool, so you will need to open a new session with (i.e.)  `start 180` to have your monitoring workstation terminal.
+
+You will notice that after introducing some kind of commands, a prompt to continue with the script execution will appear. This is to avoid the script running without control and introducing commands incorrectly. Have a look at some special commands that require these stopper prompts in the `operate-lab.py.j2` template. 
+
+![image](https://user-images.githubusercontent.com/80515069/233406747-cc578ae1-d1c1-4b25-be4c-4b7084896c22.png)
+
+How to steer the script in other exceptional situations:
+
+- If for any reasons, the script introduced an incorrect command, because it needed a customized input, or is missing some configuration file, you can stop the terminal process with `CTRL + s`. Then, resolve any inconsistencies in the exercise and resume the script execution with `CTRL + q`. 
+- This is a work in progress project, mostly tested on RHxxx courses, so if you find any other exceptional kind of command that needs a stopper prompt, please tell or submit a PR. Thanks!
 
 # SNOW auto-assign tickets
 The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. The need for this script emerged from the time-consuming task of filling all the field of each ticket, which came without the name, email, and summary filled.
