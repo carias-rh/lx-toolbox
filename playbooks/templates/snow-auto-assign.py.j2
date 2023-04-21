@@ -86,7 +86,7 @@ def search_name(username, email):
 
     # Else is a redhatter
     else:
-        if "@" in email and "redhat" in email:
+        if "@" in email and "redhat.com" in email:
             username = email.split("@")[0]
 
         driver.execute_script("window.open('');")
