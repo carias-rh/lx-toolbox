@@ -11,8 +11,4 @@
     - name: Generate selenium script
       template:
         src: templates/snow-auto-assign.py.j2
-        dest: "/tmp/snow.py"
-
-    - name: Auto-assign snow tickets
-      shell: '/usr/bin/python3 /tmp/snow.py'
-      register: selenium
+        dest: "/tmp/snow-{{ team_acronim }}.py"

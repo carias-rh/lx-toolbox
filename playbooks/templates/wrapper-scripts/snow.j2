@@ -13,7 +13,7 @@ while [ : ]; do
         shift 2
         ;;
     -u | --user)
-        USER=$2
+        USER_NAME=$2
         shift 2
         ;;
     -r | --region)
@@ -35,27 +35,34 @@ while [ : ]; do
   esac
 done
 
-if [ $TEAM != '' ]; then
-for process in $(ps -ef |egrep "$TEAM" |egrep -v 'grep|bash' |awk '{print $2}'); do kill $process; done
-fi
-
+echo "User: " $USER_NAME
+echo "Team: " $TEAM
+echo "Region: " $REGION
 
 if [[ $TEAM != '' ]]; then
 for process in $(ps -ef |egrep "$TEAM" |egrep -v 'grep|bash' |awk '{print $2}'); do kill $process; done
 fi
 
-  if [[ $REGION == "" ]]
+if [[ $TEAM == "RHT Learner Experience" ]]
   then
-    /usr/bin/ansible-playbook {{ playbook_dir }}/snow.yml -e user_name="\"$USER_NAME\"" -e team_name="\"$TEAM\""
+    TEAM_ACRONIM="T1"
+elif [[ $TEAM == "RHT Learner Experience - T2" ]]
+  then
+    TEAM_ACRONIM="T2"
+fi
+
+if [[ $REGION == "" ]]
+  then
+    /usr/bin/ansible-playbook {{ playbook_dir }}/snow.yml -e user_name="\"$USER_NAME\"" -e team_name="\"$TEAM\"" -e team_acronim="\"$TEAM_ACRONIM\""
     echo ""
     echo "---> Starting selenium script <---"
-    /usr/bin/python /tmp/snow-$TEAM.py
-  elif [[ $USER_NAME == "" ]]
+    /usr/bin/python /tmp/snow-$TEAM_ACRONIM.py
+elif [[ $USER_NAME == "" ]]
   then
-    /usr/bin/ansible-playbook {{ playbook_dir }}/snow.yml -e region="\"$REGION\"" -e team_name="\"$TEAM\""
+    /usr/bin/ansible-playbook {{ playbook_dir }}/snow.yml -e region="\"$REGION\"" -e team_name="\"$TEAM\"" -e team_acronim="\"$TEAM_ACRONIM\""
     echo ""
     echo "---> Starting selenium script <---"
-    /usr/bin/python /tmp/snow-$TEAM.py
+    /usr/bin/python /tmp/snow-$TEAM_ACRONIM.py
 fi
 
 
