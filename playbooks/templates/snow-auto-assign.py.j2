@@ -162,50 +162,6 @@ def auto_assign_tickets():
 
                 # Fill in name
                 driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').clear()
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').send_keys(
-                    first_name)
-
-                # Fill in email
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').clear()
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').send_keys(
-                    email)
-
-            except:
-                print("Failed to fill in name or email")
-
-            # Get the summary and fill in the short description
-            try:
-                short_description = re.findall("Description:.*", description)
-                summary = short_description[0].split(":  ")[1]
-                course = re.findall("Course:.*", description)
-                version = re.findall("Version:.*", description)
-
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').clear()
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').send_keys(
-                    course[0].split(":  ")[1].upper().replace(" ", "") + "-" + version[0].split(":  ")[1] + " Feedback: " + summary[
-                                                                                                                            :100] + "...")
-            except:
-                print("Failed to fill short_description")
-
-            # Extract user name from description and fill in the field
-            try:
-                username = re.findall("User Name:.*", description)
-                username = username[0].split(":  ")[1]
-
-                # Extract user email from description and fill in the field
-                user_email = re.findall("User Email:.*", description)
-                # RedHatters' issues usually come without email, just their RHNID in "User Name: " field, so it will fail the following email regex being empty and will jump to the except
-                try:
-                    email = re.findall("([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
-                    first_name = search_name(username.replace(" ", ""), email)
-                except:
-                    first_name = search_name(username.replace(" ", ""), "")
-                    email = username.replace(" ", "") + "@redhat.com"
-
-                WebDriverWait(driver, 10).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
-
-                # Fill in name
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').clear()
                 driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').send_keys(first_name)
 
                 # Fill in email
@@ -258,7 +214,7 @@ Best Regards,
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).send_keys('1')
 
             # Save (First time to change status In Progress)
-            #WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
 
             # Assign to {{ user_name }}
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).clear()
@@ -273,9 +229,9 @@ Best Regards,
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assignment_group"]'))).send_keys(Keys.RETURN)
 
             # Save (Second time to assign to teammate)
-            #WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
 
-            # Go back to "RHT - Unassigned T2"
+            # Go back to the "Unassigned" list
             driver.switch_to.default_content()
 {% if team_name == 'RHT Learner Experience' %}
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[5]/div/div/nav/div/div[3]/div/div/magellan-favorites-list/ul/li[4]/div/div[1]/a'))).click()
