@@ -40,7 +40,7 @@ echo "Team: " $TEAM
 echo "Region: " $REGION
 
 if [[ $TEAM != '' ]]; then
-for process in $(ps -ef |egrep "$TEAM" |egrep -v 'grep|bash' |awk '{print $2}'); do kill $process; done
+for process in $(ps -ef |egrep -w "$TEAM" |egrep -v 'grep|bash' |awk '{print $2}'); do kill $process; done
 fi
 
 if [[ $TEAM == "RHT Learner Experience" ]]
