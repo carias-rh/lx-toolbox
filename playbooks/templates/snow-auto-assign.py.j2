@@ -189,6 +189,20 @@ def auto_assign_tickets():
             # If it is not a jira ticket, then reply to the user
             try:
                 if not '[training-feedback]' in short_summary:
+{% if team_name == 'RHT Learner Experience' %}
+                    ack_response = "Hi " + first_name + """,
+
+Thanks for contacting Red Hat Online Learning support team.
+
+We have received your request and working on it, will update you at the earliest.
+
+Best Regards,
+{{ user_name }}
+{{ team_name }}"""
+
+{% endif %}
+{% if team_name == 'RHT Learner Experience - T2' %}
+
                     ack_response = "Hi " + first_name + """,
 
 Thanks for submitting your feedback to the Learner Experience Team.
@@ -198,6 +212,7 @@ We are reviewing your message and will get back to you as soon as possible.
 Best Regards,
 {{ user_name }}
 {{ team_name }}"""
+{% endif %}
 
                     driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]').send_keys(ack_response)
             except:
