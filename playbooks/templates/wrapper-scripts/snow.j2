@@ -40,15 +40,15 @@ echo "Team: " $TEAM
 echo "Region: " $REGION
 
 if [[ $TEAM != '' ]]; then
-for process in $(ps -ef |egrep -w "$TEAM" |egrep -v 'grep|bash' |awk '{print $2}'); do kill $process; done
+for process in $(ps -ef |egrep -w "$TEAM_ACRONIM" |egrep -v 'grep|bash' |awk '{print $2}'); do kill $process; done
 fi
 
 if [[ $TEAM == "RHT Learner Experience" ]]
   then
-    TEAM_ACRONIM="T1"
+    TEAM_ACRONIM="LX-T1"
 elif [[ $TEAM == "RHT Learner Experience - T2" ]]
   then
-    TEAM_ACRONIM="T2"
+    TEAM_ACRONIM="LX-T2"
 fi
 
 if [[ $REGION == "" ]]
