@@ -138,10 +138,10 @@ def auto_assign_tickets():
 {% if team_name == 'RHT Learner Experience' %}
             try:
                 name = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute("value")
-                full_name = re.split(' ',name)
-                full_name[:] = (value for value in list if '@' not in value )
+                name_list = re.split(' ',name)
+                full_name = name_list[0] + " " + name_list[1]
             except:
-                pass
+                full_name = name_list[0]
 {% endif %}
 
 {% if team_name == 'RHT Learner Experience - T2' %}
