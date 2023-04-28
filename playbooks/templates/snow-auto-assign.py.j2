@@ -136,7 +136,12 @@ def auto_assign_tickets():
             fill_in_categorization_fields()
 
 {% if team_name == 'RHT Learner Experience' %}
-            first_name = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute("value")
+            try:
+                name = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute("value")
+                full_name = re.split(' ',name)
+                full_name[:] = (value for value in list if '@' not in value )
+            except:
+                pass
 {% endif %}
 
 {% if team_name == 'RHT Learner Experience - T2' %}
@@ -190,7 +195,7 @@ def auto_assign_tickets():
             try:
                 if not '[training-feedback]' in short_summary:
 {% if team_name == 'RHT Learner Experience' %}
-                    ack_response = "Hi " + first_name + """,
+                    ack_response = "Hi " + full_name + """,
 
 Thanks for contacting Red Hat Online Learning support team.
 
