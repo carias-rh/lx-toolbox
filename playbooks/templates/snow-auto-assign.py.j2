@@ -150,7 +150,7 @@ def auto_assign_tickets():
 
 {% if team_name == 'RHT Learner Experience - T2' %}
             # Get description
-            description = driver.find_element("XPATH", '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]').get_attribute('value')
+            description = driver.find_element("xpath", '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]').get_attribute('value')
 
             # Extract user name from description and fill in the field
             try:
