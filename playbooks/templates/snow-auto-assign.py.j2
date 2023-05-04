@@ -137,6 +137,10 @@ def auto_assign_tickets():
 
 {% if team_name == 'RHT Learner Experience' %}
             try:
+                # Get teammate_name from t1.robots4life.es
+                teammate_name = os.popen("curl -s t1.robots4life.es/api/shift |jq -r '.name'").read().strip()
+
+                # Get user's ticket name
                 name = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute("value")
                 name_list = re.split(' ',name)
                 full_name = name_list[0] + " " + name_list[1]
@@ -202,7 +206,7 @@ Thanks for contacting Red Hat Online Learning support team.
 We have received your request and working on it, will update you at the earliest.
 
 Best Regards,
-{{ user_name }}
+""" + teammate_name + """ 
 {{ team_name }}"""
 
 {% endif %}
@@ -267,7 +271,14 @@ Best Regards,
 go_to_main_site()
 login()
 while True:
+{% if team_name == 'RHT Learner Experience' %}
+    teammate_name = os.popen("curl -s t1.robots4life.es/api/shift |jq -r '.name'").read().strip()
+    if teammate_name != 'null':
+        auto_assign_tickets()
+{% endif %}
+{% if team_name == 'RHT Learner Experience - T2' %}
     auto_assign_tickets()
+{% endif %}
     time.sleep(60)
     go_to_main_site()
 
