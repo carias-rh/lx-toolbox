@@ -242,7 +242,13 @@ Best Regards,
 
             # Assign to {{ user_name }}
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).clear()
+{% if team_name == 'RHT Learner Experience' %}
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys(teammate_name)
+{% endif %}
+
+{% if team_name == 'RHT Learner Experience - T2' %}
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys("{{ user_name }}")
+{% endif %}
             time.sleep(1.5)
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys(Keys.RETURN)
 
