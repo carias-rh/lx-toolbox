@@ -1,0 +1,13 @@
+#!/bin/bash
+
+if [ $# -ne 1 ]
+  then
+      echo "Please, introduce only the ticket number:"
+      echo "$ jira RHT12345678"
+
+  else
+      /usr/bin/ansible-playbook {{ playbook_dir }}/jira.yml -e snow_id="$1"
+fi
+
+echo "---> Starting selenium script <---"
+/usr/bin/python3 /tmp/jira.py &

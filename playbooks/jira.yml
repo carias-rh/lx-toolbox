@@ -12,7 +12,3 @@
       template:
         src: templates/create-jira.py.j2
         dest: "/tmp/jira.py"
-
-    - name: Create jira
-      shell: '/usr/bin/python3 /tmp/jira.py'
-      register: selenium
