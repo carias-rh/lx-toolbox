@@ -11,10 +11,12 @@ from selenium.webdriver.common.by import By
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1600,1200")
-{% if action == "qa" %}
+{% if action == "qa" and  debug == 'True' %}
 #DEBUG: Run in terminal: google-chrome --remote-debugging-port=8999 --user-data-dir="/home/carias/.config/google-chrome/quality-assurance"
 options.add_experimental_option("debuggerAddress", "localhost:8999")
 options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/quality-assurance")
+{% elif action == "qa" %}
+options.add_argument("--headless")
 {% else %}
 # Define the webdriver to use.
 # Chrome webdriver
@@ -54,7 +56,6 @@ def check_running_session():
 
     if pid: return int(pid)
     else: return 0
-
 
 # Go to the course site
 def go_to_course(course_id):
@@ -194,7 +195,7 @@ def select_lab_environment_tab(tab_name):
 
 
 def create_lab(course_id):
-    step("Creating lab")
+    step("Creating lab " + course_id)
     try:
         select_lab_environment_tab("lab")
         WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Create")]'))).click()
@@ -203,7 +204,7 @@ def create_lab(course_id):
     time.sleep(20)
 
 def start_lab(course_id):
-    step("Starting lab")
+    step("Starting lab " + course_id)
     try:
         select_lab_environment_tab("lab")
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Start")]'))).click()
@@ -212,7 +213,7 @@ def start_lab(course_id):
     time.sleep(5)
 
 def stop_lab(course_id):
-    step("Stopping lab")
+    step("Stopping lab " + course_id)
     try:
         select_lab_environment_tab("lab")
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Stop")]'))).click()
@@ -222,7 +223,7 @@ def stop_lab(course_id):
     time.sleep(5)
 
 def delete_lab(course_id):
-    step("Deleting lab")
+    step("Deleting lab " + course_id)
     try:
         select_lab_environment_tab("lab")
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Delete")]'))).click()
@@ -509,24 +510,16 @@ def toggle_tab(tab):
         driver.switch_to.window(handles[0])
 
 ## Main
-{% if selenium_driver == "chrome" %}
+{% if action == "qa" and selenium_driver == "chrome" and debug == 'True' %}
 if not check_running_session():
     open_profile()
     driver = webdriver.Chrome(options=options)
     login()
 else:
     driver = webdriver.Chrome(options=options)
+{% elif action == "qa" and selenium_driver == "chrome" %}
+driver = webdriver.Chrome(options=options)
 {% endif %}
-
-{% if action == "qa" and selenium_driver == "chrome" %}
-if not check_running_session():
-    open_profile()
-    driver = webdriver.Chrome(options=options)
-    login()
-else:
-    driver = webdriver.Chrome(options=options)
-{% endif %}
-
 
 # Rol prod, rol-stage and china environments are different on login and cookies
 {% if lab_environment == "rol" %}
@@ -611,6 +604,7 @@ increase_lifespan("{{ course }}")
 {% endif %}
 
 {% if action == "impersonate" %}
+select_lab_environment_tab("course")
 impersonate()
 go_to_course("{{ course }}")
 select_lab_environment_tab("lab")
