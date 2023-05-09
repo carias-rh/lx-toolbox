@@ -151,7 +151,7 @@ You will need the SSH key access to [github](https://www.freecodecamp.org/news/g
 
 It's possible to start the QA from any chapter and the script will continue from that point until the end.  
 
-`qa -c 180 -s ch02s02 -e china`
+`$ qa -c 180 -s ch02s02 -e china`
 
 ![image](https://user-images.githubusercontent.com/80515069/233403992-3e15964b-32c9-4f6a-95a3-ec0efa5bac42.png)
 
@@ -210,12 +210,12 @@ I created a crontab to periodically run the script every hour during my shift.
 # Jira ticket from SNOW Feedback
 This script create a new jira from a SNOW feedback ticket. Review that everything is fine according to priority, categorization and a proper summary and description.
 
-`ansible-playbook playbooks/jira.yml -e snow_id='RHT1915340'`
+`$ jira RHT1915340`
 
 # Intercom status change
 This script will switch your status on intercom to Away/Active.
 
-`ansible-playbook playbooks/intercom.yml -e status="Away"`
+`$ ansible-playbook playbooks/intercom.yml -e status="Away"`
 
 ![image](https://user-images.githubusercontent.com/80515069/223106095-6628576d-ba36-4c86-b258-856eca079b73.png)
 
