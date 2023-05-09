@@ -147,6 +147,7 @@ def auto_assign_tickets():
                 user_email = re.findall("User Email:.*", description)
                 # RedHatters' issues usually come without email, just their RHNID in "User Name: " field, so it will fail the following email regex being empty and will jump to the except
                 try:
+                # TODO: when intercom login fails, it will try with rover for a customer and put Carlos in the name field. 
                     email = re.findall("([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
                     first_name = search_name(username.replace(" ", ""), email)
                 except:
@@ -224,7 +225,7 @@ Best Regards,
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).send_keys('1')
 
             # Save (First time to change status In Progress)
-            #WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
 
             # Assign to {{ user_name }}
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).clear()
@@ -245,7 +246,7 @@ Best Regards,
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assignment_group"]'))).send_keys(Keys.RETURN)
 
             # Save (Second time to assign to teammate)
-            #WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
 
             # Go back to the "Unassigned" list
             driver.switch_to.default_content()
