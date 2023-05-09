@@ -22,7 +22,7 @@ function get_course_from_list()
                                 COURSE_VERSION=$CHECK_COURSE_VERSION
                         fi
                 done
-                COURSE_LIST=$(cat /tmp/list.txt |grep -v ea | grep $COURSE_VERSION)
+                COURSE_LIST=$(cat /tmp/list.txt |grep -v ea | grep "$COURSE_VERSION\..*")
 
                 # compare subversion
                 COURSE_SUBVERSION=0

@@ -1,0 +1,14 @@
+- name: ROL labs launcher
+  hosts: localhost
+  vars_files: credentials.yml
+  vars:
+    - rh_username: "{{ username | default('') }}"
+    - rh_password: "{{ password | default('') }}"
+    - counter: 0
+    - status: "Away"
+        
+  tasks:
+    - name: Generate selenium script
+      template:
+        src: templates/create-jira.py.j2
+        dest: "/tmp/jira.py"

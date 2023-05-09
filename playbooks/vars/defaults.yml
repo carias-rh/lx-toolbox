@@ -2,6 +2,11 @@ selenium_driver: "chrome"
 rh_username: "{{ username | default('') }}"
 rh_password: "{{ password | default('') }}"
 counter: 0
+
 action: ""
 impersonate_username: ""
+
+status: "stopped"
+chapter_and_section: "ch01s02"
+
 lx_teammate_name: ""

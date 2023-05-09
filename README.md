@@ -1,15 +1,9 @@
-# Automated lab environment creation
-This project uses ansible and selenium to create, delete, and extend life of most used labs in rol.redhat.com:
-  - rh124-9.0
-  - rh134-9.0
-  - rh199-9.0
-  - rh294-9.0
-  - do180-4.10
-  - do280-4.10
-  - do288-4.10
-  - do447-2.8
+This project contains a series of web automation scripts for the daily tasks of the Learner Experience Team at Red Hat. 
+- Automated lab environment creation
+- Semi-automated QA for RHxxx courses
+- SNOW auto-assign tickets
+- Intercom status change
 
-It uses ansible-playbook to generate python scripts from templates that will launch a browser by using selenium.
 
 ## Setup
 
@@ -67,6 +61,20 @@ username: "youruser@mail.com"
 password: "yourpassword"
 ``` 
 
+
+# Automated lab environment creation
+This script uses ansible and selenium to create, delete, and extend life of most used labs in rol.redhat.com:
+  - rh124-9.0
+  - rh134-9.0
+  - rh199-9.0
+  - rh294-9.0
+  - do180-4.10
+  - do280-4.10
+  - do288-4.10
+  - do447-2.8
+
+It uses ansible-playbook to generate python scripts from templates that will launch a browser by using selenium.
+
 ## Running the thing
 
 The `setup.yml` playbook has placed in your `/usr/local/bin/` dir some wrapper scripts that use the `rol-prod` environment by default. So if you want to use stage, append `rol-stage` as the second parameter.
@@ -80,9 +88,6 @@ The wrapper script will look into the list of courses and match the latest versi
 [rol-start-render.webm](https://user-images.githubusercontent.com/80515069/214608957-41e14cd4-1084-45fc-bd4a-3e08cc34cf84.webm)
 
 ```
-$ which start
-/usr/local/bin/start
-
 $ start 180 rol-stage
 
 Course starting: do180-4.10
@@ -137,8 +142,47 @@ $ cat playbooks/create.yaml
         - rh294-9.0
         ...
 ```
+# Semi-automated QA for RHxxx courses
+This script will assist you in the introduction of the commands during any QA of the RH series, which are mostly done using the command line interface. It has some limitations, such those exercise where it's asked the user to open a new terminal tab, or that commands may need to be introduced directly into a different host without sshing it first, or with commands that require some custom user input. 
 
-## Extended functionality
+Despite these limitations, the script has proven to serve of great help during E2E QAs, reducing the human work to merely check that the output of the commands correspond to the steps in the guide.
+
+You will need the SSH key access to [github](https://www.freecodecamp.org/news/git-ssh-how-to/) configured to checkout the version of the course from repo to get the commands.
+
+It's possible to start the QA from any chapter and the script will continue from that point until the end.  
+
+`qa -c 180 -s ch02s02 -e china`
+
+![image](https://user-images.githubusercontent.com/80515069/233403992-3e15964b-32c9-4f6a-95a3-ec0efa5bac42.png)
+
+`[...]`
+
+The script will get the commands from the indicated section, or from the first guided exercise if not indicated 
+
+![image](https://user-images.githubusercontent.com/80515069/233404289-9ca4540e-4b00-4081-a8be-08f2bf5d7cf2.png)
+
+
+`[...]`
+
+![image](https://user-images.githubusercontent.com/80515069/233405072-26d7810c-0148-4841-9fb9-bbcaed416895.png)
+
+
+At this point of the script, the lab is up and running, but needs 2 manual steps before hitting Enter to start the introduction of the commands: 
+ - opening a terminal
+ - disabling key repetition on `Settings > Universal Access > Typing > Repeat Keys = Off`
+
+Note that this script is run in headless mode to avoid any manual interruption of the user in the automation tool, so you will need to open a new session with (i.e.)  `start 180` to have your monitoring workstation terminal.
+
+You will notice that after introducing some kind of commands, a prompt to continue with the script execution will appear. This is to avoid the script running without control and introducing commands incorrectly. Have a look at some special commands that require these stopper prompts in the `operate-lab.py.j2` template. 
+
+![image](https://user-images.githubusercontent.com/80515069/233406747-cc578ae1-d1c1-4b25-be4c-4b7084896c22.png)
+
+How to steer the script in other exceptional situations:
+
+- If for any reasons, the script introduced an incorrect command, because it needed a customized input, or is missing some configuration file, you can stop the terminal process with `CTRL + s`. Then, resolve any inconsistencies in the exercise and resume the script execution with `CTRL + q`. 
+- This is a work in progress project, mostly tested on RHxxx courses, so if you find any other exceptional kind of command that needs a stopper prompt, please tell or submit a PR. Thanks!
+
+# SNOW auto-assign tickets
 The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. The need for this script emerged from the time-consuming task of filling all the field of each ticket, which came without the name, email, and summary filled.
 I could have make this script simpler, but I finally decided to automate the whole thing to auto-assign the tickets to my queue as they come and automatically reply to the users.
 
@@ -161,4 +205,20 @@ I created a crontab to periodically run the script every hour during my shift.
 #######################
 
 59 8-13 * * 1-5   export DISPLAY=:1 && SHELL=/usr/bin/bash && source ${HOME}/.bashrc && /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/playbooks/snow.yml
-``
+```
+
+# Jira ticket from SNOW Feedback
+This script create a new jira from a SNOW feedback ticket. Review that everything is fine according to priority, categorization and a proper summary and description.
+
+`ansible-playbook playbooks/jira.yml -e snow_id='RHT1915340'`
+
+# Intercom status change
+This script will switch your status on intercom to Away/Active.
+
+`ansible-playbook playbooks/intercom.yml -e status="Away"`
+
+![image](https://user-images.githubusercontent.com/80515069/223106095-6628576d-ba36-4c86-b258-856eca079b73.png)
+
+
+
+

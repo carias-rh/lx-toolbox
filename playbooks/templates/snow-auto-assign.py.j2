@@ -33,11 +33,11 @@ def go_to_main_site():
 def snow_login():
     try:
             # RH SSO
-            driver.find_element("xpath", '//*[@id="username"]').send_keys("{{ username }}")
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
             counter = os.popen("cat {{ playbook_dir }}/../counter").read()
             token = os.popen("oathtool --hotp {{ secret }} -c " + str(counter)).read().replace('\n', '')
-            driver.find_element("xpath", '//*[@id="password"]').send_keys(str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
-            driver.find_element("xpath", '//*[@id="submit"]').click()
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(token).replace('\n', ''))
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
 
             # Increment SSO token counter
             counter = int(counter) + 1
@@ -57,7 +57,6 @@ def intercom_login():
         except:
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
                 (By.XPATH, '//*[@id="view_container"]/div/div/div[2]/div/div[1]/div/form/span/section/div/div/div/div/ul/li[1]/div/div[1]/div/div[2]/div[2]'))).click()
-
     except:
         print("An exception occurred while accepting during login")
 

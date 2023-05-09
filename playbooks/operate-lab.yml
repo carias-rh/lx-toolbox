@@ -14,15 +14,23 @@
       - do188-4.10
       - do280-4.12
       - do288-4.10
-      - do374-2.0
-      - do447-2.8
-        
+      - do374-2.2
+      - do467-2.2
+
   tasks:
     - name: Generate selenium script
       template:
         src: templates/operate-lab.py.j2
-        dest: "/tmp/operate-lab.py"
+        dest: "/tmp/{{ action }}-{{ course_id[0] }}-{{ lab_environment }}.py"
+      tags:
+        - generate_template
 
-    - name: Create courses
-      shell: '/usr/bin/python3 /tmp/operate-lab.py'
-      register: selenium
+    - name: Clone git repo for qa
+      ansible.builtin.git:
+        repo: "git@github.com:RedHatTraining/{{ course_id[0] | split('-') | first }}.git"
+        dest: "files/{{ course_id[0] | split('-') | first | lower }}"
+      when: '"qa" == action'
+
+    - name: Running scripts
+      shell: '/usr/bin/python3 /tmp/{{ action }}-{{ course_id[0] }}-{{ lab_environment }}.py'
+      when: '"qa" != action'
