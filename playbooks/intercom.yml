@@ -1,6 +1,6 @@
 - name: ROL labs launcher
   hosts: localhost
-  vars_files: credentials.yml
+  vars_files: vars/credentials.yml
   vars:
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"

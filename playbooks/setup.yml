@@ -16,6 +16,7 @@
           - python3-pip
           - firefox.x86_64
           - chromium.x86_64
+          - perl-Digest-SHA-1:6.02-1.el8.x86_64
         state: present
 
     - name: Install Selenium with pip
@@ -54,6 +55,7 @@
         - impersonate.j2
         - qa.j2
         - jira.j2
+        - snow.j2
       tags: scripts
 
     - name: generate secret and

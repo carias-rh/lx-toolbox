@@ -1,6 +1,6 @@
 - name: ROL labs launcher
   hosts: localhost
-  vars_files: credentials.yml
+  vars_files: vars/credentials.yml
   vars:
     - rh_username: "{{ username | default('') }}"
     - rh_password: "{{ password | default('') }}"
@@ -11,8 +11,4 @@
     - name: Generate selenium script
       template:
         src: templates/snow-auto-assign.py.j2
-        dest: "/tmp/snow.py"
-
-    - name: Auto-assign snow tickets
-      shell: '/usr/bin/python3 /tmp/snow.py'
-      register: selenium
+        dest: "/tmp/snow-{{ team_acronim }}.py"
