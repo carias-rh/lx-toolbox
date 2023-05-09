@@ -30,7 +30,3 @@
         repo: "git@github.com:RedHatTraining/{{ course_id[0] | split('-') | first }}.git"
         dest: "files/{{ course_id[0] | split('-') | first | lower }}"
       when: '"qa" == action'
-
-    - name: Running scripts
-      shell: '/usr/bin/python3 /tmp/{{ action }}-{{ course_id[0] }}-{{ lab_environment }}.py'
-      when: '"qa" != action'

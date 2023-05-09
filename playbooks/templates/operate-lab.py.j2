@@ -666,4 +666,6 @@ print("#####################################")
 
 {% endfor %}
 
+{%- if action == "delete" -%}
 driver.quit()
+{%- endif %}

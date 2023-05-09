@@ -6,7 +6,7 @@ if [ $# -ne 1 ]
       echo "$ jira RHT12345678"
 
   else
-      /usr/bin/ansible-playbook {{ playbook_dir }}/jira.yml -e snow_id="$1"
+      /usr/bin/ansible-playbook {{ playbook_dir }}/jira.yml -e snow_id="$1" -e selenium_driver="chrome"
 fi
 
 echo "---> Starting selenium script <---"

@@ -45,7 +45,8 @@ function get_course_from_list()
 function start_course()
 {
         /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="impersonate" -e impersonate_username=$2  -e "{'course_id': ['$COURSE_PATH']}" -v
-
+        echo "---> Starting selenium script <---"
+        /usr/bin/python /tmp/impersonate-$COURSE_PATH-rol.py
 }
 
 if [[ $# -ne 2 ]]

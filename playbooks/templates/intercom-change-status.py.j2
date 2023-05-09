@@ -26,11 +26,11 @@ def go_to_main_site():
 def intercom_login():
     try:
         WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
-            (By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div[3]/a/div[2]'))).click()
+            (By.XPATH, '//*[@class="m__login__form"]//*[contains(text(), "Sign in with Google")]'))).click()
         try:
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="identifierId"]'))).send_keys("{{ username }}" + "@redhat.com")
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
-                (By.XPATH, '/html/body/div[1]/div[1]/div[2]/div/div[2]/div/div/div[2]/div/div[2]/div/div[1]/div/div/button/span'))).click()
+                (By.XPATH, '//*[contains(text(), "Next")]'))).click()
         except:
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable(
                 (By.XPATH, '//*[@id="view_container"]/div/div/div[2]/div/div[1]/div/form/span/section/div/div/div/div/ul/li[1]/div/div[1]/div/div[2]/div[2]'))).click()
