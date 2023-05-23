@@ -15,6 +15,7 @@
           - python3-pip
           - firefox.x86_64
           - chromium.x86_64
+          - jq
         state: present
 
     - name: Install Selenium with pip
@@ -34,6 +35,14 @@
       ansible.builtin.unarchive:
         src: "/tmp/{{ item }}"
         dest: "/usr/bin/"
+      loop:
+        - geckodriver-v0.32.2-linux64.tar.gz
+        - chromedriver_linux64.zip
+
+    - name: remove /tmp files
+      ansible.builtin.file:
+        path: "/tmp/{{ item }}"
+        state: absent
       loop:
         - geckodriver-v0.32.2-linux64.tar.gz
         - chromedriver_linux64.zip
