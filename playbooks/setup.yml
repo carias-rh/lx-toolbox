@@ -4,7 +4,7 @@
 
   tasks:
     - name: Install epel repository
-      command: dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
+      command: microdnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
       ignore_errors: true
 
     - name: Ensure dependencies are installed.
@@ -16,7 +16,6 @@
           - python3-pip
           - firefox.x86_64
           - chromium.x86_64
-          - perl-Digest-SHA-1:6.02-1.el8.x86_64
         state: present
 
     - name: Install Selenium with pip
