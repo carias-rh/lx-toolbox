@@ -40,6 +40,7 @@
 
     - name: Install xq
       shell: 'curl -sSL https://bit.ly/install-xq | bash'
+      ignore_errors: true
 
     - name: Install wrapper scripts into /usr/bin/
       ansible.builtin.template:
