@@ -11,7 +11,6 @@
       package:
         name:
           - oathtool
-          - perl-Digest-SHA-1
           - epel-release
           - python3-pip
           - firefox.x86_64
@@ -58,7 +57,7 @@
       tags: scripts
 
     - name: generate secret and
-      shell: 'dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40'
+      shell: 'dd if=/dev/random bs=1M count=1 status=none | sha1sum | cut -b 1-40'
       register: generated_secret
       tags: secret
 
