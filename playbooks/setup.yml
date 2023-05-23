@@ -3,17 +3,12 @@
   become: true
 
   tasks:
-    - name: Install epel repository
-      command: microdnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
-      ignore_errors: true
-
     - name: Ensure dependencies are installed.
       package:
         name:
           - oathtool
           - epel-release
           - python3-pip
-          - firefox.x86_64
           - chromium.x86_64
           - jq
         state: present
@@ -28,7 +23,6 @@
         url: "{{ item }}"
         dest: "/tmp/{{ item | split('/')| last }}"
       loop:
-        - "https://github.com/mozilla/geckodriver/releases/download/v0.32.2/geckodriver-v0.32.2-linux64.tar.gz"
         - "https://chromedriver.storage.googleapis.com/111.0.5563.64/chromedriver_linux64.zip"
 
     - name: Extract selenium drivers into /usr/bin/
@@ -36,7 +30,6 @@
         src: "/tmp/{{ item }}"
         dest: "/usr/bin/"
       loop:
-        - geckodriver-v0.32.2-linux64.tar.gz
         - chromedriver_linux64.zip
 
     - name: remove /tmp files
@@ -44,7 +37,6 @@
         path: "/tmp/{{ item }}"
         state: absent
       loop:
-        - geckodriver-v0.32.2-linux64.tar.gz
         - chromedriver_linux64.zip
 
     - name: Install xq
