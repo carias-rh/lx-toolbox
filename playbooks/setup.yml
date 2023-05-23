@@ -28,7 +28,7 @@
         dest: "/tmp/{{ item | split('/')| last }}"
       loop:
         - "https://github.com/mozilla/geckodriver/releases/download/v0.32.2/geckodriver-v0.32.2-linux64.tar.gz"
-        - "https://chromedriver.storage.googleapis.com/110.0.5481.77/chromedriver_linux64.zip"
+        - "https://chromedriver.storage.googleapis.com/112.0.5615.49/chromedriver_linux64.zip"
 
     - name: Extract selenium drivers into /usr/bin/
       ansible.builtin.unarchive:
