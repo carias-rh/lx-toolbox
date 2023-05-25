@@ -48,11 +48,6 @@ elif [[ $TEAM == "RHT Learner Experience - T2" ]]
     TEAM_ACRONIM="LX-T2"
 fi
 
-if [[ $TEAM != '' ]]; then
-for process in $(ps -ef |egrep -w "$TEAM_ACRONIM" |egrep -v 'grep|bash' |awk '{print $2}'); do kill $process; done
-fi
-
-
 if [[ $REGION == "" ]]
   then
     /usr/bin/ansible-playbook {{ playbook_dir }}/snow.yml -e user_name="\"$USER_NAME\"" -e team_name="\"$TEAM\"" -e team_acronim="\"$TEAM_ACRONIM\""
