@@ -1,6 +1,6 @@
 - name: ROL labs installer
   hosts: localhost
-  become: true
+  #become: true
 
   tasks:
     - name: Ensure dependencies are installed.
