@@ -271,8 +271,11 @@ Best Regards,
         print("No more items to assign")
 
 # Main
+print('Im doing something')
 go_to_main_site()
+print('Went to the main site')
 snow_login()
+print('I logged in snow')
 while True:
 {% if team_name == 'RHT Learner Experience' %}
     teammate_name = os.popen("curl -s t1.robots4life.es/api/shift |jq -r '.name'").read().strip()
