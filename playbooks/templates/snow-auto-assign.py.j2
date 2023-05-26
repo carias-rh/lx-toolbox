@@ -21,7 +21,7 @@ options.add_argument("--window-size=1600,1200")
 # Define the webdriver to use.
 # Chrome webdriver
 #driver = webdriver.Chrome(options=options)
-driver = webdriver.Remote(command_executor='http://selenium:4444', options=options)
+driver = webdriver.Remote(command_executor='http://localhost:4444', options=options)
 
 
 counter = 1
