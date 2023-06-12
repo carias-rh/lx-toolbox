@@ -11,21 +11,17 @@ from selenium.webdriver.support.select import Select
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 
+
 options = webdriver.ChromeOptions()
-#options.add_argument('--ignore-certificate-errors')
-#options.add_argument('--no-sandbox')
-#options.add_argument('--disable-dev-shm-usage')
 options.add_argument("--window-size=1600,1200")
-#options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/{{ team_acronim }}")
 
 # Define the webdriver to use.
 # Chrome webdriver
-#driver = webdriver.Chrome(options=options)
-driver = webdriver.Remote(command_executor='http://localhost:4444', options=options)
+driver = webdriver.Chrome(options=options)
 
 
-counter = 1
 # Prints the current step
+counter = 1
 def step(step_str, patience = 1):
     global counter
     print('#####################################')
@@ -271,11 +267,9 @@ Best Regards,
         print("No more items to assign")
 
 # Main
-print('Im doing something')
 go_to_main_site()
-print('Went to the main site')
 snow_login()
-print('I logged in snow')
+
 while True:
 {% if team_name == 'RHT Learner Experience' %}
     teammate_name = os.popen("curl -s t1.robots4life.es/api/shift |jq -r '.name'").read().strip()
