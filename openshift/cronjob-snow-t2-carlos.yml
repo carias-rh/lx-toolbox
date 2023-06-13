@@ -7,6 +7,7 @@ spec:
   concurrencyPolicy: Replace
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 17280
       template:
         spec:
           containers:
@@ -55,7 +56,8 @@ spec:
             secret:
               defaultMode: 420
               secretName: credentials
-  schedule: 36 9 * * *
+
+  schedule: 06 4 * * *
   timeZone: "Asia/Kolkata"
   startingDeadlineSeconds: 200
   successfulJobsHistoryLimit: 3
