@@ -1,0 +1,25 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: sso-rh-login
+  namespace: lx-snow
+  labels:
+    app: sso-rh-login
+    app.kubernetes.io/component: sso-rh-login
+    app.kubernetes.io/instance: sso-rh-login
+    app.kubernetes.io/name: sso-rh-login
+    app.kubernetes.io/part-of: snow-t2
+  annotations:
+    app.openshift.io/vcs-ref: feature/snow
+    app.openshift.io/vcs-uri: 'https://github.com/carias-rh/sso-rh-login.git'
+    openshift.io/generated-by: OpenShiftWebConsole
+spec:
+  ports:
+    - name: 5000-tcp
+      protocol: TCP
+      port: 5000
+      targetPort: 5000
+  type: ClusterIP
+  selector:
+    app: sso-rh-login
+    deploymentconfig: sso-rh-login

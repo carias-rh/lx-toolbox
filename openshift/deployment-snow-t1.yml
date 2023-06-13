@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: snow-t1
+  namespace: lx-snow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: snow-t1
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: snow-t1
+        app.kubernetes.io/component: snow-t1
+        app.kubernetes.io/name: snow-t1
+        deploymentconfig: snow-t1
+    spec:
+      containers:
+      - args:
+        - /bin/sh
+        - -c
+        - snow -t 'RHT Learner Experience'
+        env:
+        - name: DISPLAY
+          value: :99
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        image: quay.io/carias_rh/lx-toolbox:latest
+        imagePullPolicy: Always
+        name: snow-t1
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /runner
+          name: snow-t1-1
+        - mountPath: /tmp/lx-toolbox/playbooks/vars/credentials.yml
+          name: credentials-volume
+          subPath: credentials.yml
+      - image: docker.io/metal3d/xvfb
+        imagePullPolicy: Always
+        name: xvfb
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - emptyDir: {}
+        name: snow-t1-1
+      - name: credentials-volume
+        secret:
+          defaultMode: 420
+          secretName: credentials
+  

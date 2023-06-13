@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: snow-t2-wasim
+  namespace: lx-snow
+spec:
+  concurrencyPolicy: Replace
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - args:
+            - /bin/sh
+            - -c
+            - /usr/bin/snow -t 'RHT Learner Experience - T2' -u 'Wasim Raja'
+            env:
+            - name: DISPLAY
+              value: :99
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            image: quay.io/carias_rh/lx-toolbox:latest
+            imagePullPolicy: Always
+            name: snow-t2
+            ports:
+            - containerPort: 8080
+              protocol: TCP
+            resources: {}
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+            volumeMounts:
+            - mountPath: /runner
+              name: snow-t2-1
+            - mountPath: /tmp/lx-toolbox/playbooks/vars/credentials.yml
+              name: credentials-volume
+              subPath: credentials.yml
+          - image: docker.io/metal3d/xvfb
+            imagePullPolicy: Always
+            name: xvfb
+            ports:
+            - containerPort: 99
+              protocol: TCP
+            resources: {}
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+          dnsPolicy: ClusterFirst
+          restartPolicy: OnFailure
+          schedulerName: default-scheduler
+          securityContext: {}
+          terminationGracePeriodSeconds: 30
+          volumes:
+          - emptyDir: {}
+            name: snow-t2-1
+          - name: credentials-volume
+            secret:
+              defaultMode: 420
+              secretName: credentials
+  schedule: 24 14 * * *
+  timeZone: Asia/Kolkata
+  startingDeadlineSeconds: 200
+  successfulJobsHistoryLimit: 3
+  suspend: false
