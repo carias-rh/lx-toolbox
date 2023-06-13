@@ -56,7 +56,7 @@ spec:
               defaultMode: 420
               secretName: credentials
   schedule: 24 14 * * *
-  timeZone: Asia/Kolkata
+  timeZone: "Asia/Kolkata"
   startingDeadlineSeconds: 200
   successfulJobsHistoryLimit: 3
   suspend: false
