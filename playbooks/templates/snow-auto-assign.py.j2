@@ -121,6 +121,9 @@ def auto_assign_tickets():
             # Select the first item on the list
             WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/span/div/div[5]/table/tbody/tr/td/div/table/tbody/tr[1]/td[3]/a'))).click()
 
+            # Get SNOW ID
+            snow_id = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="sys_readonly.x_redha_red_hat_tr_x_red_hat_training.number"]'))).get_attribute('value')
+
             # Change status to "In progress"
             Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.state"]')))).select_by_visible_text('In Progress')
 
@@ -237,10 +240,14 @@ Best Regards,
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).clear()
 {% if team_name == 'RHT Learner Experience' %}
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys(teammate_name)
+            # Print output
+            print("Assigned ticket " + snow_id + " to " + teammate_name)
 {% endif %}
 
 {% if team_name == 'RHT Learner Experience - T2' %}
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys("{{ user_name }}")
+            # Print output
+            print("Assigned ticket " + snow_id + " to {{ user_name }}")
 {% endif %}
             time.sleep(1.5)
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys(Keys.RETURN)
