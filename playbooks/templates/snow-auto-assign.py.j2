@@ -48,7 +48,7 @@ def snow_login():
     try:
             # RH SSO
             WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
-            WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL sso-rh-login:5000/get_otp").read()).replace('\n', ''))
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -s sso-rh-login:5000/get_otp").read()).replace('\n', ''))
             WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
 
     except:
@@ -114,12 +114,6 @@ def fill_in_categorization_fields():
         (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.issue"]')))).select_by_visible_text('Other')
 {% endif %}
 
-def fix_empty():
-    empty = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').get_attribute("value")
-    if empty == '':
-        driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').send_keys("RH Academy")
-
-
 def auto_assign_tickets():
     step("Assigning tickets ")
     try:
@@ -139,13 +133,10 @@ def auto_assign_tickets():
             # Fill in the boxes
             fill_in_categorization_fields()
 
-            # Fix if the short_description is empty
-            fix_empty()
-
 {% if team_name == 'RHT Learner Experience' %}
             try:
                 # Get teammate_name from t1.robots4life.es
-                teammate_name = os.popen("curl -sL t1.robots4life.es/api/shift |jq -r '.name'").read().strip()
+                teammate_name = os.popen("curl -s t1.robots4life.es/api/shift |jq -r '.name'").read().strip()
 
                 # Get user's ticket name
                 name = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute("value")
@@ -291,7 +282,7 @@ snow_login()
 
 while True:
 {% if team_name == 'RHT Learner Experience' %}
-    teammate_name = os.popen("curl -sL t1.robots4life.es/api/shift |jq -r '.name'").read().strip()
+    teammate_name = os.popen("curl -s t1.robots4life.es/api/shift |jq -r '.name'").read().strip()
     if teammate_name != 'null':
         auto_assign_tickets()
 {% endif %}
