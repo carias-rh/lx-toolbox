@@ -114,6 +114,12 @@ def fill_in_categorization_fields():
         (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.issue"]')))).select_by_visible_text('Other')
 {% endif %}
 
+def fix_empty():
+    empty = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').get_attribute("value")
+    if empty == '':
+        driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').send_keys("RH Academy")
+
+
 def auto_assign_tickets():
     step("Assigning tickets ")
     try:
@@ -132,6 +138,9 @@ def auto_assign_tickets():
 
             # Fill in the boxes
             fill_in_categorization_fields()
+
+            # Fix if the short_description is empty
+            fix_empty()
 
 {% if team_name == 'RHT Learner Experience' %}
             try:
