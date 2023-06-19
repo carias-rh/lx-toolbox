@@ -318,7 +318,7 @@ def get_commands(course, chapter_and_section):
 
     # checkout the current course version branch
     #os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git checkout $(git branch -a |grep " + course_version +" |head -n1) &>/dev/null").read()
-    os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git checkout main &>/dev/null; git pull").read()
+    os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git pull").read()
     # get the commands from source
     commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/" + course_no_version + "/guides/en-US/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
 

@@ -9,18 +9,18 @@
     #   tags: install
     #
     - name: Ensure dependencies are installed.
-      package:
+      ansible.builtin.package:
         name:
-         # - oathtool
-         # - perl-Digest-SHA-1
-         # - epel-release
+       # - oathtool
+       # - perl-Digest-SHA-1
+       # - epel-release
           - python3-pip
-         # - firefox.x86_64
-         # - chromium.x86_64
-         # - perl-Digest-SHA-1:6.02-1.el8.x86_64
+       # - firefox.x86_64
+       # - chromium.x86_64
+       # - perl-Digest-SHA-1:6.02-1.el8.x86_64
         state: present
       tags: install
-
+  
     - name: Install Selenium with pip
       ansible.builtin.pip:
         name: selenium
@@ -37,7 +37,6 @@
         dest: "/tmp/{{ item | split('/')| last }}"
       loop:
         - "https://github.com/mozilla/geckodriver/releases/download/v0.34.0/geckodriver-v0.34.0-linux64.tar.gz"
-        #- "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip"
       tags: drivers
 
     - name: Extract selenium drivers into /usr/bin/
@@ -46,7 +45,6 @@
         dest: "/usr/bin/"
       loop:
         - geckodriver-v0.34.0-linux64.tar.gz
-      #  - chromedriver_linux64.zip
       tags: drivers
 
 
@@ -65,20 +63,20 @@
         - snow.j2
       tags: scripts
 
-    - name: generate secret and
-      shell: 'dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40'
-      register: generated_secret
-      tags: secret
-
-
-    - name: place secret in playbooks/vars/credentials.yml file
-      ansible.builtin.lineinfile:
-        path: '{{ playbook_dir }}/vars/credentials.yml'
-        regexp: '^secret'
-        line: 'secret: {{ generated_secret.stdout }}'
-      tags: secret
-
-    - name: Use this secret string to create your token.redhat.com
-      debug:
-        var: generated_secret.stdout
-      tags: secret
+#    - name: generate secret and
+#      shell: 'dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40'
+#      register: generated_secret
+#      tags: secret
+#
+#
+#    - name: place secret in playbooks/vars/credentials.yml file
+#      ansible.builtin.lineinfile:
+#        path: '{{ playbook_dir }}/vars/credentials.yml'
+#        regexp: '^secret'
+#        line: 'secret: {{ generated_secret.stdout }}'
+#      tags: secret
+#
+#    - name: Use this secret string to create your token.redhat.com
+#      debug:
+#        var: generated_secret.stdout
+#      tags: secret
