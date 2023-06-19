@@ -6,6 +6,7 @@
     - name: Install epel repository
       command: dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
       ignore_errors: true
+      tags: install
 
     - name: Ensure dependencies are installed.
       package:
@@ -18,11 +19,17 @@
           - chromium.x86_64
           - perl-Digest-SHA-1:6.02-1.el8.x86_64
         state: present
+      tags: install
 
     - name: Install Selenium with pip
       ansible.builtin.pip:
         name: selenium
         executable: pip3
+      tags: install
+
+    - name: Install xq
+      shell: 'curl -sSL https://bit.ly/install-xq | sudo bash'
+      tags: install
 
     - name: Download selenium drivers
       ansible.builtin.get_url:
@@ -30,7 +37,8 @@
         dest: "/tmp/{{ item | split('/')| last }}"
       loop:
         - "https://github.com/mozilla/geckodriver/releases/download/v0.32.2/geckodriver-v0.32.2-linux64.tar.gz"
-        - "https://chromedriver.storage.googleapis.com/110.0.5481.77/chromedriver_linux64.zip"
+        - "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip"
+      tags: drivers
 
     - name: Extract selenium drivers into /usr/bin/
       ansible.builtin.unarchive:
@@ -39,9 +47,8 @@
       loop:
         - geckodriver-v0.32.2-linux64.tar.gz
         - chromedriver_linux64.zip
+      tags: drivers
 
-    - name: Install xq
-      shell: 'curl -sSL https://bit.ly/install-xq | sudo bash'
 
     - name: Install wrapper scripts into /usr/bin/
       ansible.builtin.template:
