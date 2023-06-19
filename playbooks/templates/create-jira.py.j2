@@ -116,12 +116,12 @@ def create_jira(snow_info):
     # Click Create
     WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="create_link"]'))).click()
     # Select Bug
-    issuetype_field = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="issuetype-field"]')))
+    issuetype_field = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="issuetype-field"]')))
     select_dropdown(issuetype_field, "Bug")
     # Add SNOW ID to summary
-    WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))).send_keys(snow_info["SNOW_id"] + " - ")
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))).send_keys(snow_info["SNOW_id"] + " - ")
     # Select Minor priority
-    priority_field = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
+    priority_field = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
     select_dropdown(priority_field, "Minor")
 
     # Select Lab component
@@ -130,17 +130,17 @@ def create_jira(snow_info):
     select_dropdown(components_field, "SG")
 
     # Add chapter and section
-    WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_10101"]'))).send_keys(snow_info["Chapter"])
-    WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_10204"]'))).send_keys(snow_info["Section"])
-    WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_10206"]'))).send_keys(snow_info["Title"])
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_10101"]'))).send_keys(snow_info["Chapter"])
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_10204"]'))).send_keys(snow_info["Section"])
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_10206"]'))).send_keys(snow_info["Title"])
     # Add RHNID
-    WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_10207"]'))).send_keys(snow_info["RHNID"])
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_10207"]'))).send_keys(snow_info["RHNID"])
     # Add URL
-    WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_10205"]'))).send_keys(snow_info["URL"])
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_10205"]'))).send_keys(snow_info["URL"])
 
     # Add description
-    WebDriverWait(driver, 2).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="mce_7_ifr"]')))
-    WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH,  '//*[@id="tinymce"]'))).send_keys(snow_info["Description"])
+    WebDriverWait(driver, 15).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="mce_7_ifr"]')))
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH,  '//*[@id="tinymce"]'))).send_keys(snow_info["Description"])
 
 # Main
 if not check_running_session():
