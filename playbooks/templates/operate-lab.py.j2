@@ -62,7 +62,7 @@ def go_to_course(course_id):
 {% if lab_environment == "rol" %}
     driver.get('https://rol.redhat.com/rol/app/courses/' + course_id)
 {% elif lab_environment == "rol-stage" %}
-    driver.get('https://rol-factory.ole.redhat.com/rol-devel/app/courses/' + course_id)
+    driver.get('https://rol-factory.ole.redhat.com/rol/app/courses/' + course_id)
 {% elif lab_environment == "china" %}
     driver.get('https://rol-cn.ole.redhat.com/rol/app/courses/' + course_id)
 {% endif %}
@@ -115,7 +115,7 @@ def login():
 
         driver.find_element("xpath", '//*[@id="login_field"]').send_keys("{{ github_username }}")
         driver.find_element("xpath", '//*[@id="password"]').send_keys("{{ github_password }}")
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/form/div/input[12]'))).click()
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/form/div/input[13]'))).click()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]'))).click()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]'))).send_keys(os.popen("2fa github").read())
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/div[2]/form/button'))).click()
