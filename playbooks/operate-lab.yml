@@ -27,6 +27,6 @@
 
     - name: Clone git repo for qa
       ansible.builtin.git:
-        repo: "git@github.com:RedHatTraining/{{ course_id[0] | split('-') | first }}.git"
-        dest: "files/{{ course_id[0] | split('-') | first | lower }}"
+        repo: "git@github.com:RedHatTraining/{{ course_id[0] | split('-') | first | split('ea') | first }}.git"
+        dest: "files/{{ course_id[0] | split('-') | first | split('ea') | first| lower }}"
       when: '"qa" == action'

@@ -311,6 +311,13 @@ def get_commands(course, chapter_and_section):
     lab_script_name = WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-pane-2"]//div[@class="taskprerequisites"]//strong[@class="userinput"]//code'))).text
     course_no_version = course.split("-")[0]
     course_version = course.split("-")[1]
+    try:
+        if re.findall("ea", course):
+            course_no_version = course_no_version.split("ea")[0]
+            course_version = 'earlyaccess'
+    except:
+        pass
+
     # checkout the current course version branch
     os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git checkout $(git branch -a |grep " + course_version +" |head -n1) &>/dev/null").read()
     # get the commands from source
@@ -379,31 +386,32 @@ def manage_special_commands(command, send_text_option_button):
         command = "date; time " + command
         introduce_command(command, send_text_option_button)
         # Wait for user to continue after the lab script has executed
-        prompt_user_enter_to_continue("with the exercise")
-    elif re.match("lab .*grade", command):
+        prompt_user_enter_to_continue("with the exercise.")
+    elif re.match("lab .*grade", command) :
         command = "date; time " + command
         introduce_command(command, send_text_option_button)
+        prompt_user_enter_to_continue("with the exercise.")
     elif  re.match("lab .*finish", command):
         command = "date; time " + command
         introduce_command(command, send_text_option_button)
         print("##############  Exercise completed ##############")
     elif "ssh" in command:
         introduce_command(command, send_text_option_button)
-        prompt_user_enter_to_continue("after the ssh")
+        prompt_user_enter_to_continue("after the ssh.")
     elif "ansible" in command:
         # Wait for user to continue after the playbook has been reviewed/created
-        prompt_user_enter_to_continue("if you did review/create the playbook")
+        prompt_user_enter_to_continue("if you did review/create the playbook.")
         introduce_command(command, send_text_option_button)
         prompt_user_enter_to_continue("if playbook finished")
     elif "ok=" in command or "failed=" in command:
         print("skipping output")
     elif "podman build" in command:
-        prompt_user_enter_to_continue("if the Containerfile is ready to build")
+        prompt_user_enter_to_continue("if the Containerfile is ready to build.")
         introduce_command(command, send_text_option_button)
-        prompt_user_enter_to_continue("if podman build finished")
+        prompt_user_enter_to_continue("if podman build finished.")
     elif "vim " in command or "vi " in command:
         introduce_command(command, send_text_option_button)
-        prompt_user_enter_to_continue("if you did review/create the file")
+        prompt_user_enter_to_continue("if you did review/create the file.")
     elif "Enter" in command:
         command = "\n"
         introduce_command(command, send_text_option_button)
@@ -416,7 +424,7 @@ def manage_special_commands(command, send_text_option_button):
         introduce_command(command, send_text_option_button)
     elif "systemctl restart" in command or "daemon-reload" in command:
         prompt_user_enter_to_continue(
-            "if you made sure that the new configuration is in place to 'systemctl restart service'")
+            "if you made sure that the new configuration is in place to 'systemctl restart service.'")
         introduce_command(command, send_text_option_button)
     elif "journalctl" in command:
         introduce_command(command, send_text_option_button)
@@ -426,25 +434,28 @@ def manage_special_commands(command, send_text_option_button):
         if not "-c" in command:
             command = command + " -c2"
         introduce_command(command, send_text_option_button)
-    elif "yum install" in command or "yum reinstall" in command or "yum remove" in command:
+    elif "yum install" in command or "yum reinstall" in command or "yum remove" in command or "dnf install" in command:
         if not "-y" in command:
             command = command + " -y"
         introduce_command(command, send_text_option_button)
         # Wait for user to continue after yum has executed
-        prompt_user_enter_to_continue("when the installation has finished")
+        prompt_user_enter_to_continue("when the installation has finished.")
     elif "podman login registry.redhat.io" in command:
         introduce_command(command, send_text_option_button)
         # Wait for user to continue after yum has executed
-        prompt_user_enter_to_continue("when login is completed")
+        prompt_user_enter_to_continue("when login is completed.")
     elif "vgcfgrestore -f" in command:
-        prompt_user_enter_to_continue("when you have selected the desired .vg file")
+        prompt_user_enter_to_continue("when you have selected the desired .vg file.")
         introduce_command(command, send_text_option_button)
     elif "/etc/hosts" in command or "/etc/resolv.conf" in command:
-        prompt_user_enter_to_continue("when you have reviewed/fixed the /etc/hosts or /etc/resolv.conf files")
+        prompt_user_enter_to_continue("when you have reviewed/fixed the /etc/hosts or /etc/resolv.conf files.")
         introduce_command(command, send_text_option_button)
     elif "iscsiadm -m discovery" in command:
         introduce_command(command, send_text_option_button)
-        prompt_user_enter_to_continue("when discovery command has executed")
+        prompt_user_enter_to_continue("when discovery command has executed.")
+    elif "oc edit" in command:
+        introduce_command(command, send_text_option_button)
+        prompt_user_enter_to_continue("when the file edit has been saved.")
     else:
         return 0
 
