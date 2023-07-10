@@ -89,11 +89,11 @@ def search_name(username, email):
         driver.switch_to.window(driver.window_handles[1])
         driver.get("https://app.intercom.com/a/apps/jeuow7ss/users/segments/all-users:eyJwcmVkaWNhdGVzIjpbeyJhdHRyaWJ1dGUiOiJyb2xlIiwiY29tcGFyaXNvbiI6ImVxIiwidHlwZSI6InJvbGUiLCJ2YWx1ZSI6InVzZXJfcm9sZSJ9LHsiYXR0cmlidXRlIjoiY3VzdG9tX2RhdGEudXNlcm5hbWUiLCJjb21wYXJpc29uIjoiZXEiLCJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiIifV19")
         intercom_login()
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[1]/div/div[4]/div/div[2]/div/div[2]/div[2]/div/div/div/span/div[2]/span/div/div/div/div/div'))).click()
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[1]/div/div[3]/div/div[2]/div/div[2]/div[2]/div/div/div/span/div[2]/span/div/div/div/div/div'))).click()
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div/div/div/input'))).send_keys(username)
         WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[2]/a'))).click()
         time.sleep(2)
-        first_name = str(driver.find_element("xpath", '/html/body/div[1]/div/div[1]/div/div[4]/div/div[2]/div/div[2]/div[3]/div[1]/div/div[1]/table/tbody/tr/td[1]/span/div/span/a').text).split(" ")[0]
+        first_name = str(driver.find_element("xpath", '/html/body/div[1]/div/div[1]/div/div[3]/div/div[2]/div/div[2]/div[3]/div[1]/div/div[1]/table/tbody/tr/td[1]/span/div/span/a').text)
 
     # Else is a redhatter
     else:
