@@ -294,7 +294,7 @@ Best Regards,
 
             # If round_robin, get the next name of the list
             if round_robin:
-                response = urlopen("http://t1-lx-snow.apps.tools-na100.dev.ole.redhat.com/api/shift")
+                response = urlopen("http://t1-lx-snow.apps.tools-na100.dev.ole.redhat.com/api/round_robin")
                 shift_json = json.loads(response.read())
                 teammate_name = shift_json["name"]
 
