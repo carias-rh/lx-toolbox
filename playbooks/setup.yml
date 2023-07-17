@@ -3,21 +3,6 @@
   #become: true
 
   tasks:
-    - name: Ensure dependencies are installed.
-      package:
-        name:
-          - oathtool
-          - epel-release
-          - python3-pip
-          - chromium.x86_64
-          - jq
-        state: present
-
-    - name: Install Selenium with pip
-      ansible.builtin.pip:
-        name: selenium
-        executable: pip3
-
     - name: Download selenium drivers
       ansible.builtin.get_url:
         url: "{{ item }}"
