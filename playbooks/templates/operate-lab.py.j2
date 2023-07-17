@@ -29,7 +29,7 @@ driver = webdriver.Chrome(options=options)
 {% if action == "qa" %}
 options = webdriver.FirefoxOptions()
 options.set_headless()
-driver = webdriver.Firefox(firefox_options=options)
+driver = webdriver.Firefox(options=options)
 {% else %}
 driver = webdriver.Firefox()
 driver.install_addon(os.path.expanduser('{{ playbook_dir }}/../copy_on_select-1.0-an+fx.xpi'), temporary=True)
