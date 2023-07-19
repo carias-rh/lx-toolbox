@@ -10,7 +10,3 @@
       template:
         src: templates/intercom-oncall.py.j2
         dest: "/tmp/intercom-oncall.py"
-
-    - name: Activate intercom
-      shell: '/usr/bin/python3 /tmp/intercom-oncall.py'
-      register: selenium
