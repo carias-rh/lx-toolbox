@@ -14,9 +14,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(
 
 options = webdriver.FirefoxOptions()
 options.add_argument('--headless')
-options.add_argument('--memory 1024mb')
-options.add_argument('--shm-size 2g')
-driver = webdriver.Firefox(service=Service('/usr/bin/geckodriver'), options=options)
+#driver = webdriver.Firefox(service=Service('/usr/bin/geckodriver'), options=options)
+driver = webdriver.Firefox(options=options)
 driver.maximize_window()
 
 
