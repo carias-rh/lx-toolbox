@@ -11,8 +11,11 @@ from selenium import webdriver
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
 
-options = webdriver.FirefoxOptions()
-driver = webdriver.Firefox(options=options)
+#options = webdriver.FirefoxOptions()
+#options.add_argument('--headless')
+#driver = webdriver.Firefox(options=options)
+driver = webdriver.Firefox()
+
 driver.maximize_window()
 
 
