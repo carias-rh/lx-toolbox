@@ -8,7 +8,7 @@
         url: "{{ item }}"
         dest: "/tmp/{{ item | split('/')| last }}"
       loop:
-        - "https://chromedriver.storage.googleapis.com/113.0.5672.63/chromedriver_linux64.zip"
+        - "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip"
 
     - name: Extract selenium drivers into /usr/bin/
       ansible.builtin.unarchive:
