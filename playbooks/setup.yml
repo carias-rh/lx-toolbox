@@ -9,6 +9,7 @@
         dest: "/tmp/{{ item | split('/')| last }}"
       loop:
         - "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip"
+        - "https://github.com/mozilla/geckodriver/releases/download/v0.33.0/geckodriver-v0.33.0-linux64.tar.gz"
 
     - name: Extract selenium drivers into /usr/bin/
       ansible.builtin.unarchive:
@@ -23,6 +24,7 @@
         state: absent
       loop:
         - chromedriver_linux64.zip
+        - geckodriver-v0.33.0-linux64.tar.gz
 
     - name: Install wrapper scripts into /usr/bin/
       ansible.builtin.template:

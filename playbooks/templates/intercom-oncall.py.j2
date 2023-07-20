@@ -10,16 +10,11 @@ from selenium import webdriver
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
-options = webdriver.ChromeOptions()
-options.add_argument("--window-size=1600,1200")
-options.add_argument('--no-sandbox')
-options.add_argument('--disable-dev-shm-usage')
-options.add_argument('--ignore-certificate-errors')
 
+options = webdriver.FirefoxOptions()
+driver = webdriver.Firefox(options=options)
+driver.maximize_window()
 
-# Define the webdriver to use.
-# Chrome webdriver
-driver = webdriver.Chrome(options=options)
 
 # Go to the website
 def go_to_main_site():
@@ -94,7 +89,7 @@ def wait_for_expert_chat():
         # If the call was successful equal the customer_name to the one in the new chat to avoid more calls
         customer_name = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[1]/div[2]/div/div/div/div[3]/div/div[1]/div/div[4]/ul/div/div/li/a/div[2]/div[1]/div[1]'))).text
     except:
-        return ''
+        pass
     return customer_name
 
 
@@ -116,4 +111,4 @@ while True:
     if customer_name != new_customer_name:
         logging.info("New chat from: " + new_customer_name)
         customer_name = wait_for_expert_chat()
-    time.sleep(2)
+    time.sleep(10)
