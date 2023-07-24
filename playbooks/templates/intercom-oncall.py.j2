@@ -61,8 +61,8 @@ def intercom_login():
 
 
 def skype_login():
-        logging.info("Skype login")
-    #try:
+    logging.info("Skype login")
+    try:
         driver.execute_script("window.open('');")
         driver.switch_to.window(driver.window_handles[1])
         driver.get('https://web.skype.com/')
@@ -70,17 +70,14 @@ def skype_login():
         WebDriverWait(driver, 45).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/form[1]/div/div/div[2]/div[1]/div/div/div/div[2]/div[1]/div[3]/div/div/div/div[4]/div/div/div/div/input'))).click()
         WebDriverWait(driver, 45).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/form[1]/div/div/div[2]/div[1]/div/div/div/div[2]/div/div[3]/div/div[2]/div/div[3]/div/div[2]/input'))).send_keys(os.environ.get('SKYPE_PASSWORD'))
         WebDriverWait(driver, 45).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/form[1]/div/div/div[2]/div[1]/div/div/div/div[2]/div/div[3]/div/div[2]/div/div[4]/div[2]/div/div/div/div/input'))).click()
-        try:
-            WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/form/div/div/div[2]/div[1]/div/div/div/div[2]/div/div[3]/div/div[2]/div/div[3]/div[1]/div/label/input'))).click()
-            WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/form/div/div/div[2]/div[1]/div/div/div/div[2]/div/div[3]/div/div[2]/div/div[3]/div[2]/div/div/div[2]/input'))).click()
-        except:
-            pass
+        WebDriverWait(driver, 45).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/form/div/div/div[2]/div[1]/div/div/div/div[2]/div/div[3]/div/div[2]/div/div[3]/div[1]/div/label/input'))).click()
+        WebDriverWait(driver, 45).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/form/div/div/div[2]/div[1]/div/div/div/div[2]/div/div[3]/div/div[2]/div/div[3]/div[2]/div/div/div[2]/input'))).click()
         WebDriverWait(driver, 45).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[1]/div[2]/div/div[2]/div/div[1]/div/div/div/div/div/div[3]/button/div'))).click()
         WebDriverWait(driver, 45).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div/div[1]/div[2]/div/div/div[1]/div/div[1]/div[3]/div[1]/div[1]/div[1]/button'))).click()
         driver.switch_to.window(driver.window_handles[0])
-    #except:
-    #    logging.error("Skype login failed")
-    #    driver.switch_to.window(driver.window_handles[0])
+    except:
+        logging.error("Skype login failed")
+        driver.switch_to.window(driver.window_handles[0])
 
 def skype_call():
     try:
@@ -119,7 +116,6 @@ def wait_for_expert_chat():
 go_to_main_site()
 intercom_login()
 skype_login()
-driver.switch_to.window(driver.window_handles[0])
 customer_name = ''
 new_customer_name = ''
 
