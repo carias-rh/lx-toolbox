@@ -31,6 +31,8 @@ spec:
           value: :99
         - name: PYTHONUNBUFFERED
           value: "1"
+        - name: T1_FRONTEND_OPENSHIFT_ROUTE
+          value: http://t1-shifts-main-lx-snow.apps.cluster-z6szp.z6szp.sandbox1862.opentlc.com
         image: quay.io/carias_rh/lx-toolbox:latest
         imagePullPolicy: Always
         name: snow-t1
