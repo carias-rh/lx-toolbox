@@ -422,8 +422,9 @@ def introduce_command(command, auto_enter):
         wait_for_command_to_paste(command)
         # Click Enter
         if auto_enter:
+            if auto_enter:
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-                (By.XPATH, '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'))).click()
+                    (By.XPATH, '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'))).click()
 
 # Prompts for user input to continue the execution of the QA
 def prompt_user_enter_to_continue(custom_message):
@@ -552,9 +553,9 @@ def manage_special_commands(command):
         introduce_command(command, send_text_option_button)
     elif "/etc/hosts" in command or "/etc/resolv.conf" in command:
         prompt_user_enter_to_continue("when you have reviewed/fixed the /etc/hosts or /etc/resolv.conf files.")
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
     elif "iscsiadm -m discovery" in command:
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         prompt_user_enter_to_continue("when discovery command has executed.")
     elif "oc edit" in command:
         introduce_command(command, send_text_option_button)
@@ -628,6 +629,7 @@ else:
     driver = webdriver.Chrome(options=options)
 {% elif action == "qa" and selenium_driver == "chrome" %}
 driver = webdriver.Chrome(options=options)
+login()
 {% endif %}
 
 # Rol prod, rol-stage and china environments are different on login and cookies
