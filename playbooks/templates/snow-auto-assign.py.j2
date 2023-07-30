@@ -294,7 +294,7 @@ Best Regards,
 
             # If round_robin, get the next name of the list
             if round_robin:
-                response = urlopen("http://t1-lx-snow.apps.tools-na100.dev.ole.redhat.com/api/round_robin")
+                response = urlopen(str(os.environ.get('T1_FRONTEND_OPENSHIFT_ROUTE')) + "/api/round_robin")
                 shift_json = json.loads(response.read())
                 teammate_name = shift_json["name"]
 
@@ -312,7 +312,7 @@ snow_login()
 
 while True:
 {% if team_name == 'RHT Learner Experience' %}
-    response = urlopen("http://t1-lx-snow.apps.tools-na100.dev.ole.redhat.com/api/shift")
+    response = urlopen(str(os.environ.get('T1_FRONTEND_OPENSHIFT_ROUTE')) + "/api/shift")
     shift_json = json.loads(response.read())
 
     if shift_json["name"] != 'None':
