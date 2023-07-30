@@ -358,7 +358,7 @@ def filter_commands_list(commands):
     return filtered_commands_array
 
 # Uses the Text button function to paste and the Digital Keyboard UI to execute it
-def introduce_command(command, send_text_option_button):
+def introduce_command(command, send_text_option_button, auto_enter):
     if command != '':
         # Open text dialog
         send_text_option_button.click()
@@ -371,8 +371,9 @@ def introduce_command(command, send_text_option_button):
         # time.sleep depending on the length of the command
         wait_for_command_to_paste(command)
         # Click Enter
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'))).click()
+        if auto_enter:
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+                (By.XPATH, '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'))).click()
 
 # Prompts for user input to continue the execution of the QA
 def prompt_user_enter_to_continue(custom_message):
@@ -384,78 +385,88 @@ def manage_special_commands(command, send_text_option_button):
 
     if re.match("lab .*start", command) or re.match("lab .*setup", command):
         command = "date; time " + command
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         # Wait for user to continue after the lab script has executed
         prompt_user_enter_to_continue("with the exercise.")
     elif re.match("lab .*grade", command) :
         command = "date; time " + command
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         prompt_user_enter_to_continue("with the exercise.")
     elif  re.match("lab .*finish", command):
         command = "date; time " + command
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         print("##############  Exercise completed ##############")
     elif "ssh" in command:
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         prompt_user_enter_to_continue("after the ssh.")
     elif "ansible" in command:
         # Wait for user to continue after the playbook has been reviewed/created
         prompt_user_enter_to_continue("if you did review/create the playbook.")
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         prompt_user_enter_to_continue("if playbook finished")
     elif "ok=" in command or "failed=" in command:
         print("skipping output")
     elif "podman build" in command:
         prompt_user_enter_to_continue("if the Containerfile is ready to build.")
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         prompt_user_enter_to_continue("if podman build finished.")
     elif "vim " in command or "vi " in command:
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         prompt_user_enter_to_continue("if you did review/create the file.")
     elif "Enter" in command:
         command = "\n"
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
     elif "less " in command:
         command = command.replace("less ", "cat ")
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
     elif "systemctl status" in command:
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         command = "q\n"
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
     elif "systemctl restart" in command or "daemon-reload" in command:
         prompt_user_enter_to_continue(
             "if you made sure that the new configuration is in place to 'systemctl restart service.'")
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
     elif "journalctl" in command:
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         command = " \n"
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
     elif "ping" in command and not "ansible" in command:
         if not "-c" in command:
             command = command + " -c2"
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
     elif "yum install" in command or "yum reinstall" in command or "yum remove" in command or "dnf install" in command:
         if not "-y" in command:
             command = command + " -y"
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         # Wait for user to continue after yum has executed
         prompt_user_enter_to_continue("when the installation has finished.")
     elif "podman login registry.redhat.io" in command:
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         # Wait for user to continue after yum has executed
         prompt_user_enter_to_continue("when login is completed.")
     elif "vgcfgrestore -f" in command:
         prompt_user_enter_to_continue("when you have selected the desired .vg file.")
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
     elif "/etc/hosts" in command or "/etc/resolv.conf" in command:
         prompt_user_enter_to_continue("when you have reviewed/fixed the /etc/hosts or /etc/resolv.conf files.")
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
     elif "iscsiadm -m discovery" in command:
-        introduce_command(command, send_text_option_button)
+        introduce_command(command, send_text_option_button, auto_enter=True)
         prompt_user_enter_to_continue("when discovery command has executed.")
     elif "oc edit" in command:
-        introduce_command(command, send_text_option_button)
-        prompt_user_enter_to_continue("when the file edit has been saved.")
+        introduce_command(command, send_text_option_button, auto_enter=True)
+        prompt_user_enter_to_continue("when the object edit has been saved.")
+    elif "oc create -f" in command or "oc apply -f" in command:
+        prompt_user_enter_to_continue("when the yaml file has been saved.")
+        introduce_command(command, send_text_option_button, auto_enter=True)
+    elif "oc logs" in command or "podman logs" in command:
+        suffix = re.findall(r"-\w+-\w+$",command)[0]
+        introduce_command(re.split(str(suffix), command)[0], send_text_option_button, auto_enter=False)
+        prompt_user_enter_to_continue(". Use TAB to complete the container/pod name.\n")
+    elif "watch" in command:
+        introduce_command(command, send_text_option_button, auto_enter=True)
+        prompt_user_enter_to_continue("when you finished the watch command.")
     else:
         return 0
 
@@ -507,7 +518,7 @@ def qa(commands_array):
                 print('-------------------------------------------------')
             # Manage if the command has an exception, if there is not, just introduce_command normaly
             if not manage_special_commands(commands_array[i], send_text_option_button):
-                introduce_command(commands_array[i], send_text_option_button)
+                introduce_command(commands_array[i], send_text_option_button, auto_enter=True)
 
             # Standard time for command to execute
             time.sleep(3)
@@ -529,6 +540,7 @@ else:
     driver = webdriver.Chrome(options=options)
 {% elif action == "qa" and selenium_driver == "chrome" %}
 driver = webdriver.Chrome(options=options)
+login()
 {% endif %}
 
 # Rol prod, rol-stage and china environments are different on login and cookies
