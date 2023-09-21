@@ -134,7 +134,6 @@ def create_jira(snow_info):
     *Steps to reproduce:*
 
 
-
     *Expected result:*"""
 
     # Add description
@@ -152,7 +151,7 @@ def create_jira(snow_info):
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="versions-textarea"]'))).send_keys(snow_info["Course"])
 
     # Add chapter and section
-    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_12316549"]'))).send_keys(f"ch{snow_info['Chapter']}s{snow_info['Section']}")
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_12316549"]'))).send_keys(snow_info['Chapter'])
 
 
     # Change to priority tab and change priority
@@ -172,6 +171,3 @@ else:
     driver = webdriver.Chrome(options=options)
     snow_info = get_snow_info("{{ snow_id }}")
     create_jira(snow_info)
-
-# Accept jira
-WebDriverWait(driver, 2000).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="action_id_101"]/span'))).click()
