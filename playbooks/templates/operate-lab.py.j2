@@ -258,15 +258,13 @@ def impersonate():
     step("Impersonating user '{{ impersonate_username }}'")
     try:
         driver.refresh()
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '//*[text()="Switch user"]'))).click()
-
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-            (By.XPATH, '/html/body/div[3]/div[2]/div/div/div[2]/form/button')))
+        # Click on Switch user
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[text()="Switch user"]'))).click()
         time.sleep(1)
-        driver.find_element("xpath", '//*[@id="formInlineUsername"]').send_keys("{{ impersonate_username }}")
-
-        driver.find_element("xpath", "/html/body/div[3]/div[2]/div/div/div[2]/form/button").click()
+        # Introduce username
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="formInlineUsername"]'))).send_keys("{{ impersonate_username }}")
+        # Click on switch
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[4]/div[2]/div/div/div[2]/form/button"))).click()
         time.sleep(5)
 
         WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/button')))
