@@ -7,6 +7,7 @@ from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
+from selenium.webdriver import ActionChains
 
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
@@ -16,7 +17,7 @@ options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrom
 # Define the webdriver to use.
 # Chrome webdriver
 driver = webdriver.Chrome(options=options)
-
+actions = ActionChains(driver)
 
 # Go to the website
 def go_to_main_site():
@@ -53,15 +54,15 @@ def intercom_login():
 def intercom_change_status(change_status_to):
     try:
         avatar = WebDriverWait(driver, 15).until(EC.element_to_be_clickable(
-            (By.XPATH, '/html/body/div[1]/div/div[1]/div[2]/div/div/div/div[1]/div[5]/div[2]/div/div')))
+            (By.XPATH, '/html/body/div[1]/div/div[1]/div[2]/div/div/div/div[1]/div[5]/div/div/div')))
         avatar.click()
-        status_raw = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[1]/div[2]/div/div/div/div[1]/div[5]/div[2]/div/div').get_attribute(
+        status_raw = avatar.get_attribute(
             "class")
     except:
         avatar = WebDriverWait(driver, 15).until(EC.element_to_be_clickable(
-            (By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div/div/div/div[1]/div[5]/div[2]/div/div')))
+            (By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div/div/div/div[1]/div[5]/div/div/div')))
         avatar.click()
-        status_raw = driver.find_element(By.XPATH, '/html/body/div[1]/div/div[1]/div[3]/div/div/div/div[1]/div[5]/div[2]/div/div').get_attribute(
+        status_raw = avatar.get_attribute(
             "class")
 
         # Get attributes from the gravatar
@@ -70,21 +71,24 @@ def intercom_change_status(change_status_to):
     status_active = re.findall("o__active", status_raw)
     time.sleep(1)
     try:
-            # Change status to Away if actual status is active
+        # Change status to Away if actual status is active
         if change_status_to == "Away" and status_active:
             WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div[2]/div/div/button/span'))).click()
+
+            # Reason "Done for the day"
+            time.sleep(1)
+            avatar.click()
+            reason = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div[4]/div/div[1]/div/div[1]')))
+            actions.move_to_element(reason).perform()
+            done_for_the_day = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div[4]/div/div[2]/div/div/div/div[7]')))
+            actions.move_to_element(done_for_the_day).click().perform()
 
             # Reassign replies
             time.sleep(1)
             avatar.click()
             WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div[3]/div/div/button'))).click()
 
-            # Reason "Done for the day"
-            time.sleep(1)
-            avatar.click()
-            WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div[4]/div/div[2]/div/div/div/div[6]/div/div[1]'))).click()
-
-            # Change status to Active if actual status is Away
+        # Change status to Active if actual status is Away
         if change_status_to == "Active" and status_away:
             WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div[2]/div/div/button/span'))).click()
     except:
@@ -95,4 +99,5 @@ def intercom_change_status(change_status_to):
 go_to_main_site()
 intercom_login()
 intercom_change_status("{{ status }}")
+time.sleep(3)
 driver.quit()
