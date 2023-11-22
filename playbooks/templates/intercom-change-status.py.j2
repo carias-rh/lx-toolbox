@@ -13,6 +13,7 @@ options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1600,1200")
 options.add_argument("--user-data-dir={{ ansible_env.HOME}}/.config/google-chrome/rh-sso")
+options.binary_location = '/usr/bin/google-chrome'
 
 # Define the webdriver to use.
 # Chrome webdriver
