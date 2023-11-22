@@ -70,7 +70,7 @@ def get_snow_info(snow_id):
 
     print(description)
     # Get issue info
-    issue = re.findall("Description:.*", description)[0].split(":  ")[1]
+    issue = re.search(r"Description:\s*(.*?)\s*Copyright", description, re.DOTALL).group(1).strip()
     course = re.findall("Course:.*", description)[0].split(":  ")[1].upper().replace(" ", "")
     version = re.findall("Version:.*", description)[0].split(":  ")[1]
     url = re.findall("URL:.*", description)[0].split(":  ")[1]
