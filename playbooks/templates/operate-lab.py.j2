@@ -103,10 +103,10 @@ def login():
 
 {% elif lab_environment == "rol-stage" %}
         check_cookies()
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click()
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click()
 
-        driver.find_element("xpath", '//*[@id="login_field"]').send_keys("{{ github_username }}")
-        driver.find_element("xpath", '//*[@id="password"]').send_keys("{{ github_password }}")
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_field"]'))).send_keys("{{ github_username }}")
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys("{{ github_password }}")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/form/div/input[13]'))).click()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]'))).click()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]'))).send_keys(os.popen("2fa github").read())
@@ -310,6 +310,7 @@ def get_commands(course, chapter_and_section):
 
     # checkout the current course version branch
     os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git checkout $(git branch -a |grep " + course_version +" |head -n1) &>/dev/null").read()
+    #os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git checkout main &>/dev/null").read()
     # get the commands from source
     commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/" + course_no_version + "/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
 
@@ -451,9 +452,13 @@ def manage_special_commands(command, send_text_option_button):
         prompt_user_enter_to_continue("when the yaml file has been saved.")
         introduce_command(command, send_text_option_button, auto_enter=True)
     elif "oc logs" in command or "podman logs" in command:
-        suffix = re.findall(r"-\w+-\w+$",command)[0]
-        introduce_command(re.split(str(suffix), command)[0], send_text_option_button, auto_enter=False)
-        prompt_user_enter_to_continue(". Use TAB to complete the container/pod name.\n")
+        try:
+            suffix = re.findall(r"-\w+-\w+$",command)[0]
+            introduce_command(re.split(str(suffix), command)[0], send_text_option_button, auto_enter=False)
+            prompt_user_enter_to_continue(". Use TAB to complete the container/pod name.\n")
+        except:
+            introduce_command(command, send_text_option_button, auto_enter=True)
+
     elif "watch" in command:
         introduce_command(command, send_text_option_button, auto_enter=True)
         prompt_user_enter_to_continue("when you finished the watch command.")
