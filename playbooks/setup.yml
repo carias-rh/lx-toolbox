@@ -3,21 +3,11 @@
   become: true
 
   tasks:
-    - name: Install epel repository
-      command: dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
-      ignore_errors: true
-      tags: install
-
     - name: Ensure dependencies are installed.
       package:
         name:
-          - oathtool
-          - perl-Digest-SHA-1
-          - epel-release
           - python3-pip
           - firefox.x86_64
-          - chromium.x86_64
-          - perl-Digest-SHA-1:6.02-1.el8.x86_64
         state: present
       tags: install
 
@@ -27,17 +17,12 @@
         executable: pip3
       tags: install
 
-    - name: Install xq
-      shell: 'curl -sSL https://bit.ly/install-xq | sudo bash'
-      tags: install
-
     - name: Download selenium drivers
       ansible.builtin.get_url:
         url: "{{ item }}"
         dest: "/tmp/{{ item | split('/')| last }}"
       loop:
-        - "https://github.com/mozilla/geckodriver/releases/download/v0.32.2/geckodriver-v0.32.2-linux64.tar.gz"
-        - "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip"
+        - "https://github.com/mozilla/geckodriver/releases/download/v0.33.0/geckodriver-v0.33.0-linux64.tar.gz"
       tags: drivers
 
     - name: Extract selenium drivers into /usr/bin/
@@ -46,39 +31,4 @@
         dest: "/usr/bin/"
       loop:
         - geckodriver-v0.32.2-linux64.tar.gz
-        - chromedriver_linux64.zip
       tags: drivers
-
-
-    - name: Install wrapper scripts into /usr/bin/
-      ansible.builtin.template:
-        src: "./templates/wrapper-scripts/{{ item }}"
-        dest: "/usr/bin/{{ item | splitext | first }}"
-        mode: 0755
-      loop:
-        - start.j2
-        - delete.j2
-        - recreate.j2
-        - impersonate.j2
-        - qa.j2
-        - jira.j2
-        - snow.j2
-      tags: scripts
-
-    - name: generate secret and
-      shell: 'dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40'
-      register: generated_secret
-      tags: secret
-
-
-    - name: place secret in playbooks/vars/credentials.yml file
-      ansible.builtin.lineinfile:
-        path: '{{ playbook_dir }}/vars/credentials.yml'
-        regexp: '^secret'
-        line: 'secret: {{ generated_secret.stdout }}'
-      tags: secret
-
-    - name: Use this secret string to create your token.redhat.com
-      debug:
-        var: generated_secret.stdout
-      tags: secret
