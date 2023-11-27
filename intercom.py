@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(
 options = webdriver.FirefoxOptions()
 options.set_preference("permissions.default.microphone", True)
 options.set_capability('browserName', 'firefox')
-driver = webdriver.Firefox(options=options)
+driver = webdriver.Remote(command_executor="http://localhost:4446/wd/hub", options=options)
 driver.get("https://app.intercom.com/a/inbox/jeuow7ss/inbox/admin/4643910?view=List")
 
 def handle_exception(e):
