@@ -112,9 +112,8 @@ def create_jira(snow_info):
     # Select Text mode
     WebDriverWait(driver, 15).until(
         EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[2]/button'))).click()
-    # Add SNOW ID to summary
-    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))).send_keys(
-        snow_info["SNOW_id"] + " - ")
+    # Fill in Summary
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))).send_keys(f'{snow_info["Course"]}: ch{snow_info["Chapter"]}s{snow_info["Section"]} -             - {snow_info["SNOW_id"]}')
     # Add Description
     color1 = '{color:#0747a6}'
     color2 = '{color}'
@@ -143,7 +142,6 @@ def create_jira(snow_info):
     # Select Visual mode back again
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[1]/button'))).click()
 
-
     # Select Component (course)
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]'))).send_keys(snow_info["Course"])
 
@@ -153,11 +151,11 @@ def create_jira(snow_info):
     # Add chapter and section
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_12316549"]'))).send_keys(snow_info['Chapter'])
 
-
     # Change to priority tab and change priority
-    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="aui-uid-2"]'))).click()
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="aui-uid-3"]'))).click()
     priority_dropdown = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
     select_dropdown(priority_dropdown, "Minor")
+
 
 # Main
 if not check_running_session():
