@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 ### Maintained by carias@redhat.com
 
-import time, os.path
+import time, sys, os.path
 import re
 import logging
 import json
@@ -25,6 +25,24 @@ options.add_argument('--ignore-certificate-errors')
 # Define the webdriver to use.
 # Chrome webdriver
 driver = webdriver.Chrome(options=options)
+
+def handle_exception(e):
+    exc_type, exc_value, exc_traceback = sys.exc_info()
+    traceback_details = traceback.extract_tb(exc_traceback)
+
+    first_function_filename = traceback_details[0].filename
+    first_function_line_number = traceback_details[0].lineno
+    first_function_name = traceback_details[0].name
+
+    print(
+        f"Exception first caught in file {first_function_filename}, line {first_function_line_number}, in {first_function_name}")
+
+    filename = traceback_details[-1].filename
+    line_number = traceback_details[-1].lineno
+    function_name = traceback_details[-1].name
+
+    print(f"Exception occurred in file {filename}, line {line_number}, in {function_name}")
+    print(f"Exception message: {str(e)}")
 
 
 # Prints the current step
@@ -144,7 +162,7 @@ def auto_assign_tickets(teammate_name):
     step("Assigning tickets ")
     try:
         WebDriverWait(driver, 10).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
-        num_rows = len(WebDriverWait(driver, 10).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//tbody[@class="list2_body"]/tr'))))
+        num_rows = len(driver.find_elements('xpath','/html/body/div[1]/div[1]/span/div/div[5]/table/tbody/tr/td/div/table/tbody/tr'))
         logging.info(f"{num_rows} tickets in queue")
         driver.switch_to.default_content()
 
