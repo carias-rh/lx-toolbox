@@ -11,4 +11,4 @@
     - name: Generate selenium script
       template:
         src: templates/snow-auto-assign.py.j2
-        dest: "/tmp/snow-{{ team_acronim }}.py"
+        dest: "/app/snow-{{ team_acronim }}.py"

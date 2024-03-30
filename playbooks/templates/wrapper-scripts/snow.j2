@@ -53,13 +53,13 @@ if [[ $REGION == "" ]]
     /usr/bin/ansible-playbook {{ playbook_dir }}/snow.yml -e user_name="\"$USER_NAME\"" -e team_name="\"$TEAM\"" -e team_acronim="\"$TEAM_ACRONIM\""
     echo ""
     echo "---> Starting selenium script <---"
-    /usr/bin/python /tmp/snow-$TEAM_ACRONIM.py
+    /usr/bin/python /app/snow-$TEAM_ACRONIM.py
 elif [[ $USER_NAME == "" ]]
   then
     /usr/bin/ansible-playbook {{ playbook_dir }}/snow.yml -e region="\"$REGION\"" -e team_name="\"$TEAM\"" -e team_acronim="\"$TEAM_ACRONIM\""
     echo ""
     echo "---> Starting selenium script <---"
-    /usr/bin/python /tmp/snow-$TEAM_ACRONIM.py
+    /usr/bin/python /app/snow-$TEAM_ACRONIM.py
 fi
 
 
