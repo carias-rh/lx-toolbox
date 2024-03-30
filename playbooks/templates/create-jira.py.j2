@@ -8,6 +8,9 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+
+
 options = webdriver.ChromeOptions()
 options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1600,1200")
@@ -105,15 +108,26 @@ def select_dropdown(element, input):
     element.send_keys(input)
     element.send_keys(Keys.TAB)
 
+def tab_to_priority():
+    action = ActionChains(driver)
+    element = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@class="tabs-menu"]//*[contains(text(), "Priority")]')))
+    time.sleep(0.3)
+    for x in range(0,75):
+        action.move_to_element(element).send_keys(Keys.SHIFT + Keys.TAB).perform()
+    action.move_to_element(element).send_keys(Keys.ENTER).perform()
+
+
 def create_jira(snow_info):
     driver.get('https://issues.redhat.com/projects/PTL/issues')
     # Click Create
     WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="create_link"]'))).click()
+
     # Select Text mode
-    WebDriverWait(driver, 15).until(
-        EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[2]/button'))).click()
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[2]/button'))).click()
+
     # Fill in Summary
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))).send_keys(f'{snow_info["Course"]}: ch{snow_info["Chapter"]}s{snow_info["Section"]} -  - {snow_info["SNOW_id"]}')
+
     # Add Description
     color1 = '{color:#0747a6}'
     color2 = '{color}'
@@ -132,6 +146,7 @@ def create_jira(snow_info):
 
     *Steps to reproduce:*
 
+    *Workaround:*
 
     *Expected result:*"""
 
@@ -149,10 +164,11 @@ def create_jira(snow_info):
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_12316549"]'))).send_keys(snow_info['Chapter'])
 
     # Select version
-    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="versions-textarea"]'))).send_keys(snow_info["Course"])
+    version = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="versions-textarea"]')))
+    version.send_keys(Keys.HOME)
 
     # Change to priority tab and change priority
-    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@class="tabs-menu"]//*[contains(text(), "Priority")]'))).click()
+    tab_to_priority()
     priority_dropdown = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
     select_dropdown(priority_dropdown, "Minor")
 

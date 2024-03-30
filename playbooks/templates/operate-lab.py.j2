@@ -311,7 +311,7 @@ def get_commands(course, chapter_and_section):
     #os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git checkout $(git branch -a |grep " + course_version +" |head -n1) &>/dev/null").read()
     os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git checkout main &>/dev/null; git pull").read()
     # get the commands from source
-    commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/" + course_no_version + "/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
+    commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/" + course_no_version + "/guides/en-US/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
 
     print("\n")
     print(commands)
@@ -529,12 +529,10 @@ def toggle_tab(tab):
 if not check_running_session():
     open_profile()
     driver = webdriver.Chrome(options=options)
-    login()
 else:
     driver = webdriver.Chrome(options=options)
 {% elif action == "qa" and selenium_driver == "chrome" %}
 driver = webdriver.Chrome(options=options)
-login()
 {% endif %}
 
 # Rol prod, rol-stage and china environments are different on login and cookies
