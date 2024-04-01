@@ -148,9 +148,15 @@ def fill_in_categorization_fields():
 
 def fix_empty():
     # short description is empty
-    empty = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').get_attribute("value")
-    if empty == '':
+    empty_description = driver.find_element("xpath",'//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').get_attribute("value")
+    # email is empty
+    empty_email = driver.find_element("xpath",'//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').get_attribute("value")
+
+    if empty_description == '':
         driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').send_keys("RH Academy")
+
+    if empty_email == '':
+        driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').send_keys("fix_this_non_sense_email@manually.com")
 
 
 {% if team_name == 'RHT Learner Experience' %}
