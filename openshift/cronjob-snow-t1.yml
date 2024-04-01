@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: snow-t2-shashi
+  name: snow-t1
   namespace: lx-snow
 spec:
   concurrencyPolicy: Replace
@@ -14,24 +14,23 @@ spec:
           - args:
             - /bin/sh
             - -c
-            - /usr/bin/snow -t 'RHT Learner Experience - T2' -u 'Shashi Singh'
+            - /usr/bin/snow -t 'RHT Learner Experience'
             env:
             - name: DISPLAY
-              value: :99
+              value: ':99'
             - name: PYTHONUNBUFFERED
-              value: "1"
+              value: '1'
+            - name: T1_FRONTEND_OPENSHIFT_ROUTE
+              value: https://t1-shifts-frontend-lx-snow.apps.tools-na100.dev.ole.redhat.com/
             image: quay.io/carias_rh/lx-toolbox:latest
             imagePullPolicy: Always
-            name: snow-t2
-            ports:
-            - containerPort: 8080
-              protocol: TCP
+            name: snow-t1
             resources: {}
             terminationMessagePath: /dev/termination-log
             terminationMessagePolicy: File
             volumeMounts:
             - mountPath: /runner
-              name: snow-t2-1
+              name: snow-t1-1
             - mountPath: /app/lx-toolbox/playbooks/vars/credentials.yml
               name: credentials-volume
               subPath: credentials.yml
@@ -51,13 +50,12 @@ spec:
           terminationGracePeriodSeconds: 30
           volumes:
           - emptyDir: {}
-            name: snow-t2-1
+            name: snow-t1-1
           - name: credentials-volume
             secret:
               defaultMode: 420
               secretName: credentials
-  schedule: 30 19 * * *
-  #timeZone: "Asia/Kolkata"
+  schedule: '0 */4 * * *'
   startingDeadlineSeconds: 200
   successfulJobsHistoryLimit: 3
   suspend: false

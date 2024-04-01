@@ -32,7 +32,7 @@ spec:
             volumeMounts:
             - mountPath: /runner
               name: snow-t2-1
-            - mountPath: /tmp/lx-toolbox/playbooks/vars/credentials.yml
+            - mountPath: /app/lx-toolbox/playbooks/vars/credentials.yml
               name: credentials-volume
               subPath: credentials.yml
           - image: docker.io/metal3d/xvfb
