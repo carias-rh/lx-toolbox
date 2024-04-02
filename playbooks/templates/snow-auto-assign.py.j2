@@ -158,6 +158,21 @@ def fix_empty():
     if empty_email == '':
         driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').send_keys("fix_this_non_sense_email@manually.com")
 
+{% if team_name == 'RHT Learner Experience' %}
+def fix_contact_data_for_t1_team():
+    # emails from iqlaserpress.net to lywillia@redhat.com
+    email_field = driver.find_element("xpath",'//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').get_attribute("value")
+    email_pattern = r"@iqlaserpress\.net"
+    match = re.search(email_pattern, email_field)
+    if match:
+        email_address_field = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]')
+        email_address_field.clear()
+        email_address_field.send_keys("lywillia@redhat.com ")
+        contact_source_field = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]')
+        contact_source_field.clear()
+        contact_source_field.send_keys("Lynda Williams")
+{% endif %}
+
 
 {% if team_name == 'RHT Learner Experience' %}
 def auto_assign_tickets(teammate_name, round_robin):
@@ -195,12 +210,16 @@ def auto_assign_tickets(teammate_name):
 
 {% if team_name == 'RHT Learner Experience' %}
             try:
-                # Get user's ticket name
+                # Get user's ticket name for ACK message
                 name = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute("value")
-                name_list = re.split(' ',name)
+                name_list = re.split(' ', name)
                 full_name = name_list[0] + " " + name_list[1]
             except:
                 full_name = name_list[0]
+
+            # fix contact info for several cases
+            fix_contact_data_for_t1_team()
+
 {% endif %}
 
 {% if team_name == 'RHT Learner Experience - T2' %}
@@ -217,7 +236,7 @@ def auto_assign_tickets(teammate_name):
                 # RedHatters' issues usually come without email, just their RHNID in "User Name: " field, so it will fail the following email regex being empty and will jump to the except
                 try:
                 # TODO: when intercom login fails, it will try with rover for a customer and put Carlos in the name field. 
-                    email = re.findall("([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
+                    email = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
                     first_name = search_name(username.replace(" ", ""), email)
                 except:
                     first_name = search_name(username.replace(" ", ""), "")
