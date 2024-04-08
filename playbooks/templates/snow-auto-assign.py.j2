@@ -126,9 +126,9 @@ def search_name(username, email):
         WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="verifyUserButton"]')))
         full_name = driver.find_element("xpath", '//*[@id="userFullName"]').text
         if full_name != "Carlos Arias":
-            first_name = ''
-        else:
             first_name = str(full_name).split(" ")[0]
+        else:
+            first_name = ''
 
 
     driver.close()
