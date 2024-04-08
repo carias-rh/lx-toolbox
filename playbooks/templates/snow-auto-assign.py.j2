@@ -206,13 +206,21 @@ def auto_assign_tickets(teammate_name):
             # Change status to "In progress"
             Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.state"]')))).select_by_visible_text('In Progress')
 
+{ % if team_name == 'RHT Learner Experience' %}
+
             # Fill in the boxes
             fill_in_categorization_fields()
 
             # Fix if the short_description is empty
             fix_empty()
 
-{% if team_name == 'RHT Learner Experience' %}
+            # fix contact info for several cases
+            fix_contact_data_for_t1_team()
+
+            # Save fixes
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            time.sleep(3)
+
             try:
                 # Get user's ticket name for ACK message
                 name = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute("value")
@@ -220,10 +228,6 @@ def auto_assign_tickets(teammate_name):
                 full_name = name_list[0] + " " + name_list[1]
             except:
                 full_name = name_list[0]
-
-            # fix contact info for several cases
-            fix_contact_data_for_t1_team()
-
 {% endif %}
 
 {% if team_name == 'RHT Learner Experience - T2' %}
