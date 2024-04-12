@@ -206,10 +206,10 @@ def auto_assign_tickets(teammate_name):
             # Change status to "In progress"
             Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.state"]')))).select_by_visible_text('In Progress')
 
-{% if team_name == 'RHT Learner Experience' %}
-
             # Fill in the boxes
             fill_in_categorization_fields()
+
+{% if team_name == 'RHT Learner Experience' %}
 
             # Fix if the short_description is empty
             fix_empty()
