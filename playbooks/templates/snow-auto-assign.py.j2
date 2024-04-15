@@ -63,7 +63,7 @@ def go_to_main_site():
 {% if team_name == 'RHT Learner Experience - T2' %}
     driver.get("https://redhat.service-now.com/nav_to.do?uri=%2Fx_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_clear_stack%3Dtrue%26sysparm_query%3Dassigned_toISEMPTY%255Eassignment_group%253D974cb3e01bc31c50c57c3224cc4bcbfe%255EstateIN1%252C2%252C-2%252C14%252C13%252C15%252C16%252C17%252C18%255Eactive%253Dtrue%26sysparm_first_row%3D1%26sysparm_view%3D")
 {% endif %}
-    time.sleep(2)
+    time.sleep(0.5)
 
 def snow_login():
     step("Login into Service Now ")
@@ -102,40 +102,46 @@ def intercom_login():
         logging.error("An exception occurred while accepting during login")
 
 
-def search_name(username, email):
-    # If there is @ and not redhat.com it is a customer email
-    if "@" in email and not email.endswith("@redhat.com"):
-        driver.execute_script("window.open('');")
-        driver.switch_to.window(driver.window_handles[1])
-        driver.get("https://app.intercom.com/a/apps/jeuow7ss/users/segments/all-users:eyJwcmVkaWNhdGVzIjpbeyJhdHRyaWJ1dGUiOiJyb2xlIiwiY29tcGFyaXNvbiI6ImVxIiwidHlwZSI6InJvbGUiLCJ2YWx1ZSI6InVzZXJfcm9sZSJ9LHsiYXR0cmlidXRlIjoiY3VzdG9tX2RhdGEudXNlcm5hbWUiLCJjb21wYXJpc29uIjoiZXEiLCJ0eXBlIjoic3RyaW5nIiwidmFsdWUiOiIifV19")
-        intercom_login()
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div/div[1]/div/div[3]/div/div[2]/div/div[2]/div[2]/div/div/div/span/div[2]/span/div/div/div/div/div'))).click()
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[1]/div/div/div/input'))).send_keys(username)
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/div/div/div/div/div/div[2]/a'))).click()
-        time.sleep(2)
-        first_name = str(driver.find_element("xpath", '/html/body/div[1]/div/div[1]/div/div[3]/div/div[2]/div/div[2]/div[3]/div[1]/div/div[1]/table/tbody/tr/td[1]/span/div/span/a').text)
+def check_cookies():
+    try:
+        WebDriverWait(driver, 2).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
+        accept_cookies()
+    except:
+        pass
 
-    # Else is a redhatter
-    else:
-        if "@" in email and email.endswith("@redhat.com"):
-            username = email.split("@")[0]
-
-        driver.execute_script("window.open('');")
-        driver.switch_to.window(driver.window_handles[1])
-        driver.get('https://rover.redhat.com/people/profile/' + username)
-        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="verifyUserButton"]')))
-        full_name = driver.find_element("xpath", '//*[@id="userFullName"]').text
-        if full_name != "Carlos Arias":
-            first_name = str(full_name).split(" ")[0]
-        else:
-            first_name = ''
+def accept_cookies():
+        try:
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
+            driver.refresh()
+        except:
+            driver.refresh()
+            pass
+def lms_login():
+    step("Login into LMS")
+    driver.execute_script("window.open('');")
+    driver.switch_to.window(driver.window_handles[1])
+    driver.get("https://training-lms.redhat.com/sso/saml/auth/redhatint")
+    check_cookies()
+    driver.switch_to.window(driver.window_handles[0])
 
 
-    driver.close()
+def search_name(email):
+    driver.switch_to.window(driver.window_handles[1])
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//div[@class="primary-nav"]//li[@class="dd nav-admin"]'))).click()
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@class="subnav-admin_menu"]'))).click()
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "User Summary")]'))).click()
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//input[@id="in_username"]'))).send_keys(email)
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//button[@class="btn btn--submit"]'))).click()
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//h4[@class="title"]/a'))).click()
+    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//div[@class="my-team__tab"]/*[contains(text(), "User Summary")]')))
+    first_name = str(driver.find_element("xpath",'/html/body/div/main/div[1]/div[2]/section/div/div[2]/div/div/span').text).capitalize()
+    last_name = str(driver.find_element("xpath",'/html/body/div/main/div[1]/div[2]/section/div/div[3]/div/div/span').text).capitalize()
+    full_name = f"{first_name} {last_name}"
+    logging.info(full_name)
+
     driver.switch_to.window(driver.window_handles[0])
     time.sleep(1)
-
-    return first_name
+    return full_name
 
 
 def fill_in_categorization_fields():
@@ -244,13 +250,9 @@ def auto_assign_tickets(teammate_name):
                 # RedHatters' issues usually come without email, just their RHNID in "User Name: " field, so it will fail the following email regex being empty and will jump to the except
                 try:
                     email = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
-                    first_name = search_name(username.replace(" ", ""), email)
+                    first_name = search_name(email)
                 except:
-                    first_name = search_name(username.replace(" ", ""), "")
-                    if first_name != '':
-                        email = username.replace(" ", "") + "@redhat.com"
-                    else:
-                        first_name = username
+                    logging.error("No email in the description")
 
                 WebDriverWait(driver, 10).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
 
@@ -318,7 +320,7 @@ Best Regards,
             try:
                 del username, first_name, user_email, email
             except:
-                logging.error("No variables to delete")
+                logging.info("No variables to delete")
 {% endif %}
 
 
@@ -368,6 +370,7 @@ Best Regards,
 # Main
 go_to_main_site()
 snow_login()
+lms_login()
 
 while True:
 {% if team_name == 'RHT Learner Experience' %}
