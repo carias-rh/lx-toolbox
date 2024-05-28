@@ -55,6 +55,7 @@ def step(step_str, patience = 1):
     time.sleep(patience)
 
 def switch_to_iframe():
+    driver.switch_to.default_content()
     macroponent = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[starts-with(local-name(), "macro")]')))
     shadow_root = driver.execute_script('return arguments[0].shadowRoot', macroponent)
     iframe = shadow_root.find_element(By.CSS_SELECTOR, 'iframe#gsft_main')
@@ -66,7 +67,7 @@ def go_to_main_site():
     driver.get("https://redhat.service-now.com/nav_to.do?uri=%2Fx_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_ck%3D72e293b54792295014ff1e8dd46d43221fe99ff2172b20f584e8235cb8094379671ac819%26sys_is_list%3Dtrue%26sysparm_clear_stack%3Dtrue%26sysparm_query%3Dassigned_toISEMPTY%255Eassignment_group%253D5afc8ba24f8cf6004db6022f0310c70a%255EstateIN1%252C2%252C-2%252C14%252C13%252C15%252C16%252C17%252C18%255Eactive%253Dtrue%26save_filter_query%3Dassigned_toISEMPTY%255Eassignment_group%253D5afc8ba24f8cf6004db6022f0310c70a%255EstateIN1%252C2%252C-2%252C14%252C13%252C15%252C16%252C17%252C18%255Eactive%253Dtrue%255EEQ%26sys_target%3Dx_redha_red_hat_tr_x_red_hat_training%26filter_visible%3DMe%26save_filter_name%3DRHT%2520-%2520Unassigned%2520T1")
 {% endif %}
 {% if team_name == 'RHT Learner Experience - T2' %}
-    driver.get("https://redhat.service-now.com/nav_to.do?uri=%2Fx_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_clear_stack%3Dtrue%26sysparm_query%3Dassigned_toISEMPTY%255Eassignment_group%253D974cb3e01bc31c50c57c3224cc4bcbfe%255EstateIN1%252C2%252C-2%252C14%252C13%252C15%252C16%252C17%252C18%255Eactive%253Dtrue%26sysparm_first_row%3D1%26sysparm_view%3D")
+    driver.get('https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_clear_stack%3Dtrue%26sysparm_query%3Dassigned_toISEMPTY%255Eassignment_group%253D974cb3e01bc31c50c57c3224cc4bcbfe%255EstateIN1%252C2%252C-2%252C14%252C13%252C15%252C16%252C17%252C18%255Eactive%253Dtrue%26sysparm_first_row%3D1%26sysparm_view%3D')
 {% endif %}
     time.sleep(0.5)
 
@@ -78,18 +79,23 @@ def snow_login():
             WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL sso-rh-login:5000/get_otp").read()).replace('\n', ''))
             WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
             snow_login_succeed()
+            time.sleep(15)
     except:
         logging.error("An exception occurred while accepting during login")
 
 
 def snow_login_succeed():
     try:
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="user_info_dropdown"]')))
-        print("Login succeeded")
+        switch_to_iframe()
+        if 'Red Hat Trainings' == WebDriverWait(driver, 15).until(
+                EC.element_to_be_clickable((By.XPATH, '//h1/a/span'))).text:
+            print("Login succeeded")
+        else:
+            print("Introduce your credentials manually")
+            time.sleep(15)
     except:
         print("Introduce your credentials manually")
         time.sleep(15)
-
 
 def intercom_login():
     step("Login into Intercom ")
@@ -202,6 +208,7 @@ def auto_assign_tickets(teammate_name):
             (By.CSS_SELECTOR, '#x_redha_red_hat_tr_x_red_hat_training_table > tbody')))
         rows = table_body.find_elements(By.TAG_NAME, 'tr')
         num_rows = len(rows)
+
         logging.info(f"{num_rows} tickets in queue")
 
         for ticket in range(num_rows):
@@ -259,7 +266,7 @@ def auto_assign_tickets(teammate_name):
                 except:
                     logging.error("No email in the description")
 
-                WebDriverWait(driver, 10).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//*[@id="gsft_main"]')))
+                switch_to_iframe()
 
                 # Fill in name
                 driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').clear()
@@ -337,6 +344,7 @@ Best Regards,
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
 
             # Assign to {{ team_name }}
+            switch_to_iframe()
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assignment_group"]'))).clear()
             WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assignment_group"]'))).send_keys("{{ team_name }}")
             time.sleep(3.5)
@@ -354,7 +362,8 @@ Best Regards,
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
 
             # Go back to the "Unassigned" list
-            driver.switch_to.default_content()
+            go_to_main_site()
+            switch_to_iframe()
 {% if team_name == 'RHT Learner Experience' %}
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[5]/div/div/nav/div/div[3]/div/div/magellan-favorites-list/ul/li[4]/div/div[1]/a'))).click()
 
