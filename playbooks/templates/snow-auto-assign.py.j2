@@ -26,6 +26,9 @@ options.add_argument('--ignore-certificate-errors')
 # Chrome webdriver
 driver = webdriver.Chrome(options=options)
 
+snow_id = ''
+teammate_name= ''
+
 def handle_exception(e):
     exc_type, exc_value, exc_traceback = sys.exc_info()
     traceback_details = traceback.extract_tb(exc_traceback)
@@ -61,6 +64,15 @@ def switch_to_iframe():
     iframe = shadow_root.find_element(By.CSS_SELECTOR, 'iframe#gsft_main')
     WebDriverWait(driver, 3).until(EC.frame_to_be_available_and_switch_to_it(iframe))
 
+def close_alert():
+    try:
+        driver.switch_to.alert.accept()
+        logging.info("There was an alert dialog open. Closing...")
+        reassign_ticket()
+    except:
+        pass
+
+
 # Go to the website
 def go_to_main_site():
 {% if team_name == 'RHT Learner Experience' %}
@@ -78,8 +90,9 @@ def snow_login():
             WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
             WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL sso-rh-login:5000/get_otp").read()).replace('\n', ''))
             WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
+
+            time.sleep(13)
             snow_login_succeed()
-            time.sleep(15)
     except:
         logging.error("An exception occurred while accepting during login")
 
@@ -87,7 +100,7 @@ def snow_login():
 def snow_login_succeed():
     try:
         switch_to_iframe()
-        if 'Red Hat Trainings' == WebDriverWait(driver, 15).until(
+        if 'Red Hat Trainings' == WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, '//h1/a/span'))).text:
             print("Login succeeded")
         else:
@@ -157,7 +170,7 @@ def search_name(email):
 
 def fill_in_categorization_fields():
     Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
-        (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.category"]')))).select_by_visible_text('RHLS Basic External Support')
+        (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.category"]')))).select_by_visible_text('RHLS Standard Support')
     time.sleep(0.5)
 {% if team_name == 'RHT Learner Experience - T2' %}
     Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
@@ -201,6 +214,8 @@ def auto_assign_tickets(teammate_name, round_robin):
 {% if team_name == 'RHT Learner Experience - T2' %}
 def auto_assign_tickets(teammate_name):
 {% endif %}
+    global snow_id
+
     step("Assigning tickets ")
     try:
         switch_to_iframe()
@@ -337,25 +352,22 @@ Best Regards,
 
 
             # Add 1 minute to work
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).clear()
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).send_keys('1')
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).clear()
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).send_keys('1')
 
             # Save (First time to change status In Progress)
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
 
             # Assign to {{ team_name }}
-            switch_to_iframe()
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assignment_group"]'))).clear()
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assignment_group"]'))).send_keys("{{ team_name }}")
-            time.sleep(3.5)
-            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assignment_group"]'))).send_keys(Keys.RETURN)
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assignment_group"]'))).clear()
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assignment_group"]'))).send_keys("{{ team_name }}")
+            time.sleep(3)
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assignment_group"]'))).send_keys(Keys.RETURN)
 
             # Assign to {{ user_name }}
-            WebDriverWait(driver, 6).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).clear()
-            WebDriverWait(driver, 6).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys(teammate_name)
-            # Print output
-            logging.info("Assigned ticket " + snow_id + " to " + teammate_name)
-            time.sleep(1.5)
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).clear()
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys(teammate_name)
+            time.sleep(3)
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys(Keys.RETURN)
 
             # Save (Second time to assign to teammate)
@@ -364,9 +376,9 @@ Best Regards,
             # Go back to the "Unassigned" list
             go_to_main_site()
             switch_to_iframe()
-{% if team_name == 'RHT Learner Experience' %}
-            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[5]/div/div/nav/div/div[3]/div/div/magellan-favorites-list/ul/li[4]/div/div[1]/a'))).click()
+            logging.info("Assigned ticket " + snow_id + " to " + teammate_name)
 
+{% if team_name == 'RHT Learner Experience' %}
             # If round_robin, get the next name of the list
             if round_robin:
                 response = urlopen(str(os.environ.get('T1_FRONTEND_OPENSHIFT_ROUTE')) + "/api/round_robin")
@@ -381,26 +393,46 @@ Best Regards,
     except:
         logging.error("Failed to assign ticket")
 
+def reassign_ticket():
+    global snow_id
+    global teammate_name
+
+    driver.get(f'https://redhat.service-now.com/surl.do?n={snow_id}')
+    switch_to_iframe()
+
+    # Assign to { teammate_name }
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).clear()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys(teammate_name)
+    time.sleep(3)
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sys_display.x_redha_red_hat_tr_x_red_hat_training.assigned_to"]'))).send_keys(Keys.RETURN)
+
+    # Save
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+    logging.info("Assigned ticket " + snow_id + " to " + teammate_name)
+
 # Main
 go_to_main_site()
 snow_login()
+{% if team_name == 'RHT Learner Experience - T2' %}
 lms_login()
+{% endif %}
 
 while True:
 {% if team_name == 'RHT Learner Experience' %}
     response = urlopen(str(os.environ.get('T1_FRONTEND_OPENSHIFT_ROUTE')) + "/api/shift")
     shift_json = json.loads(response.read())
+    teammate_name = shift_json["name"]
+    is_round_robin_enabled = shift_json["round_robin"]
 
-    if shift_json["name"] != 'None':
+    if teammate_name != 'None' or is_round_robin_enabled:
         try:
             switch_to_iframe()
             tickets_in_line = WebDriverWait(driver, 3).until(
                 EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training"]/div[1]'))).text
             if tickets_in_line == 'No records to display':
-                driver.switch_to.default_content()
+                pass
             else:
-                driver.switch_to.default_content()
-                auto_assign_tickets(shift_json["name"], shift_json["round_robin"])
+                auto_assign_tickets(teammate_name, shift_json["round_robin"])
         except:
             pass
 {% endif %}
@@ -409,22 +441,15 @@ while True:
         switch_to_iframe()
         tickets_in_line = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training"]/div[1]'))).text
         if tickets_in_line == 'No records to display':
-            driver.switch_to.default_content()
+            pass
         else:
-            driver.switch_to.default_content()
             auto_assign_tickets("{{ user_name }}")
-    except:
-        pass
-{% endif %}
-{% if team_name == 'RHT Learner Experience' %}
-    # Close any possible alert dialog open
-    try:
-        driver.switch_to.alert.accept()
-        logging.error("There was an alert dialog open")
     except:
         pass
 {% endif %}
 
     time.sleep(60)
     go_to_main_site()
-
+{% if team_name == 'RHT Learner Experience' %}
+    close_alert()
+{% endif %}
