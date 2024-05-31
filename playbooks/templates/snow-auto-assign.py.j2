@@ -169,10 +169,15 @@ def search_name(email):
 
 
 def fill_in_categorization_fields():
+{% if team_name == 'RHT Learner Experience' %}
     Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.category"]')))).select_by_visible_text('RHLS Standard Support')
-    time.sleep(0.5)
+{% endif %}
+
 {% if team_name == 'RHT Learner Experience - T2' %}
+    Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+        (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.category"]')))).select_by_visible_text('RHLS Basic Internal Support')
+    time.sleep(0.5)
     Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.subcategory"]')))).select_by_visible_text('Course Content')
     time.sleep(0.5)
@@ -386,10 +391,6 @@ Best Regards,
                 teammate_name = shift_json["name"]
 
 {% endif %}
-{% if team_name == 'RHT Learner Experience - T2' %}
-            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[5]/div/div/nav/div/div[3]/div/div/magellan-favorites-list/ul/li[3]/div/div[1]/a'))).click()
-{% endif %}
-
     except:
         logging.error("Failed to assign ticket")
 
