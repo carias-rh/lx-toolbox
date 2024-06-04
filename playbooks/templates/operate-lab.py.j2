@@ -274,11 +274,12 @@ def impersonate():
 
 # Looks for the workstation console button and opens the console in a new tab
 def open_workstation():
+    global send_text_option_button
     step("Opening workstation console")
     # Open the Lab Environment tab
     select_lab_environment_tab("lab")
-    # Open the workstation console;
-    open_workstation_console = WebDriverWait(driver, 300).until(EC.element_to_be_clickable(
+    # Wait until 10 minutes to open the workstation console;
+    WebDriverWait(driver, 600).until(EC.element_to_be_clickable(
             (By.XPATH, "//*[text()='workstation']/../td[3]/button"))).click()
     # Wait for the console to open
     time.sleep(6)
@@ -289,6 +290,14 @@ def open_workstation():
     time.sleep(3)
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
         (By.XPATH, '//*[@id="showKeyboard"]'))).click()
+    # Set the send text box option button
+    send_text_option_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '//*[@id="showSendTextDialog"]')))
+    {% if setup == "True" %}
+    # Set the environment to 'da Costa' style
+    set_environment_in_rgdacosta_style()
+    {% endif %}
+
 
 # Gets a list of the commands from the current section
 def get_commands(course, chapter_and_section):
@@ -324,6 +333,46 @@ def multiline_command(command):
     else: return False
 
 
+def set_environment_in_rgdacosta_style():
+    step('Setup the lab environment')
+    time.sleep(10)
+    # Click enter to select student user
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '//div[text()="Tab"]'))).click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '//div[text()="Enter"]'))).click()
+    # Enter password for student user and press enter
+    introduce_command('student', auto_enter=True)
+    time.sleep(12)
+    # Open a terminal with ALT + F2
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//div[text()="Esc"]'))).click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//div[text()="Alt"]'))).click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//div[text()="F2"]'))).click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '//div[text()="Alt"]'))).click()
+    time.sleep(0.5)
+    introduce_command('gnome-terminal', auto_enter=True)
+    # Clone the rgdacosta repository
+    time.sleep(1.5)
+    introduce_command('git clone https://gitlab.com/rgdacosta/classroom_env.git', auto_enter=True)
+    time.sleep(3)
+    # Run the ansible playbook
+    introduce_command('cd classroom_env; ansible-playbook playbook.yml', auto_enter=True)
+    time.sleep(45)
+    # Open a terminal with ALT + F2
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//div[text()="Esc"]'))).click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//div[text()="Alt"]'))).click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//div[text()="F2"]'))).click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, '//div[text()="Alt"]'))).click()
+    introduce_command('gnome-terminal', auto_enter=True)
+
 def filter_commands_list(commands):
     commands_array = commands.split("\n")
     composed_command= ''
@@ -348,7 +397,8 @@ def filter_commands_list(commands):
     return filtered_commands_array
 
 # Uses the Text button function to paste and the Digital Keyboard UI to execute it
-def introduce_command(command, send_text_option_button, auto_enter):
+def introduce_command(command, auto_enter):
+    global send_text_option_button
     if command != '':
         # Open text dialog
         send_text_option_button.click()
@@ -371,95 +421,94 @@ def prompt_user_enter_to_continue(custom_message):
     input("Press Enter to continue " + custom_message + "\n")
 
 # This function includes the whole list of exceptions that are not just enter a command and press enter
-def manage_special_commands(command, send_text_option_button):
-
+def manage_special_commands(command):
     if re.match("lab .*start", command) or re.match("lab .*setup", command):
         command = "date; time " + command
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         # Wait for user to continue after the lab script has executed
         prompt_user_enter_to_continue("with the exercise.")
     elif re.match("lab .*grade", command) :
         command = "date; time " + command
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("with the exercise.")
     elif  re.match("lab .*finish", command):
         command = "date; time " + command
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         print("##############  Exercise completed ##############")
     elif "ssh" in command:
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("after the ssh.")
     elif "ansible" in command:
         # Wait for user to continue after the playbook has been reviewed/created
         prompt_user_enter_to_continue("if you did review/create the playbook.")
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("if playbook finished")
     elif "ok=" in command or "failed=" in command:
         print("skipping output")
     elif "podman build" in command:
         prompt_user_enter_to_continue("if the Containerfile is ready to build.")
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("if podman build finished.")
     elif "vim " in command or "vi " in command:
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("if you did review/create the file.")
     elif "Enter" in command:
         command = "\n"
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
     elif "less " in command:
         command = command.replace("less ", "cat ")
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
     elif "systemctl status" in command:
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         command = "q\n"
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
     elif "systemctl restart" in command or "daemon-reload" in command:
         prompt_user_enter_to_continue(
             "if you made sure that the new configuration is in place to 'systemctl restart service.'")
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
     elif "journalctl" in command:
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         command = " \n"
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
     elif "ping" in command and not "ansible" in command:
         if not "-c" in command:
             command = command + " -c2"
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
     elif "yum install" in command or "yum reinstall" in command or "yum remove" in command or "dnf install" in command:
         if not "-y" in command:
             command = command + " -y"
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         # Wait for user to continue after yum has executed
         prompt_user_enter_to_continue("when the installation has finished.")
     elif "podman login registry.redhat.io" in command:
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         # Wait for user to continue after yum has executed
         prompt_user_enter_to_continue("when login is completed.")
     elif "vgcfgrestore -f" in command:
         prompt_user_enter_to_continue("when you have selected the desired .vg file.")
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
     elif "/etc/hosts" in command or "/etc/resolv.conf" in command:
         prompt_user_enter_to_continue("when you have reviewed/fixed the /etc/hosts or /etc/resolv.conf files.")
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
     elif "iscsiadm -m discovery" in command:
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("when discovery command has executed.")
     elif "oc edit" in command:
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("when the object edit has been saved.")
     elif "oc create -f" in command or "oc apply -f" in command:
         prompt_user_enter_to_continue("when the yaml file has been saved.")
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
     elif "oc logs" in command or "podman logs" in command:
         try:
             suffix = re.findall(r"-\w+-\w+$",command)[0]
-            introduce_command(re.split(str(suffix), command)[0], send_text_option_button, auto_enter=False)
+            introduce_command(re.split(str(suffix), command)[0], auto_enter=False)
             prompt_user_enter_to_continue(". Use TAB to complete the container/pod name.\n")
         except:
-            introduce_command(command, send_text_option_button, auto_enter=True)
+            introduce_command(command, auto_enter=True)
 
     elif "watch" in command:
-        introduce_command(command, send_text_option_button, auto_enter=True)
+        introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("when you finished the watch command.")
     else:
         return 0
@@ -499,10 +548,6 @@ def get_ge_and_labs(course):
 # Receives a list of the commands of the section
 def qa(commands_array):
     step("Starting QA")
-    send_text_option_button = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-        (By.XPATH, '//*[@id="showSendTextDialog"]')))
-    show_keyboard_toggle = WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
-        (By.XPATH, '//*[@id="showKeyboard"]')))
 
     for i in range(len(commands_array)):
         if commands_array[i] != '':
@@ -511,8 +556,8 @@ def qa(commands_array):
                 print("Next command: " + commands_array[i + 1])
                 print('-------------------------------------------------')
             # Manage if the command has an exception, if there is not, just introduce_command normaly
-            if not manage_special_commands(commands_array[i], send_text_option_button):
-                introduce_command(commands_array[i], send_text_option_button, auto_enter=True)
+            if not manage_special_commands(commands_array[i]):
+                introduce_command(commands_array[i], auto_enter=True)
 
             # Standard time for command to execute
             time.sleep(3)
@@ -652,6 +697,7 @@ if lab_status_second_button == "STOP" or lab_status_second_button == "STARTING" 
     increase_lifespan("{{ course }}")
 
 on_track = False
+send_text_option_button = None
 for section in ge_and_labs_list:
     # If section is current execute the qa
     if section == "{{ chapter_and_section }}":
