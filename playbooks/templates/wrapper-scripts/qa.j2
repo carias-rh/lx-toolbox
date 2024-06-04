@@ -42,62 +42,79 @@ function get_course_from_list()
 function start_qa()
 {
   if [ "$ENV" == "rol" ] || [ "$ENV" == "rol-stage" ]  || [ "$ENV" == "china" ]
-		 then /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV" -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION" -e selenium_driver="$DRIVER" -e debug=$DEBUG
+		 then /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV" -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION" -e setup=$SETUP -e selenium_driver="$DRIVER" -e debug=$DEBUG
 
 	else
 	    ENV=rol
-      /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV" -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION" -e selenium_driver="$DRIVER" -e debug=$DEBUG
+      /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="qa" -e "lab_environment=$ENV" -e "{'course_id': ['$COURSE_PATH']}" -e chapter_and_section="$SECTION" -e setup=$SETUP -e selenium_driver="$DRIVER" -e debug=$DEBUG
 	fi
 
 }
 
+# Define usage function
+usage() {
+  echo "Usage: $(basename $0) [-e | --env arg] [-c | --course arg] [-s | --section arg] [-S | --setup] [-D | --debug] [-h | --help]"
+  echo ""
+  echo "Examples:"
+  echo "  Pass only the course number to select the latest version in ROL production and the first guided exercise"
+  echo "    $ qa -c 199 -S"
+  echo "  or by selecting a particular section and any other environment:"
+  echo "    $ qa --course 199 --section ch09s04 --env rol-stage"
+}
 
-VALID_ARGS=$(getopt -o :d:e:c:s:h:D --long driver:,env:,course:,section:,debug:,help: -- "$@")
+
+VALID_ARGS=$(getopt -o e:c:s:d:SDh --long env:,course:,section:,driver:,setup,debug,help -- "$@")
 if [[ $? -ne 0 ]]; then
     exit 1;
 fi
 
 eval set -- "$VALID_ARGS"
-while [ : ]; do
+
+# Initialize variables
+DEBUG='False'
+SETUP='False'
+
+# Process arguments
+while true; do
   case "$1" in
     -e | --env)
-        ENV=$2
-        shift 2
-        ;;
+      ENV=$2
+      shift 2
+      ;;
     -c | --course)
-        COURSE=$2
-        shift 2
-        ;;
-
+      COURSE=$2
+      shift 2
+      ;;
     -s | --section)
-        SECTION=$2
-        shift 2
-        ;;
+      SECTION=$2
+      shift 2
+      ;;
     -d | --driver)
-        DRIVER=$2
-        shift 2
-        ;;
+      DRIVER=$2
+      shift 2
+      ;;
     -D | --debug)
-        DEBUG='True'
-        shift
-        ;;
-    --) shift;
-        break
-        ;;
-    -h)
-        echo "Usage: $(basename $0) [-e | --env arg] [-c | --course arg] [-s | --section arg]"
-        echo ""
-        echo "Pass only the course number to select the latest version in ROL production and the first guided exercise"
-        echo "$ qa -c 199"
-        echo "or by selecting a particular section and any other environment:"
-        echo "$ qa -course 199 -section ch09s04 -env rol-stage"
-        exit 1
-        ;;
-
-
+      DEBUG='True'
+      shift
+      ;;
+    -S | --setup)
+      SETUP='True'
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      usage
+      exit 1
+      ;;
   esac
 done
-
 
 
 
@@ -127,6 +144,8 @@ else
     echo "Environment: rol-production"
     ENV='rol'
 fi
+
+echo "Da Costa's setup: $SETUP"
 
 if [[ $DRIVER != '' ]]
 then
