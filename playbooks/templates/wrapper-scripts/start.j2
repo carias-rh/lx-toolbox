@@ -46,13 +46,13 @@ function start_course()
 	if [ $# -eq 2 ]
 	  then
 	      if [ "$2" == "rol" ] || [ "$2" == "rol-stage" ] || [ "$2" == "china" ]
-		        then /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="start" -e "lab_environment=$2"  -e "{'course_id': ['$COURSE_PATH']}" -v
+		        then /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="start" -e "lab_environment=$2"  -e "{'course_id': ['$COURSE_PATH']}" -e setup='False' -v
 		        echo "---> Starting selenium script <---"
             /usr/bin/python /tmp/start-$COURSE_PATH-$2.py
         fi
 	else 
 	      LAB_ENVIRONMENT=rol
-        /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="start" -e "lab_environment=$LAB_ENVIRONMENT"  -e "{'course_id': ['$COURSE_PATH']}" -v
+        /usr/bin/ansible-playbook {{ playbook_dir }}/operate-lab.yml -e action="start" -e "lab_environment=$LAB_ENVIRONMENT"  -e "{'course_id': ['$COURSE_PATH']}" -e setup='False' -v
         echo "---> Starting selenium script <---"
         /usr/bin/python /tmp/start-$COURSE_PATH-rol.py
 	fi
