@@ -92,7 +92,7 @@ def get_snow_info(snow_id):
     except:
         section = ""
     title = re.findall("Section Title:.*", description)[0].split(":  ")[1]
-    rhnid = "{{ username }}@redhat.com"
+    rhnid = re.findall("User Name:.*", description)[0].split(":  ")[1]
 
     snow_info = {
         "SNOW_id": snow_id,
@@ -114,13 +114,9 @@ def select_dropdown(element, input):
     element.send_keys(input)
     element.send_keys(Keys.TAB)
 
-def tab_to_priority():
-    action = ActionChains(driver)
-    element = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@class="tabs-menu"]//*[contains(text(), "Priority")]')))
-    time.sleep(0.3)
-    for x in range(0,52):
-        action.move_to_element(element).send_keys(Keys.SHIFT + Keys.TAB).perform()
-    action.move_to_element(element).send_keys(Keys.ENTER).perform()
+def switch_to_tab(tabname):
+    WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, f'//ul[@role="tablist"]//strong[text()="{tabname}"]'))).click()
+
 
 
 def create_jira(snow_info):
@@ -137,12 +133,12 @@ def create_jira(snow_info):
     # Add Description
     color1 = '{color:#0747a6}'
     color2 = '{color}'
-    rhnid = "{{ username }}@redhat.com"
+    #rhnid = "{{ username }}@redhat.com"
     description = f"""
         h3. {color1}*Please fill in the following information:*{color2}
     ----
     |*URL:*|[ch{snow_info["Chapter"]}s{snow_info["Section"]} |{snow_info["URL"]}]|
-    |*Reporter RHNID:*| {rhnid} |
+    |*Reporter RHNID:*| {snow_info["RHNID"]} |
     |*Section title:*|{snow_info["Title"]}|
     |*Language*:| English |
 
@@ -174,9 +170,10 @@ def create_jira(snow_info):
     version.send_keys(Keys.HOME)
 
     # Change to priority tab and change priority
-    tab_to_priority()
+    switch_to_tab('Priority')
     priority_dropdown = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
     select_dropdown(priority_dropdown, "Minor")
+    switch_to_tab('Field Tab')
 
 
 # Main
