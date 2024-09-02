@@ -18,13 +18,16 @@ USER root
 #
 #RUN ln -s /usr/bin/python3 /usr/bin/python && \
 #    ln -s /usr/local/bin/ansible-playbook /usr/bin/ansible-playbook
+ARG GIT_ACCESS_TOKEN
 
 RUN mkdir /app
 
 ENV HOME /app
 
 WORKDIR /app
-RUN git clone https://github.com/carias-rh/lx-toolbox.git
+
+# clone private repository
+RUN git clone https://carias-rh:${GIT_ACCESS_TOKEN}@github.com/carias-rh/lx-toolbox.git
 
 WORKDIR /app/lx-toolbox
 RUN cd /app/lx-toolbox; ls -al
