@@ -308,7 +308,7 @@ def auto_assign_tickets(teammate_name):
                 driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').clear()
                 driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').send_keys(
                     course[0].split(":  ")[1].upper().replace(" ", "") + "-" + version[0].split(":  ")[1] + " Feedback: " + summary[
-                                                                                                                            :100] + "...")
+                                                                                                                            :200] + "...")
             except:
                 logging.error("Failed to fill short_description")
 
