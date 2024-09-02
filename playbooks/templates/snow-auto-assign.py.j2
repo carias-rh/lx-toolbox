@@ -311,6 +311,17 @@ def auto_assign_tickets(teammate_name):
                                                                                                                             :100] + "...")
             except:
                 logging.error("Failed to fill short_description")
+
+            # Fill the Project Code field with the course for easier categorization
+            try:
+                WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+                    (By.XPATH, '/html/body/div[2]/form/div[1]/span[2]/span[1]'))).click()
+                WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
+                    (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.project_code"]'))).send_keys(course[0].split(":  ")[1].upper().replace(" ", ""))
+            except:
+                logging.error("Failed to fill Project Code")
+
+
 {% endif %}
             # Get summary content
             short_summary = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').get_attribute("value")
