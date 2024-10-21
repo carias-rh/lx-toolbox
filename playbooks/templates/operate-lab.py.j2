@@ -39,10 +39,10 @@ driver.maximize_window()
 
 counter = 1
 # Prints the current step
-def step(step_str, patience = 1):
+def step(step_str, patience=1):
     global counter
-    print('#####################################')
-    print(str(counter) + ": " + step_str)
+    print(f"Step {counter}: {step_str}")
+    print('-' * 40)
     counter += 1
     time.sleep(patience)
 
@@ -338,19 +338,24 @@ def set_environment_in_rgdacosta_style():
     time.sleep(10)
     # Click enter to select student user
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        (By.XPATH, '//div[text()="Enter"]'))).click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
         (By.XPATH, '//div[text()="Tab"]'))).click()
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
         (By.XPATH, '//div[text()="Enter"]'))).click()
     # Enter password for student user and press enter
     introduce_command('student', auto_enter=True)
-    time.sleep(12)
+    time.sleep(17)
     # Open a terminal with ALT + F2
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '//div[text()="Esc"]'))).click()
+    time.sleep(0.3)
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '//div[text()="Alt"]'))).click()
+    time.sleep(0.3)
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '//div[text()="F2"]'))).click()
+    time.sleep(0.3)
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
         (By.XPATH, '//div[text()="Alt"]'))).click()
     time.sleep(0.5)
@@ -361,7 +366,7 @@ def set_environment_in_rgdacosta_style():
     time.sleep(3)
     # Run the ansible playbook
     introduce_command('cd classroom_env; ansible-playbook playbook.yml', auto_enter=True)
-    time.sleep(45)
+    time.sleep(20)
     # Open a terminal with ALT + F2
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, '//div[text()="Esc"]'))).click()
