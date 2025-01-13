@@ -2,7 +2,7 @@
 #FROM docker.io/geerlingguy/docker-fedora39-ansible
 FROM quay.io/carias_rh/lx-toolbox-base:0.2
 
-MAINTAINER "Carlos M. Arias <carias@redhat.com>"
+LABEL maintainer="Carlos M. Arias <carias@redhat.com>"
 
 USER root
 
