@@ -434,7 +434,11 @@ while True:
     response = urlopen(str(os.environ.get('T1_FRONTEND_OPENSHIFT_ROUTE')) + "/api/shift")
     shift_json = json.loads(response.read())
     teammate_name = shift_json["name"]
-    is_round_robin_enabled = shift_json["round_robin"]
+
+    response = urlopen(str(os.environ.get('T1_FRONTEND_OPENSHIFT_ROUTE')) + "/api/round_robin_status")
+    round_robin_status_json = json.loads(response.read())
+    is_round_robin_enabled = round_robin_status_json["round_robin_enabled"]
+    
 
     if teammate_name != 'None' or is_round_robin_enabled:
         try:
@@ -444,7 +448,7 @@ while True:
             if tickets_in_line == 'No records to display':
                 pass
             else:
-                auto_assign_tickets(teammate_name, shift_json["round_robin"])
+                auto_assign_tickets(teammate_name, is_round_robin_enabled)
         except:
             pass
 {% endif %}
