@@ -105,13 +105,8 @@ def login():
         check_cookies()
         WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click()
 
-<<<<<<< HEAD
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_field"]'))).send_keys("{{ github_username }}")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys("{{ github_password }}")
-=======
-        driver.find_element("xpath", '//*[@id="login_field"]').send_keys("{{ github_username }}")
-        driver.find_element("xpath", '//*[@id="password"]').send_keys("{{ github_password }}")
->>>>>>> 0bd1a57 (fixed rol-stage url)
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/form/div/input[13]'))).click()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]'))).click()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]'))).send_keys(os.popen("2fa github").read())
@@ -422,7 +417,6 @@ def introduce_command(command, auto_enter):
         wait_for_command_to_paste(command)
         # Click Enter
         if auto_enter:
-            if auto_enter:
             WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
                     (By.XPATH, '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'))).click()
 
@@ -440,47 +434,28 @@ def manage_special_commands(command):
         prompt_user_enter_to_continue("with the exercise.")
     elif re.match("lab .*grade", command) :
         command = "date; time " + command
-<<<<<<< HEAD
         introduce_command(command, auto_enter=True)
-=======
-        introduce_command(command, send_text_option_button)
->>>>>>> dbca072 (fixed for qa with early access)
         prompt_user_enter_to_continue("with the exercise.")
     elif  re.match("lab .*finish", command):
         command = "date; time " + command
         introduce_command(command, auto_enter=True)
         print("##############  Exercise completed ##############")
     elif "ssh" in command:
-<<<<<<< HEAD
         introduce_command(command, auto_enter=True)
-=======
-        introduce_command(command, send_text_option_button)
->>>>>>> dbca072 (fixed for qa with early access)
         prompt_user_enter_to_continue("after the ssh.")
     elif "ansible" in command:
         # Wait for user to continue after the playbook has been reviewed/created
         prompt_user_enter_to_continue("if you did review/create the playbook.")
-<<<<<<< HEAD
         introduce_command(command, auto_enter=True)
-=======
-        introduce_command(command, send_text_option_button)
->>>>>>> dbca072 (fixed for qa with early access)
         prompt_user_enter_to_continue("if playbook finished")
     elif "ok=" in command or "failed=" in command:
         print("skipping output")
     elif "podman build" in command:
         prompt_user_enter_to_continue("if the Containerfile is ready to build.")
-<<<<<<< HEAD
         introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("if podman build finished.")
     elif "vim " in command or "vi " in command:
         introduce_command(command, auto_enter=True)
-=======
-        introduce_command(command, send_text_option_button)
-        prompt_user_enter_to_continue("if podman build finished.")
-    elif "vim " in command or "vi " in command:
-        introduce_command(command, send_text_option_button)
->>>>>>> dbca072 (fixed for qa with early access)
         prompt_user_enter_to_continue("if you did review/create the file.")
     elif "Enter" in command:
         command = "\n"
@@ -495,11 +470,7 @@ def manage_special_commands(command):
     elif "systemctl restart" in command or "daemon-reload" in command:
         prompt_user_enter_to_continue(
             "if you made sure that the new configuration is in place to 'systemctl restart service.'")
-<<<<<<< HEAD
         introduce_command(command, auto_enter=True)
-=======
-        introduce_command(command, send_text_option_button)
->>>>>>> dbca072 (fixed for qa with early access)
     elif "journalctl" in command:
         introduce_command(command, auto_enter=True)
         command = " \n"
@@ -507,11 +478,7 @@ def manage_special_commands(command):
     elif "ping" in command and not "ansible" in command:
         if not "-c" in command:
             command = command + " -c2"
-<<<<<<< HEAD
         introduce_command(command, auto_enter=True)
-=======
-        introduce_command(command, send_text_option_button)
->>>>>>> dbca072 (fixed for qa with early access)
     elif "yum install" in command or "yum reinstall" in command or "yum remove" in command or "dnf install" in command:
         if not "-y" in command:
             command = command + " -y"
@@ -524,7 +491,6 @@ def manage_special_commands(command):
         prompt_user_enter_to_continue("when login is completed.")
     elif "vgcfgrestore -f" in command:
         prompt_user_enter_to_continue("when you have selected the desired .vg file.")
-<<<<<<< HEAD
         introduce_command(command, auto_enter=True)
     elif "/etc/hosts" in command or "/etc/resolv.conf" in command:
         prompt_user_enter_to_continue("when you have reviewed/fixed the /etc/hosts or /etc/resolv.conf files.")
@@ -549,18 +515,6 @@ def manage_special_commands(command):
     elif "watch" in command:
         introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("when you finished the watch command.")
-=======
-        introduce_command(command, send_text_option_button)
-    elif "/etc/hosts" in command or "/etc/resolv.conf" in command:
-        prompt_user_enter_to_continue("when you have reviewed/fixed the /etc/hosts or /etc/resolv.conf files.")
-        introduce_command(command, send_text_option_button, auto_enter=True)
-    elif "iscsiadm -m discovery" in command:
-        introduce_command(command, send_text_option_button, auto_enter=True)
-        prompt_user_enter_to_continue("when discovery command has executed.")
-    elif "oc edit" in command:
-        introduce_command(command, send_text_option_button)
-        prompt_user_enter_to_continue("when the file edit has been saved.")
->>>>>>> dbca072 (fixed for qa with early access)
     else:
         return 0
 
