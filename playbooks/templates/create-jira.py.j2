@@ -33,9 +33,25 @@ def switch_to_iframe():
     iframe = shadow_root.find_element(By.CSS_SELECTOR, 'iframe#gsft_main')
     WebDriverWait(driver, 3).until(EC.frame_to_be_available_and_switch_to_it(iframe))
 
+def check_cookies():
+    try:
+        WebDriverWait(driver, 2).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
+        accept_cookies()
+    except:
+        pass
+
+def accept_cookies():
+        try:
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
+            driver.refresh()
+        except:
+            driver.refresh()
+            pass
+
 def snow_login(snow_id):
     try:
         driver.get('https://redhat.service-now.com/surl.do?n=' + snow_id + '')
+        check_cookies()
 
         # RH SSO
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
@@ -49,6 +65,8 @@ def jira_login():
     try:
         driver.get("https://issues.redhat.com")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a'))).click()
+        time.sleep(2)
+        check_cookies()
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username-verification"]'))).send_keys("{{ username }}" + "@redhat.com")
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
