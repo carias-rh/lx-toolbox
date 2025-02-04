@@ -62,7 +62,7 @@ def go_to_course(course_id):
 {% if lab_environment == "rol" %}
     driver.get('https://rol.redhat.com/rol/app/courses/' + course_id)
 {% elif lab_environment == "rol-stage" %}
-    driver.get('https://rol-factory.ole.redhat.com/rol/app/courses/' + course_id)
+    driver.get('https://rol-factory-prod.ole.redhat.com/rol/app/courses/' + course_id)
 {% elif lab_environment == "china" %}
     driver.get('https://rol-cn.ole.redhat.com/rol/app/courses/' + course_id)
 {% endif %}
