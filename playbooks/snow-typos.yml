@@ -1,0 +1,16 @@
+---
+- name: SNOW Typos Checker
+  hosts: localhost
+  vars_files:
+    - credentials.yml
+  vars:
+    rh_username: "{{ username | default('') }}"
+    rh_password: "{{ password | default('') }}"
+    counter: 0
+    status: "Away"
+  tasks:
+    - name: Generate SNOW Typos Checker script
+      ansible.builtin.template:
+        src: templates/snow-typos-checker.py.j2
+        dest: "/tmp/snow-typos-checker.py"
+        mode: '0755'

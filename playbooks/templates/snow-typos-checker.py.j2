@@ -1,0 +1,347 @@
+#!/usr/local/bin/python3
+"""
+First implementation for processing SNOW tickets that are specifically about typos
+in Student Guides using Selenium and local AI (Ollama).
+"""
+
+import os
+import re
+import subprocess
+import time
+import json
+from selenium import webdriver
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
+
+
+# -------------------------------------------------------------------
+# Configurable constants for local paths, etc.
+# -------------------------------------------------------------------
+LOCAL_CLONE_DIRECTORY = "{{ playbook_dir }}/files/"
+GUIDE_SUBDIR = "guides/en-US"
+OLLAMA_COMMAND = "/usr/local/bin/ollama"  # Adjust if your Ollama binary is named differently
+CHROME_DEBUG_PORT = 9123    # Example local Chrome debugger port for your session
+CHROME_USER_DATA_DIR = "{{ ansible_env.HOME}}/.config/google-chrome/snow-typos"
+
+
+# -------------------------------------------------------------------
+# Browser session helpers
+# -------------------------------------------------------------------
+def open_profile():
+    """
+    Opens a new Google Chrome session with remote debugging enabled,
+    using the designated user data directory.
+    """
+    os.popen('google-chrome --remote-debugging-port=' + str(CHROME_DEBUG_PORT) +
+             ' --user-data-dir=' + CHROME_USER_DATA_DIR + ' &')
+
+def check_running_session():
+    """
+    Checks if a Google Chrome session is already running by looking for the user data directory
+    and the designated debugging port.
+    Returns the PID if found, or 0 otherwise.
+    """
+    pid = os.popen("ps -ef | grep '" + CHROME_USER_DATA_DIR +
+                   "' | grep " + str(CHROME_DEBUG_PORT) +
+                   " | grep -v grep | head -n1 | awk '{print $2}'").read().strip()
+    if pid:
+        return int(pid)
+    else:
+        return 0
+
+
+# -------------------------------------------------------------------
+# Example function to call Ollama locally with your query/prompt
+# -------------------------------------------------------------------
+# You can change the model to one available on your system.
+OLLAMA_MODEL = "llama3.2:latest"
+
+def askOllama(prompt: str) -> str:
+    """
+    Runs Ollama locally with the given prompt and returns the response text.
+    Make sure 'ollama' is installed on your system and in PATH.
+    """
+    try:
+        # Use 'ollama run <model> "<prompt>"'
+        result = subprocess.run(
+            [OLLAMA_COMMAND, "run", OLLAMA_MODEL, prompt],
+            capture_output=True,
+            text=True
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        print(f"[ERROR] Could not run Ollama: {e}")
+        return ""
+
+
+# -------------------------------------------------------------------
+# Function to set up the Selenium driver for Chrome
+# -------------------------------------------------------------------
+def get_chrome_driver() -> webdriver.Chrome:
+    """
+    Returns a Selenium Chrome WebDriver configured to use the
+    remote debugging port and user data directory.
+    """
+    options = webdriver.ChromeOptions()
+    options.add_argument("--ignore-certificate-errors")
+    options.add_argument("--window-size=1600,1200")
+    # Attach to our debug port and user data directory
+    options.add_experimental_option("debuggerAddress", f"localhost:{CHROME_DEBUG_PORT}")
+    options.add_argument(f"--user-data-dir={CHROME_USER_DATA_DIR}")
+
+    try:
+        driver = webdriver.Chrome(options=options)
+        return driver
+    except Exception as e:
+        print(f"[ERROR] Unable to start Chrome driver: {e}")
+        raise
+
+def switch_to_iframe(driver):
+    driver.switch_to.default_content()
+    macroponent = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[starts-with(local-name(), "macro")]')))
+    shadow_root = driver.execute_script('return arguments[0].shadowRoot', macroponent)
+    iframe = shadow_root.find_element(By.CSS_SELECTOR, 'iframe#gsft_main')
+    WebDriverWait(driver, 3).until(EC.frame_to_be_available_and_switch_to_it(iframe))
+
+
+def classify_ticket_llm(description: str) -> dict:
+    """
+    Classifies a SNOW ticket using an LLM, returning a dict like:
+    {
+      "is_typo_ticket": bool,
+      "is_environment_issue": bool,
+      "confidence": float,
+      "summary": str
+    }
+    
+    """
+    json_example = '{"is_typo_ticket":true,"is_environment_issue":false,"confidence":0.9,"summary":"It\'s about a minor spelling error."}'
+    prompt = f"""
+Classify the user's feedback regarding a Red Hat Training course. Return JSON with fields:
+- is_typo_ticket (true/false)
+- is_environment_issue (true/false)
+- confidence (a float from 0.0 to 1.0)
+- summary (in a short sentence)
+
+User feedback:
+\"\"\"{description}\"\"\"
+
+Reply in JSON only, no extra text.
+For example:
+{json_example}
+"""
+    response = askOllama(prompt)
+    print("[Ollama response regarding typos]:\n", response)
+    # Then parse JSON via Python. Temporary fallback if there's an error:
+    try:
+        return json.loads(response)
+    except:
+        print("[ERROR] Could not parse JSON from LLM. Full response:", response)
+        return {
+            "is_typo_ticket": False,
+            "is_environment_issue": False,
+            "confidence": 0.0,
+            "summary": ""
+        }
+
+
+# -------------------------------------------------------------------
+# Check if it's a "typo" feedback from SNOW description
+# (Simple example: if the description has certain keywords or patterns)
+# -------------------------------------------------------------------
+def is_typo_ticket(description: str) -> bool:
+    data = classify_ticket_llm(description)
+    return data.get("is_typo_ticket", False)
+
+
+# -------------------------------------------------------------------
+# Function to ensure that the course repository is available
+# -------------------------------------------------------------------
+def ensure_course_repo(course_id: str) -> str:
+    """
+    Ensures that the repository for the specified course is cloned.
+    The repository URL is constructed as:
+       git@github.com:RedHatTraining/<base_course>.git
+    where <base_course> is extracted from course_id.
+    If the repository is not present in LOCAL_CLONE_DIRECTORY, it is cloned.
+    If it exists, a 'git pull' is performed.
+    Returns the repository directory path.
+    """
+    base_course = re.split(r"-", course_id)[0]
+    base_course = re.split(r"ea", base_course)[0]
+    repo_dir = os.path.join(LOCAL_CLONE_DIRECTORY, base_course)
+    repo_url = f"git@github.com:RedHatTraining/{base_course.lower()}.git"
+    if not os.path.exists(repo_dir):
+        print(f"[INFO] Repository not found at {repo_dir}. Cloning from {repo_url} ...")
+        clone_cmd = f"git clone {repo_url} {repo_dir}"
+        result = os.system(clone_cmd)
+        if result != 0:
+            print(f"[ERROR] Failed to clone repository: {repo_url}")
+    else:
+        print(f"[INFO] Repository found at {repo_dir}. Pulling latest changes...")
+        pull_cmd = f"cd {repo_dir} && git pull"
+        os.system(pull_cmd)
+    return repo_dir
+
+
+
+def get_lab_start_script_name(driver,course, chapter_and_section):
+    driver.get(course + "/pages/" + chapter_and_section)
+    select_lab_environment_tab("course")
+    time.sleep(4)
+    # Get the lab name and grep it in the project git directory to find the xml file
+    lab_script_name = WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-pane-2"]//div[@class="taskprerequisites"]//strong[@class="userinput"]//code'))).text
+    course_no_version = course.split("-")[0]
+    course_version = course.split("-")[1]
+    try:
+        if re.findall("ea", course):
+            course_no_version = course_no_version.split("ea")[0]
+            course_version = 'earlyaccess'
+    except:
+        pass
+
+# -------------------------------------------------------------------
+# Function to fetch relevant text from the local course repository
+# Example usage of grep + xq, following operate-lab.py logic
+# -------------------------------------------------------------------
+def fetch_local_guide_text(course_id: str, repo_dir: str = None) -> str:
+    """
+    Fetches the relevant guide text from the course repository.
+    If repo_dir is not provided, it is constructed from the course_id.
+    """
+    base_course = re.split(r"-", course_id)[0]
+    base_course = re.split(r"ea", base_course)[0]
+    if repo_dir is None:
+        repo_dir = os.path.join(LOCAL_CLONE_DIRECTORY, base_course)
+    try:
+        grep_exercise_file = f"grep -ri  {repo_dir}/{GUIDE_SUBDIR} | grep xml | head -n1 | cut -d ':' -f1"
+        exercise_file = os.popen(grep_exercise_file).read().strip()
+        if not exercise_file:
+            return ""
+        parse_exercise_file = f"cat '{exercise_file}' | xq "
+        commands = os.popen(parse_exercise_file).read()
+        print("[Exercise text]:\n", commands.strip())
+        return commands.strip()
+    except Exception as e:
+        print(f"[ERROR] Could not fetch local guide text: {e}")
+        return ""
+
+
+# -------------------------------------------------------------------
+# Put everything together in a main workflow for a single SNOW ticket
+# -------------------------------------------------------------------
+def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
+    """
+    Processes a SNOW ticket by:
+    1. Navigating to the SNOW record.
+    2. Parsing the description.
+    3. Checking via LLM if it's a typo ticket.
+    4. If so, ensuring the course repository is available and fetching the guide text,
+       then invoking further LLM analysis.
+    """
+    # -------------
+    # 1. Navigate to the SNOW ticket
+    # -------------
+    snow_url = f"https://redhat.service-now.com/surl.do?n={snow_id}"
+    driver.get(snow_url)
+    time.sleep(3)  # Simplified wait for example
+
+    # -------------
+    # 2. Parse the description from SNOW
+    #    This can be done with frame switching etc. in your environment
+    # -------------
+    try:
+        switch_to_iframe(driver)
+
+        description_element = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located(
+                (By.XPATH, '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]')
+            )
+        )
+        description = description_element.get_attribute("value")
+    except Exception as e:
+        print(f"[ERROR] Could not read SNOW ticket description: {e}")
+        return
+
+    # -------------
+    # 3. Decide if it's a "typo" ticket
+    # -------------
+    if not is_typo_ticket(description):
+        print(f"[INFO] This SNOW ticket {snow_id} doesn't appear to be a simple 'typo' issue.")
+        return
+
+    print(f"[INFO] SNOW ticket {snow_id} is recognized as a 'typo' feedback ticket.")
+
+    # -------------
+    # Example: Extract course info from the description
+    # This is very environment-specific. We'll do a naive "Course: ..." parse:
+    # -------------
+    course_id = ""
+    course_match = re.search(r"Course:\s*([A-Za-z0-9\-]+)", description)
+    if course_match:
+        course_id = course_match.group(1)
+
+
+    # -------------
+    # 4. Fetch text from local repository to confirm context
+    # -------------
+    local_guide_text = ""
+    if course_id:
+        repo_dir = ensure_course_repo(course_id)
+        local_guide_text = fetch_local_guide_text(course_id, repo_dir)
+
+    if local_guide_text:
+        # -------------
+        # 5. Summon Ollama for more advanced analysis:
+        # Example: "(Description) vs. local excerpt. Summarize difference."
+        # -------------
+        prompt_text = f"""
+We have a user who reported a typo in a RHT course. 
+User's complaint: {description}
+
+Relevant excerpt from local guide: 
+{local_guide_text}
+
+Please check if there's an obvious typo or mismatch.
+If so, suggest the correct text.
+"""
+        ollama_response = askOllama(prompt_text)
+        print("[Ollama response regarding typos]:\n", ollama_response)
+
+        # -------------
+        # 6. Decide next steps: create a JIRA? or leave a note in SNOW?
+        # -------------
+        # This is purely up to your workflow. You can parse `ollama_response`
+        # to check e.g. "Yes, a likely typo is found" vs. "No difference."
+        # Then move on to create a JIRA or just a work note in SNOW.
+        #
+        # Example placeholder function:
+        # createJiraForTypos(course_id, lab_script_name, ollama_response)
+        #
+        # Alternatively, you might just do:
+        # addWorkNoteInSNOW(driver, snow_id, "Ollama says there's a mismatch. See: ...")
+        #
+        # For brevity, we only log it here.
+        print("[INFO] Based on the AI result, proceed with your next steps here...")
+
+    else:
+        print(f"[WARNING] Could not find local guide text or parse for course '{course_id}'.")
+        print("No further automated steps taken.")
+
+
+# -------------------------------------------------------------------
+# Main driver (example)
+# -------------------------------------------------------------------
+def main():
+    if not check_running_session():
+        open_profile()
+        time.sleep(3)  # Allow time for the browser to start
+    driver = get_chrome_driver()
+    sample_snow_id = "RHT1741460"
+    handle_snow_typo_ticket(driver, sample_snow_id)
+    # driver.quit()  # close the browser if desired
+
+
+if __name__ == "__main__":
+    main() 
