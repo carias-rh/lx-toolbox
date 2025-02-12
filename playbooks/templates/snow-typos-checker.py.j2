@@ -154,7 +154,7 @@ def login(driver):
     try:
 
         check_cookies(driver)
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 2).until(EC.element_to_be_clickable(
             (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input"))).send_keys("{{ rh_username }}@redhat.com")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
 
@@ -233,17 +233,22 @@ def classify_ticket_llm(description: str) -> dict:
     """
     Classifies a SNOW ticket using an LLM, returning a dict like:
     {
-      "is_typo_ticket": bool,
+      "student_feedback": str,
+      "most_defining_issue_keyword": str,
+      "is_content_issue_ticket": bool,
       "is_environment_issue": bool,
       "confidence": float,
       "summary": str
     }
     """
     step("Classifying ticket using LLM")
-    json_example = '{"is_typo_ticket":true,"is_environment_issue":false,"confidence":0.9,"summary":"It\'s about a minor spelling error."}'
+
+    json_example = '{"student_feedback":"", "most_defining_issue_keyword":"md5sum", "is_content_issue_ticket":true,"is_environment_issue":false, "confidence":0.9,"summary":"The md5sum command drops a different output than the one expected."}'
     prompt = f"""
-Classify the user's feedback regarding a Red Hat Training course. Return JSON with fields:
-- is_typo_ticket (true/false)
+Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
+- student_feedback (the user's feedback)
+- most_defining_issue_keyword (a sustantive word (not verbs or adjetives) from the *User feedback* that is the most unique and less generic that will be used to grep the guide text)
+- is_content_issue_ticket (true/false)
 - is_environment_issue (true/false)
 - confidence (a float from 0.0 to 1.0)
 - summary (in a short sentence)
@@ -263,19 +268,11 @@ For example:
     except:
         print("[ERROR] Could not parse JSON from LLM. Full response:", response)
         return {
-            "is_typo_ticket": False,
+            "is_content_issue_ticket": False,
             "is_environment_issue": False,
             "confidence": 0.0,
             "summary": ""
         }
-
-
-# -------------------------------------------------------------------
-# Check if it's a "typo" feedback from SNOW description
-# -------------------------------------------------------------------
-def is_typo_ticket(description: str) -> bool:
-    data = classify_ticket_llm(description)
-    return data.get("is_typo_ticket", False)
 
 
 # -------------------------------------------------------------------
@@ -362,17 +359,18 @@ def fetch_local_guide_text(course_id: str, lab_script_name: str, repo_dir: str =
     if repo_dir is None:
         repo_dir = os.path.join(LOCAL_CLONE_DIRECTORY, base_course)
     try:
-        grep_exercise_file = f"grep -ri '{lab_script_name}' {repo_dir}/{GUIDE_SUBDIR} | grep ge.xml | head -n1 | cut -d ':' -f1"
+        grep_exercise_file = f"grep -ri '{lab_script_name}' {repo_dir}/{GUIDE_SUBDIR}/sg-chapters/topics | grep -E 'ge.xml|review.xml|lab.xml' | head -n1 | cut -d ':' -f1"
         exercise_file = os.popen(grep_exercise_file).read().strip()
         if not exercise_file:
-            return ""
+            return "", ""
         parse_exercise_file = f"cat '{exercise_file}' | xq "
         exercise_xml_text = os.popen(parse_exercise_file).read()
-        print("[Exercise text]:\n", exercise_xml_text.strip())
-        return exercise_xml_text.strip()
+        print(f"[INFO] Exercise file path: {exercise_file}")
+        
+        return parse_exercise_file, exercise_xml_text.strip()
     except Exception as e:
         print(f"[ERROR] Could not fetch local guide text: {e}")
-        return ""
+        return "", ""
 
 
 # -------------------------------------------------------------------
@@ -407,14 +405,18 @@ def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
         print(f"[ERROR] Could not read SNOW ticket description: {e}")
         return
 
-    # 3. Check if it's a "typo" ticket
-    if not is_typo_ticket(description):
+    # 3. Extract user issue from the description
+    user_issue = re.search(r"Description:\s*(.*?)\s*Copyright", description, re.DOTALL).group(1).strip()
+
+    # 4. Check if it's a "typo" ticket
+    data = classify_ticket_llm(user_issue)
+    if not data.get("is_content_issue_ticket", False):
         print(f"[INFO] This SNOW ticket {snow_id} doesn't appear to be a simple 'typo' issue.")
         return
 
     print(f"[INFO] SNOW ticket {snow_id} is recognized as a 'typo' feedback ticket.")
 
-    # 4. Extract course id and course URL from the description.
+    # 5. Extract course id, course URL from the description
     course_id = ""
     course_match = re.search(r"Course:\s*([A-Za-z0-9\-]+)", description)
     if course_match:
@@ -425,36 +427,70 @@ def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
     if url_match:
         course_url = url_match.group(1)
 
-    # 5. Retrieve the lab start script name from the course page
+
+    # 6. Retrieve the lab start script name from the course page
     lab_script_name = ""
     if course_url:
         lab_script_name = get_lab_start_script_name(driver, course_url)
 
-    # 6. Ensure the repository is available and fetch local guide text using the lab script name
+    # 7. Ensure the repository is available and fetch local guide text using the lab script name
     local_guide_text = ""
     if course_id and lab_script_name:
         repo_dir = ensure_course_repo(course_id)
-        local_guide_text = fetch_local_guide_text(course_id, lab_script_name, repo_dir)
+        parse_exercise_file, local_guide_text = fetch_local_guide_text(course_id, lab_script_name, repo_dir)
 
-    if local_guide_text:
-        # 7. Construct the prompt for advanced LLM analysis and call Ollama
-        prompt_text = f"""
-We have a user who reported a typo in a RHT course. 
-User's complaint: {description}
-
-Relevant excerpt from local guide: 
-{local_guide_text}
-
-Please check if there's an obvious typo or mismatch.
-If so, suggest the correct text.
-"""
-        ollama_response = askOllama(prompt_text)
-        print("[Ollama response regarding typos]:\n", ollama_response)
-        print("[INFO] Based on the AI result, proceed with your next steps here...")
+    
+    if data.get("is_content_issue_ticket", False):
+        print(f"[INFO] This SNOW ticket {snow_id} is recognized as a 'content' issue feedback ticket.")
     else:
-        print(f"[WARNING] Could not find local guide text or parse for course '{course_id}'.")
-        print("No further automated steps taken.")
+        print(f"[INFO] This SNOW ticket {snow_id} doesn't appear to be a simple 'content' issue.")
+        return
 
+    # 8. Construct the prompt for advanced LLM analysis and call Ollama
+    # 9. Perform a grep search for the most defining issue keyword in the local guide text
+    most_defining_issue_keyword = data.get("most_defining_issue_keyword", "")
+    grep_result = ""
+    if most_defining_issue_keyword:
+        grep_command = f"{parse_exercise_file} |grep -C10 '{most_defining_issue_keyword}'"
+        try:
+            grep_result = subprocess.check_output(grep_command, shell=True, text=True)
+            print(f"[INFO] Grep result for keyword '{most_defining_issue_keyword}':\n{grep_result}")
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] Grep command failed: {e}")
+    else:
+        print("[INFO] No defining issue keyword found in the LLM response.")
+
+    json_example = '''{
+            "thinking": "think here, step by step, a long thinking process is required for your analysis",
+            "is_content_issue_ticket": true,
+            "content_issue_location": "a short description or excerpt of the location where the content issue appears (if applicable)",
+            "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
+            "confidence": "a float value between 0 and 1 indicating your confidence",
+            "summary": "a short summary of your analysis"
+            }'''
+
+    prompt_text = f"""
+We have a student who reported an issue with the guide text. The student's complaint is:
+"{user_issue}"
+
+Below is an excerpt of the XML document from the guide:
+--------------------------------
+{grep_result}
+--------------------------------
+
+Please analyze the XML and determine if there is a typographical error or textual mismatch that could be causing the student's issue.
+Your analysis must consider headings, task summaries, instructions, and any text content that might be inconsistent with the complaint.
+
+Return your analysis in exactly the following JSON format without any extra text:
+
+{json_example}
+
+Do not include any explanations or markdown formatting outside the JSON object.
+"""
+    ollama_response = askOllama(prompt_text)
+    print("[Ollama response regarding typos]:\n", ollama_response)
+    print("[INFO] Based on the AI result, proceed with your next steps here...")
+    return
 
 # -------------------------------------------------------------------
 # Main driver (example)
@@ -464,7 +500,7 @@ def main():
         open_profile()
         time.sleep(3)  # Allow time for the browser to start
     driver = get_chrome_driver()
-    sample_snow_id = "RHT2243695"  # Replace with a valid SNOW ticket id
+    sample_snow_id = "RHT2319171"  # Replace with a valid SNOW ticket id
     handle_snow_typo_ticket(driver, sample_snow_id)
     # driver.quit()  # close the browser if desired
 
