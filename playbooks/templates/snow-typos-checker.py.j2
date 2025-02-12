@@ -24,6 +24,14 @@ OLLAMA_COMMAND = "/usr/local/bin/ollama"  # Adjust if your Ollama binary is name
 CHROME_DEBUG_PORT = 9123    # Example local Chrome debugger port for your session
 CHROME_USER_DATA_DIR = "{{ ansible_env.HOME}}/.config/google-chrome/snow-typos"
 
+counter = 1
+# Prints the current step
+def step(step_str, patience=1):
+    global counter
+    print(f"Step {counter}: {step_str}")
+    print('-' * 40)
+    counter += 1
+    time.sleep(patience)
 
 # -------------------------------------------------------------------
 # Browser session helpers
@@ -99,12 +107,128 @@ def get_chrome_driver() -> webdriver.Chrome:
 
 def switch_to_iframe(driver):
     driver.switch_to.default_content()
-    macroponent = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[starts-with(local-name(), "macro")]')))
+    macroponent = WebDriverWait(driver, 3).until(
+        EC.presence_of_element_located((By.XPATH, '//*[starts-with(local-name(), "macro")]'))
+    )
     shadow_root = driver.execute_script('return arguments[0].shadowRoot', macroponent)
     iframe = shadow_root.find_element(By.CSS_SELECTOR, 'iframe#gsft_main')
     WebDriverWait(driver, 3).until(EC.frame_to_be_available_and_switch_to_it(iframe))
 
 
+# -------------------------------------------------------------------
+# Cookie, login and navigation helpers (integrated from operate-lab.py.j2)
+# -------------------------------------------------------------------
+def accept_cookies(driver):
+    """
+    Clicks the cookie accept button and refreshes the page.
+    """
+    try:
+        WebDriverWait(driver, 3).until(
+            EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))
+        ).click()
+        driver.refresh()
+    except Exception as e:
+        driver.refresh()
+        print("[WARNING] accept_cookies failed:", e)
+
+def check_cookies(driver):
+    """
+    Checks if the cookie consent iframe is present and accepts cookies.
+    """
+    try:
+        WebDriverWait(driver, 2).until(
+            EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]'))
+        )
+        accept_cookies(driver)
+        driver.switch_to.default_content()
+    except Exception:
+        pass
+
+
+def login(driver):
+    """
+    Logs into the course website based on the lab_environment setting.
+    The values for credentials should be passed in from Ansible.
+    """
+    step("Login into RHLS production environment")
+    try:
+
+        check_cookies(driver)
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
+            (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input"))).send_keys("{{ rh_username }}@redhat.com")
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
+
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
+
+        # RH SSO
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
+
+        wait_for_site_to_be_ready(driver)
+    except:
+        check_cookies(driver)
+        print("Login failed")
+
+def wait_for_site_to_be_ready():
+    try:
+        check_cookies(driver)
+        print("Site is ready")
+    except Exception as e:
+        check_cookies(driver)
+        print("[ERROR] Login failed:", e)
+
+def wait_for_site_to_be_ready(driver, lab_environment):
+    """
+    Waits for the main site element to be clickable before proceeding.
+    """
+    try:
+        check_cookies(driver)
+        if lab_environment in ["rol", "china"]:
+            WebDriverWait(driver, 2).until(
+                EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))
+            )
+        elif lab_environment == "rol-stage":
+            WebDriverWait(driver, 2).until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]'))
+            )
+        print("Site is ready")
+    except Exception as e:
+        time.sleep(0.5)
+        check_cookies(driver)
+        wait_for_site_to_be_ready(driver, lab_environment)
+
+def select_lab_environment_tab(driver, tab_name):
+    """
+    Selects the appropriate tab on the course page.
+    """
+    if tab_name == "index":
+        tab_id = "1"
+    elif tab_name == "course":
+        tab_id = "2"
+    elif tab_name == "lab":
+        tab_id = "8"
+    try:
+        WebDriverWait(driver, 60).until(
+            EC.element_to_be_clickable((By.XPATH, f'//*[@id="course-tabs-tab-{tab_id}"]'))
+        ).click()
+        time.sleep(0.1)
+        lab_environment_tab_status = WebDriverWait(driver, 30).until(
+            EC.element_to_be_clickable((By.XPATH, f'//*[@id="course-tabs-tab-{tab_id}"]'))
+        ).get_attribute("aria-selected")
+        if lab_environment_tab_status != "true":
+            time.sleep(0.1)
+            select_lab_environment_tab(driver, tab_name)
+    except Exception as e:
+        print("[WARNING] Lab environment tab not selected successfully. Retrying...", e)
+        check_cookies(driver)
+        time.sleep(2)
+        select_lab_environment_tab(driver, tab_name)
+
+
+# -------------------------------------------------------------------
+# Function to classify a SNOW ticket using an LLM
+# -------------------------------------------------------------------
 def classify_ticket_llm(description: str) -> dict:
     """
     Classifies a SNOW ticket using an LLM, returning a dict like:
@@ -114,8 +238,8 @@ def classify_ticket_llm(description: str) -> dict:
       "confidence": float,
       "summary": str
     }
-    
     """
+    step("Classifying ticket using LLM")
     json_example = '{"is_typo_ticket":true,"is_environment_issue":false,"confidence":0.9,"summary":"It\'s about a minor spelling error."}'
     prompt = f"""
 Classify the user's feedback regarding a Red Hat Training course. Return JSON with fields:
@@ -148,7 +272,6 @@ For example:
 
 # -------------------------------------------------------------------
 # Check if it's a "typo" feedback from SNOW description
-# (Simple example: if the description has certain keywords or patterns)
 # -------------------------------------------------------------------
 def is_typo_ticket(description: str) -> bool:
     data = classify_ticket_llm(description)
@@ -168,6 +291,7 @@ def ensure_course_repo(course_id: str) -> str:
     If it exists, a 'git pull' is performed.
     Returns the repository directory path.
     """
+    step("Ensuring course repository is available")
     base_course = re.split(r"-", course_id)[0]
     base_course = re.split(r"ea", base_course)[0]
     repo_dir = os.path.join(LOCAL_CLONE_DIRECTORY, base_course)
@@ -185,44 +309,67 @@ def ensure_course_repo(course_id: str) -> str:
     return repo_dir
 
 
-
-def get_lab_start_script_name(driver,course, chapter_and_section):
-    driver.get(course + "/pages/" + chapter_and_section)
-    select_lab_environment_tab("course")
-    time.sleep(4)
-    # Get the lab name and grep it in the project git directory to find the xml file
-    lab_script_name = WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-pane-2"]//div[@class="taskprerequisites"]//strong[@class="userinput"]//code'))).text
-    course_no_version = course.split("-")[0]
-    course_version = course.split("-")[1]
+# -------------------------------------------------------------------
+# Function to extract the lab script name from the course page
+# -------------------------------------------------------------------
+def get_lab_start_script_name(driver, course_url: str) -> str:
+    """
+    Navigates to the course URL, performs login if necessary,
+    and extracts the lab start command from the page.
+    Returns the lab script name specified in a command such as 'lab start <script name>'.
+    """
+    step("Extracting lab start script name from course page")
     try:
-        if re.findall("ea", course):
-            course_no_version = course_no_version.split("ea")[0]
-            course_version = 'earlyaccess'
-    except:
-        pass
+        # First, navigate to the course page.
+        driver.get(course_url)
+        # Optionally, if login is enforced here, call:
+        # login(driver, lab_environment, rh_username, username, pin, github_username, github_password)
+        # You can pass the required credentials from Ansible variables.
+        login(driver)
+        
+        # If your course page has tabs, you might need to select the "course" tab
+        select_lab_environment_tab(driver, "course")
+        time.sleep(4)  # Allow time for the page to load completely
+        # Locate an element containing the "lab start" command
+        element = WebDriverWait(driver, 60).until(
+            EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'lab start')]"))
+        )
+        text = element.text
+        match = re.search(r"lab start\s+(\S+)", text, re.IGNORECASE)
+        if match:
+            lab_script_name = match.group(1)
+            print(f"[INFO] Extracted lab script name: {lab_script_name}")
+            return lab_script_name
+        else:
+            print("[WARNING] Could not find script name using 'lab start' pattern.")
+            return ""
+    except Exception as e:
+        print(f"[ERROR] Could not retrieve lab start script name from {course_url}: {e}")
+        return ""
+
 
 # -------------------------------------------------------------------
 # Function to fetch relevant text from the local course repository
-# Example usage of grep + xq, following operate-lab.py logic
 # -------------------------------------------------------------------
-def fetch_local_guide_text(course_id: str, repo_dir: str = None) -> str:
+def fetch_local_guide_text(course_id: str, lab_script_name: str, repo_dir: str = None) -> str:
     """
     Fetches the relevant guide text from the course repository.
     If repo_dir is not provided, it is constructed from the course_id.
+    Uses lab_script_name to grep for the correct xml file.
     """
     base_course = re.split(r"-", course_id)[0]
     base_course = re.split(r"ea", base_course)[0]
     if repo_dir is None:
         repo_dir = os.path.join(LOCAL_CLONE_DIRECTORY, base_course)
     try:
-        grep_exercise_file = f"grep -ri  {repo_dir}/{GUIDE_SUBDIR} | grep xml | head -n1 | cut -d ':' -f1"
+        grep_exercise_file = f"grep -ri '{lab_script_name}' {repo_dir}/{GUIDE_SUBDIR} | grep ge.xml | head -n1 | cut -d ':' -f1"
         exercise_file = os.popen(grep_exercise_file).read().strip()
         if not exercise_file:
             return ""
         parse_exercise_file = f"cat '{exercise_file}' | xq "
-        commands = os.popen(parse_exercise_file).read()
-        print("[Exercise text]:\n", commands.strip())
-        return commands.strip()
+        exercise_xml_text = os.popen(parse_exercise_file).read()
+        print("[Exercise text]:\n", exercise_xml_text.strip())
+        return exercise_xml_text.strip()
     except Exception as e:
         print(f"[ERROR] Could not fetch local guide text: {e}")
         return ""
@@ -237,23 +384,19 @@ def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
     1. Navigating to the SNOW record.
     2. Parsing the description.
     3. Checking via LLM if it's a typo ticket.
-    4. If so, ensuring the course repository is available and fetching the guide text,
+    4. If so, ensuring the course repository is available, fetching the lab start script name
+       from the course page (using the URL in the ticket), and then fetching the guide text,
        then invoking further LLM analysis.
     """
-    # -------------
+    step("Navigating to the SNOW ticket")
     # 1. Navigate to the SNOW ticket
-    # -------------
     snow_url = f"https://redhat.service-now.com/surl.do?n={snow_id}"
     driver.get(snow_url)
     time.sleep(3)  # Simplified wait for example
 
-    # -------------
-    # 2. Parse the description from SNOW
-    #    This can be done with frame switching etc. in your environment
-    # -------------
+    # 2. Parse the SNOW ticket description
     try:
         switch_to_iframe(driver)
-
         description_element = WebDriverWait(driver, 5).until(
             EC.presence_of_element_located(
                 (By.XPATH, '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]')
@@ -264,38 +407,37 @@ def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
         print(f"[ERROR] Could not read SNOW ticket description: {e}")
         return
 
-    # -------------
-    # 3. Decide if it's a "typo" ticket
-    # -------------
+    # 3. Check if it's a "typo" ticket
     if not is_typo_ticket(description):
         print(f"[INFO] This SNOW ticket {snow_id} doesn't appear to be a simple 'typo' issue.")
         return
 
     print(f"[INFO] SNOW ticket {snow_id} is recognized as a 'typo' feedback ticket.")
 
-    # -------------
-    # Example: Extract course info from the description
-    # This is very environment-specific. We'll do a naive "Course: ..." parse:
-    # -------------
+    # 4. Extract course id and course URL from the description.
     course_id = ""
     course_match = re.search(r"Course:\s*([A-Za-z0-9\-]+)", description)
     if course_match:
         course_id = course_match.group(1)
 
+    course_url = ""
+    url_match = re.search(r"URL:\s*(https?://\S+)", description)
+    if url_match:
+        course_url = url_match.group(1)
 
-    # -------------
-    # 4. Fetch text from local repository to confirm context
-    # -------------
+    # 5. Retrieve the lab start script name from the course page
+    lab_script_name = ""
+    if course_url:
+        lab_script_name = get_lab_start_script_name(driver, course_url)
+
+    # 6. Ensure the repository is available and fetch local guide text using the lab script name
     local_guide_text = ""
-    if course_id:
+    if course_id and lab_script_name:
         repo_dir = ensure_course_repo(course_id)
-        local_guide_text = fetch_local_guide_text(course_id, repo_dir)
+        local_guide_text = fetch_local_guide_text(course_id, lab_script_name, repo_dir)
 
     if local_guide_text:
-        # -------------
-        # 5. Summon Ollama for more advanced analysis:
-        # Example: "(Description) vs. local excerpt. Summarize difference."
-        # -------------
+        # 7. Construct the prompt for advanced LLM analysis and call Ollama
         prompt_text = f"""
 We have a user who reported a typo in a RHT course. 
 User's complaint: {description}
@@ -308,23 +450,7 @@ If so, suggest the correct text.
 """
         ollama_response = askOllama(prompt_text)
         print("[Ollama response regarding typos]:\n", ollama_response)
-
-        # -------------
-        # 6. Decide next steps: create a JIRA? or leave a note in SNOW?
-        # -------------
-        # This is purely up to your workflow. You can parse `ollama_response`
-        # to check e.g. "Yes, a likely typo is found" vs. "No difference."
-        # Then move on to create a JIRA or just a work note in SNOW.
-        #
-        # Example placeholder function:
-        # createJiraForTypos(course_id, lab_script_name, ollama_response)
-        #
-        # Alternatively, you might just do:
-        # addWorkNoteInSNOW(driver, snow_id, "Ollama says there's a mismatch. See: ...")
-        #
-        # For brevity, we only log it here.
         print("[INFO] Based on the AI result, proceed with your next steps here...")
-
     else:
         print(f"[WARNING] Could not find local guide text or parse for course '{course_id}'.")
         print("No further automated steps taken.")
@@ -338,10 +464,9 @@ def main():
         open_profile()
         time.sleep(3)  # Allow time for the browser to start
     driver = get_chrome_driver()
-    sample_snow_id = "RHT1741460"
+    sample_snow_id = "RHT2243695"  # Replace with a valid SNOW ticket id
     handle_snow_typo_ticket(driver, sample_snow_id)
     # driver.quit()  # close the browser if desired
 
-
 if __name__ == "__main__":
-    main() 
+    main()
