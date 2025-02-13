@@ -6,6 +6,7 @@
     - rh_password: "{{ password | default('') }}"
     - counter: 0
     - status: "Away"
+    - debug_mode: false
         
   tasks:
     - name: Generate selenium script

@@ -14,20 +14,45 @@ from selenium.webdriver.support.select import Select
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s',datefmt='%Y-%m-%d %H:%M:%S')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
 options = webdriver.ChromeOptions()
+options.add_argument('--ignore-certificate-errors')
 options.add_argument("--window-size=1600,1200")
+
+{% if debug_mode|bool %}
+# --- Debug mode configuration: use port 9000 with custom "jira" profile ---
+options.add_experimental_option("debuggerAddress", "localhost:9000")
+options.add_argument("--user-data-dir={{ ansible_env.HOME }}/.config/google-chrome/jira")
+
+def open_profile():
+    os.popen('google-chrome --remote-debugging-port=9000 --user-data-dir="{{ ansible_env.HOME }}/.config/google-chrome/jira" &')
+
+def check_running_session():
+    pid = os.popen("ps -ef | grep google-chrome/jira | grep 9000 | grep -v grep | head -n1 | awk '{print $2}'").read().strip()
+    if pid:
+        try:
+            return int(pid)
+        except:
+            return 0
+    else:
+        return 0
+
+if not check_running_session():
+    open_profile()
+    driver = webdriver.Chrome(options=options)
+else:
+    driver = webdriver.Chrome(options=options)
+{% else %}
+# --- Production mode configuration ---
 options.add_argument('--no-sandbox')
 options.add_argument('--disable-dev-shm-usage')
 options.add_argument('--ignore-certificate-errors')
-
-# Define the webdriver to use.
-# Chrome webdriver
 driver = webdriver.Chrome(options=options)
+{% endif %}
 
 snow_id = ''
-teammate_name= ''
+teammate_name = ''
 
 def handle_exception(e):
     exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -37,8 +62,7 @@ def handle_exception(e):
     first_function_line_number = traceback_details[0].lineno
     first_function_name = traceback_details[0].name
 
-    print(
-        f"Exception first caught in file {first_function_filename}, line {first_function_line_number}, in {first_function_name}")
+    print(f"Exception first caught in file {first_function_filename}, line {first_function_line_number}, in {first_function_name}")
 
     filename = traceback_details[-1].filename
     line_number = traceback_details[-1].lineno
@@ -46,7 +70,6 @@ def handle_exception(e):
 
     print(f"Exception occurred in file {filename}, line {line_number}, in {function_name}")
     print(f"Exception message: {str(e)}")
-
 
 # Prints the current step
 counter = 1
@@ -58,11 +81,14 @@ def step(step_str, patience = 1):
     time.sleep(patience)
 
 def switch_to_iframe():
-    driver.switch_to.default_content()
-    macroponent = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[starts-with(local-name(), "macro")]')))
-    shadow_root = driver.execute_script('return arguments[0].shadowRoot', macroponent)
-    iframe = shadow_root.find_element(By.CSS_SELECTOR, 'iframe#gsft_main')
-    WebDriverWait(driver, 3).until(EC.frame_to_be_available_and_switch_to_it(iframe))
+    try:
+        driver.switch_to.default_content()
+        macroponent = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[starts-with(local-name(), "macro")]')))
+        shadow_root = driver.execute_script('return arguments[0].shadowRoot', macroponent)
+        iframe = shadow_root.find_element(By.CSS_SELECTOR, 'iframe#gsft_main')
+        WebDriverWait(driver, 3).until(EC.frame_to_be_available_and_switch_to_it(iframe))
+    except:
+        pass
 
 def close_alert():
     try:
@@ -422,12 +448,118 @@ def reassign_ticket():
     WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
     logging.info("Assigned ticket " + snow_id + " to " + teammate_name)
 
+def resolve_tickets_for_reporters(target_reporters):
+    """
+    Iterates through every ticket in the list, opens each ticket, and checks the 
+    ticket's Description textbox for a line of the form "Reporter: <name>".
+    If the extracted reporter's name is in the target_reporters list,
+    the ticket is marked as "Resolved" and the change is saved.
+    """
+    step("Resolving tickets for target reporters")
+    driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3DstateIN1%252C2%252C-2%252C14%252C13%252C15%252C16%252C17%252C18%255Eactive%253Dtrue%255Eshort_descriptionLIKEnew%2520Jira%26sysparm_first_row%3D1%26sysparm_view%3D")
+    time.sleep(5)
+    switch_to_iframe()
+
+    try:
+        # Check if there are any tickets available
+        tickets_in_line = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training"]/div[1]'))).text
+
+        if tickets_in_line == 'No records to display':
+            logging.info("No tickets to process for resolution.")
+        else:
+            # Get the number of tickets in the queue
+            table_body = WebDriverWait(driver, 3).until(EC.presence_of_element_located(
+                (By.CSS_SELECTOR, '#x_redha_red_hat_tr_x_red_hat_training_table > tbody')))
+            rows = table_body.find_elements(By.TAG_NAME, 'tr')
+            num_rows = len(rows)
+            logging.info(f"{num_rows} Tickets available for resolution")
+
+            try:
+                # Open the first ticket in the list
+                first_ticket = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable(
+                        (By.XPATH, '/html/body/div[1]/div[1]/span/div/div[7]/div[1]/table/tbody/tr[1]/td[3]/a')))
+                first_ticket.click()
+            except Exception as e:
+                logging.error("No ticket available to open: " + str(e))
+                
+            time.sleep(3)  # Allow the ticket details to load        
+
+            for ticket in range(num_rows):
+
+                try:
+                    # Retrieve the description text from the ticket details.
+                    # (This textbox is assumed to contain a line like "Reporter: Some Name")
+                    description_text = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located(
+                            (By.XPATH, '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]')
+                        )
+                    ).get_attribute("value")
+                except Exception as e:
+                    logging.error("Failed to retrieve ticket description: " + str(e))
+                    # Return to the main ticket list if the description cannot be retrieved.
+                    go_to_main_site()
+                    continue
+
+                reporter = None
+                try:
+                    # Extract the reporter's name from the description
+                    # Expecting a format like: "Reporter: John Doe"
+                    pattern = r"Reporter:\s*(.+)"
+                    match = re.search(pattern, description_text)
+                    if match:
+                        reporter = match.group(1).strip()
+                except Exception as e:
+                    logging.error("Error extracting reporter: " + str(e))
+
+                if reporter and reporter in target_reporters:
+                    logging.info(f"Reporter '{reporter}' matched the target list. Resolving ticket.")
+                    try:
+                        # Change the ticket state to "Resolved" and save the changes.
+                        Select(WebDriverWait(driver, 10).until(
+                            EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.state"]'))
+                        )).select_by_visible_text('Resolved')
+                        time.sleep(1)
+                        WebDriverWait(driver, 10).until(
+                            EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))
+                        ).click()
+                        time.sleep(2)
+                        if ticket < num_rows - 1:
+                            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//button[@data-now-ux-metrics-event="Click Next Record"]'))).click()
+                        else:
+                            logging.info("No more tickets to process for resolution.")
+                    except Exception as e:
+                        logging.error("Failed to mark ticket as resolved: " + str(e))
+                        handle_exception(e)
+                        break
+                else:
+                    logging.info(f"Reporter '{reporter}' not in target list. Skipping ticket resolution.")
+                    # Navigate back to the main ticket list page before checking the next one.
+                    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//button[@data-now-ux-metrics-event="Click Next Record"]'))).click()
+                time.sleep(6)   
+
+    except Exception as e:
+        logging.error("Error checking tickets in line: " + str(e))
+
 # Main
 go_to_main_site()
 snow_login()
 {% if team_name == 'RHT Learner Experience - T2' %}
 lms_login()
+
+target_reporters = ["rh-ee-jingyuwa","vsing@redhat.com","shasingh01","rh-ee-jyague","rhn-gps-jdandrea","carias@redhat.com","rht-anhernan","rht-eparenti"]
+# Call the new function
+resolve_tickets_for_reporters(target_reporters)
+
+step("Starting to assign tickets to {{ user_name }}")
 {% endif %}
+
+# List of reporter names for which tickets should be resolved
+
+
+
+
 
 while True:
 {% if team_name == 'RHT Learner Experience' %}
