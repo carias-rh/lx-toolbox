@@ -63,7 +63,9 @@ def check_running_session():
 # Example function to call Ollama locally with your query/prompt
 # -------------------------------------------------------------------
 # You can change the model to one available on your system.
+OLLAMA_MODEL = "granite3.1-dense:8b"
 OLLAMA_MODEL = "llama3.2:latest"
+
 
 def askOllama(prompt: str) -> str:
     """
@@ -363,7 +365,7 @@ def fetch_local_guide_text(course_id: str, lab_script_name: str, repo_dir: str =
         exercise_file = os.popen(grep_exercise_file).read().strip()
         if not exercise_file:
             return "", ""
-        parse_exercise_file = f"cat '{exercise_file}' | xq "
+        parse_exercise_file = f"cat '{exercise_file}' | xq --xpath '//text()' | sed '/^\s*$/d' "
         exercise_xml_text = os.popen(parse_exercise_file).read()
         print(f"[INFO] Exercise file path: {exercise_file}")
         
@@ -448,7 +450,7 @@ def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
 
     # 8. Construct the prompt for advanced LLM analysis and call Ollama
     # 9. Perform a grep search for the most defining issue keyword in the local guide text
-    most_defining_issue_keyword = data.get("most_defining_issue_keyword", "")
+    most_defining_issue_keyword = data.get("most_defining_issue_keyword", "").split()[0]
     grep_result = ""
     if most_defining_issue_keyword:
         grep_command = f"{parse_exercise_file} |grep -C10 '{most_defining_issue_keyword}'"
@@ -457,11 +459,12 @@ def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
             print(f"[INFO] Grep result for keyword '{most_defining_issue_keyword}':\n{grep_result}")
         except subprocess.CalledProcessError as e:
             print(f"[ERROR] Grep command failed: {e}")
+            grep_result = local_guide_text
     else:
         print("[INFO] No defining issue keyword found in the LLM response.")
 
     json_example = '''{
-            "thinking": "think here, step by step, a long thinking process is required for your analysis",
+            "thinking": "think here, step by step, compare the student's feedback with the guide text, and provide a detailed analysis of the issue",
             "is_content_issue_ticket": true,
             "content_issue_location": "a short description or excerpt of the location where the content issue appears (if applicable)",
             "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
@@ -473,12 +476,12 @@ def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
 We have a student who reported an issue with the guide text. The student's complaint is:
 "{user_issue}"
 
-Below is an excerpt of the XML document from the guide:
+Below is an excerpt of the guided exercise text:
 --------------------------------
 {grep_result}
 --------------------------------
 
-Please analyze the XML and determine if there is a typographical error or textual mismatch that could be causing the student's issue.
+Please analyze the guided exercise and determine if there is a typographical error or textual mismatch that could be causing the student's issue.
 Your analysis must consider headings, task summaries, instructions, and any text content that might be inconsistent with the complaint.
 
 Return your analysis in exactly the following JSON format without any extra text:
