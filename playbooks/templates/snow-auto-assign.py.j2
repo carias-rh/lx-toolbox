@@ -177,18 +177,18 @@ def lms_login():
 
 def search_name(email):
     driver.switch_to.window(driver.window_handles[1])
-    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//div[@class="primary-nav"]//li[@class="dd nav-admin"]'))).click()
-    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@class="subnav-admin_menu"]'))).click()
-    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "User Summary")]'))).click()
-    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//input[@id="in_username"]'))).send_keys(email)
-    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//button[@class="btn btn--submit"]'))).click()
-    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//h4[@class="title"]/a'))).click()
-    WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//div[@class="my-team__tab"]/*[contains(text(), "User Summary")]')))
-    first_name = str(driver.find_element("xpath",'/html/body/div/main/div[1]/div[2]/section/div/div[2]/div/div/span').text).capitalize()
-    last_name = str(driver.find_element("xpath",'/html/body/div/main/div[1]/div[2]/section/div/div[3]/div/div/span').text).capitalize()
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//div[@class="primary-nav"]//li[@class="dd nav-admin"]'))).click()
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@class="subnav-admin_menu"]'))).click()
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "User Summary")]'))).click()
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//input[@id="in_username"]'))).send_keys(email)
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//button[@class="btn btn--submit"]'))).click()
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//h4[@class="title"]/a'))).click()
+    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//div[@class="my-team__tab"]/*[contains(text(), "User Summary")]')))
+    first_name = str(WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.XPATH, '/html/body/div/main/div[1]/div[2]/section/div/div[2]/div/div/span'))).text).capitalize()
+    last_name = str(WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.XPATH, '/html/body/div/main/div[1]/div[2]/section/div/div[3]/div/div/span'))).text).capitalize()
     full_name = f"{first_name} {last_name}"
     logging.info(full_name)
-
+    time.sleep(2)
     driver.switch_to.window(driver.window_handles[0])
     time.sleep(1)
     return full_name
@@ -287,7 +287,7 @@ def auto_assign_tickets(teammate_name):
 
             try:
                 # Get user's ticket name for ACK message
-                name = driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute("value")
+                name = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]'))).get_attribute("value")
                 name_list = re.split(' ', name)
                 full_name = name_list[0] + " " + name_list[1]
             except:
@@ -296,7 +296,7 @@ def auto_assign_tickets(teammate_name):
 
 {% if team_name == 'RHT Learner Experience - T2' %}
             # Get description
-            description = driver.find_element("xpath", '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]').get_attribute('value')
+            description = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]'))).get_attribute('value')
 
             # Extract user name from description and fill in the field
             try:
@@ -308,19 +308,19 @@ def auto_assign_tickets(teammate_name):
                 # RedHatters' issues usually come without email, just their RHNID in "User Name: " field, so it will fail the following email regex being empty and will jump to the except
                 try:
                     email = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
-                    first_name = search_name(email)
+                    full_name = search_name(email)
                 except:
                     logging.error("No email in the description")
 
                 switch_to_iframe()
 
                 # Fill in name
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').clear()
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').send_keys(first_name)
+                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]'))).clear()
+                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]'))).send_keys(full_name)
 
                 # Fill in email
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').clear()
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]').send_keys(email)
+                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]'))).clear()
+                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]'))).send_keys(email)
             except:
                 logging.error("Failed to fill in name or email")
 
@@ -331,8 +331,8 @@ def auto_assign_tickets(teammate_name):
                 course = re.findall("Course:.*", description)
                 version = re.findall("Version:.*", description)
 
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').clear()
-                driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]').send_keys(
+                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]'))).clear()
+                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]'))).send_keys(
                     course[0].split(":  ")[1].upper().replace(" ", "") + "-" + version[0].split(":  ")[1] + " Feedback: " + summary[
                                                                                                                             :200] + "...")
             except:
@@ -368,7 +368,7 @@ Red Hat Training Technical Support"""
 {% endif %}
 {% if team_name == 'RHT Learner Experience - T2' %}
 
-                    ack_response = "Hi " + first_name + """,
+                    ack_response = "Hi " + full_name + """,
 
 Thanks for submitting your feedback to the Learner Experience Team.
             
@@ -387,7 +387,7 @@ Best Regards,
 
             # Clear values
             try:
-                del username, first_name, user_email, email
+                del username, full_name, user_email, email
             except:
                 logging.info("No variables to delete")
 {% endif %}
