@@ -336,7 +336,7 @@ def auto_assign_tickets(teammate_name):
                     course[0].split(":  ")[1].upper().replace(" ", "") + "-" + version[0].split(":  ")[1] + " Feedback: " + summary[
                                                                                                                             :200] + "...")
             except:
-                logging.error("Failed to fill short_description")
+                logging.debug("Failed to fill short_description")
 
             # Fill the Project Code field with the course for easier categorization
             try:
@@ -345,7 +345,7 @@ def auto_assign_tickets(teammate_name):
                 WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
                     (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.project_code"]'))).send_keys(course[0].split(":  ")[1].upper().replace(" ", ""))
             except:
-                logging.error("Failed to fill Project Code")
+                logging.debug("Failed to fill Project Code")
 
 
 {% endif %}
@@ -381,7 +381,7 @@ Best Regards,
 
                     driver.find_element("xpath", '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]').send_keys(ack_response)
             except:
-                logging.error("Failed to reply to the user")
+                logging.debug("Failed to reply to the user")
 
 {% if team_name == 'RHT Learner Experience - T2' %}
 
@@ -389,7 +389,7 @@ Best Regards,
             try:
                 del username, full_name, user_email, email
             except:
-                logging.info("No variables to delete")
+                logging.debug("No variables to delete")
 {% endif %}
 
 
@@ -516,14 +516,23 @@ def resolve_tickets_for_reporters(target_reporters):
                 if reporter and reporter in target_reporters:
                     logging.info(f"Reporter '{reporter}' matched the target list. Resolving ticket.")
                     try:
+                        fill_in_categorization_fields()
+
+                        # Change status to "In progress"
+                        Select(WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.state"]')))).select_by_visible_text('In Progress')
+
+                        # Add 1 minute to work
+                        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).clear()
+                        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[2]/form/span[1]/span/div[5]/div[1]/div[2]/div[2]/div[2]/div[2]/input[6]'))).send_keys('1')
+
+                        # Save (First time to change status In Progress)
+                        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
+                        time.sleep(3)
+
                         # Change the ticket state to "Resolved" and save the changes.
-                        Select(WebDriverWait(driver, 10).until(
-                            EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.state"]'))
-                        )).select_by_visible_text('Resolved')
+                        Select(WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.state"]')))).select_by_visible_text('Resolved')
                         time.sleep(1)
-                        WebDriverWait(driver, 10).until(
-                            EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))
-                        ).click()
+                        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sysverb_update_and_stay"]'))).click()
                         time.sleep(2)
                         if ticket < num_rows - 1:
                             WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//button[@data-now-ux-metrics-event="Click Next Record"]'))).click()
@@ -548,7 +557,7 @@ snow_login()
 {% if team_name == 'RHT Learner Experience - T2' %}
 lms_login()
 
-target_reporters = ["rh-ee-jingyuwa","vsing@redhat.com","shasingh01","rh-ee-jyague","rhn-gps-jdandrea","carias@redhat.com","rht-anhernan","rht-eparenti"]
+target_reporters = ["wraja@redhat.com","chetan-rhls","rdacosta1@redhat.com","ssanyal@redhat.com","rh-ee-jingyuwa","vsing@redhat.com","shasingh01","rh-ee-jyague","rhn-gps-jdandrea","carias@redhat.com","rht-anhernan","rht-eparenti"]
 # Call the new function
 resolve_tickets_for_reporters(target_reporters)
 
@@ -556,10 +565,6 @@ step("Starting to assign tickets to {{ user_name }}")
 {% endif %}
 
 # List of reporter names for which tickets should be resolved
-
-
-
-
 
 while True:
 {% if team_name == 'RHT Learner Experience' %}
