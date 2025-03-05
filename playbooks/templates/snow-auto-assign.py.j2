@@ -557,7 +557,15 @@ snow_login()
 {% if team_name == 'RHT Learner Experience - T2' %}
 lms_login()
 
-target_reporters = ["wraja@redhat.com","chetan-rhls","rdacosta1@redhat.com","ssanyal@redhat.com","rh-ee-jingyuwa","vsing@redhat.com","shasingh01","rh-ee-jyague","rhn-gps-jdandrea","carias@redhat.com","rht-anhernan","rht-eparenti"]
+target_reporters = [
+    "lauber", "rht-jordisola", "rht-zgutterman", "abhkuma@redhat.com", "lxncastill",
+    "rh-ee-smaity", "nehsingh@redhat.com", "rht-bchardim", "yuvaraj-rhls", "rht-pagomez",
+    "vig@redhat.com", "rhn-gls-rtaniguchi", "abpatel@redhat.com", "rh-ee-tshi", "rht-sbonnevi",
+    "rht-psolarvi", "wraja@redhat.com", "chetan-rhls", "rdacosta1@redhat.com", "ssanyal@redhat.com",
+    "rh-ee-jingyuwa", "vsing@redhat.com", "shasingh01", "rh-ee-jyague", "rhn-gps-jdandrea",
+    "carias@redhat.com", "rht-anhernan", "rht-eparenti"
+]
+
 # Call the new function
 resolve_tickets_for_reporters(target_reporters)
 
