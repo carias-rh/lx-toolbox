@@ -1,63 +1,74 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
+  annotations:
+    app.openshift.io/connects-to: '[{"apiVersion":"apps/v1","kind":"Deployment","name":"sso-rh-login"}]'
+  labels:
+    app.kubernetes.io/part-of: snow-t2
   name: snow-t2-shashi
   namespace: lx-snow
 spec:
   concurrencyPolicy: Replace
+  failedJobsHistoryLimit: 1
   jobTemplate:
+    metadata:
+      creationTimestamp: null
     spec:
-      activeDeadlineSeconds: 14400
+      activeDeadlineSeconds: 17280
       template:
+        metadata:
+          creationTimestamp: null
         spec:
           containers:
-          - args:
-            - /bin/sh
-            - -c
-            - /usr/bin/snow -t 'RHT Learner Experience - T2' -u 'Shashi Singh'
-            env:
-            - name: DISPLAY
-              value: :99
-            - name: PYTHONUNBUFFERED
-              value: "1"
-            image: quay.io/carias_rh/lx-toolbox:latest
-            imagePullPolicy: Always
-            name: snow-t2
-            ports:
-            - containerPort: 8080
-              protocol: TCP
-            resources: {}
-            terminationMessagePath: /dev/termination-log
-            terminationMessagePolicy: File
-            volumeMounts:
-            - mountPath: /runner
-              name: snow-t2-1
-            - mountPath: /app/lx-toolbox/playbooks/vars/credentials.yml
-              name: credentials-volume
-              subPath: credentials.yml
-          - image: docker.io/metal3d/xvfb
-            imagePullPolicy: Always
-            name: xvfb
-            ports:
-            - containerPort: 99
-              protocol: TCP
-            resources: {}
-            terminationMessagePath: /dev/termination-log
-            terminationMessagePolicy: File
+            - args:
+                - /bin/sh
+                - -c
+                - /usr/bin/snow -t 'RHT Learner Experience - T2' -u 'Shashi Singh'
+              env:
+                - name: DISPLAY
+                  value: :99
+                - name: PYTHONUNBUFFERED
+                  value: "1"
+              image: quay.io/carias_rh/lx-toolbox:latest
+              imagePullPolicy: Always
+              name: snow-t2
+              ports:
+                - containerPort: 8080
+                  protocol: TCP
+              resources: {}
+              terminationMessagePath: /dev/termination-log
+              terminationMessagePolicy: File
+              volumeMounts:
+                - mountPath: /runner
+                  name: snow-t2-1
+                - mountPath: /app/lx-toolbox/playbooks/vars/credentials.yml
+                  name: credentials-volume
+                  subPath: credentials.yml
+                - mountPath: /tmp/lx-toolbox/playbooks/vars/credentials.yml
+                  name: credentials-volume
+                  subPath: credentials.yml
+            - image: docker.io/metal3d/xvfb
+              imagePullPolicy: Always
+              name: xvfb
+              ports:
+                - containerPort: 99
+                  protocol: TCP
+              resources: {}
+              terminationMessagePath: /dev/termination-log
+              terminationMessagePolicy: File
           dnsPolicy: ClusterFirst
           restartPolicy: OnFailure
           schedulerName: default-scheduler
           securityContext: {}
           terminationGracePeriodSeconds: 30
           volumes:
-          - emptyDir: {}
-            name: snow-t2-1
-          - name: credentials-volume
-            secret:
-              defaultMode: 420
-              secretName: credentials
-  schedule: 30 19 * * *
-  #timeZone: "Asia/Kolkata"
+            - emptyDir: {}
+              name: snow-t2-1
+            - name: credentials-volume
+              secret:
+                defaultMode: 420
+                secretName: credentials
+  schedule: 54 14 * * *
   startingDeadlineSeconds: 200
   successfulJobsHistoryLimit: 3
   suspend: false

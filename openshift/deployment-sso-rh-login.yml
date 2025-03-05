@@ -6,6 +6,7 @@ metadata:
     app.openshift.io/route-disabled: "false"
     app.openshift.io/vcs-ref: feature/snow
     app.openshift.io/vcs-uri: https://github.com/carias-rh/sso-rh-login.git
+    deployment.kubernetes.io/revision: "4"
     openshift.io/generated-by: OpenShiftWebConsole
   labels:
     app: sso-rh-login
@@ -29,6 +30,7 @@ spec:
     type: RollingUpdate
   template:
     metadata:
+      creationTimestamp: null
       labels:
         app: sso-rh-login
         app.kubernetes.io/component: sso-rh-login
@@ -36,40 +38,40 @@ spec:
         deploymentconfig: sso-rh-login
     spec:
       containers:
-      - env:
-        - name: SECRET
-          value: b068b07da81c5b25b72a5767c6046360fb0ab92f
-        image: quay.io/carias_rh/sso-rh-login:latest
-        imagePullPolicy: IfNotPresent
-        name: sso-rh-login
-        resources: {}
-        terminationMessagePath: /dev/termination-log
-        terminationMessagePolicy: File
-        volumeMounts:
-        - mountPath: /var/log
-          name: counter
+        - env:
+            - name: SECRET
+              value: b068b07da81c5b25b72a5767c6046360fb0ab92f
+          image: quay.io/carias_rh/sso-rh-login:latest
+          imagePullPolicy: IfNotPresent
+          name: sso-rh-login
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /var/log
+              name: counter
       dnsPolicy: ClusterFirst
       initContainers:
-      - command:
-        - sh
-        - -c
-        - echo $COUNTER > /var/log/counter
-        env:
-        - name: COUNTER
-          value: "2233"
-        image: docker.io/busybox
-        imagePullPolicy: Always
-        name: initial-counter
-        resources: {}
-        terminationMessagePath: /dev/termination-log
-        terminationMessagePolicy: File
-        volumeMounts:
-        - mountPath: /var/log
-          name: counter
+        - command:
+            - sh
+            - -c
+            - echo $COUNTER > /var/log/counter
+          env:
+            - name: COUNTER
+              value: "6143"
+          image: docker.io/busybox
+          imagePullPolicy: Always
+          name: initial-counter
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /var/log
+              name: counter
       restartPolicy: Always
       schedulerName: default-scheduler
       securityContext: {}
       terminationGracePeriodSeconds: 30
       volumes:
-      - emptyDir: {}
-        name: counter
+        - emptyDir: {}
+          name: counter
