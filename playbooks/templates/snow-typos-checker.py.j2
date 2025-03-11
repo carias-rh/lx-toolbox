@@ -13,13 +13,13 @@ from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
-
+import requests
 
 # -------------------------------------------------------------------
 # Configurable constants for local paths, etc.
 # -------------------------------------------------------------------
 LOCAL_CLONE_DIRECTORY = "{{ playbook_dir }}/files/"
-GUIDE_SUBDIR = "guides/en-US"
+GUIDE_SUBDIR = "content"
 OLLAMA_COMMAND = "/usr/local/bin/ollama"  # Adjust if your Ollama binary is named differently
 CHROME_DEBUG_PORT = 9123    # Example local Chrome debugger port for your session
 CHROME_USER_DATA_DIR = "{{ ansible_env.HOME}}/.config/google-chrome/snow-typos"
@@ -84,6 +84,40 @@ def askOllama(prompt: str) -> str:
         print(f"[ERROR] Could not run Ollama: {e}")
         return ""
 
+
+def ask_gpt4_mini(prompt: str) -> str:
+    """
+    Calls the GPT-4 Mini API with the given prompt and returns the response.
+    Uses the API key and URL from the environment variables GPT4_MINI_API_KEY and GPT4_MINI_API_URL.
+    """
+    import os
+    import requests
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    api_url = "https://api.openai.com/v1/chat/completions"
+    if not api_key or not api_url:
+        print("[ERROR] GPT4_MINI_API_KEY or GPT4_MINI_API_URL environment variable not set.")
+        return ""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 500,
+        "temperature": 0.7,
+        "top_p": 1
+    }
+    try:
+        response = requests.post(api_url, headers=headers, json=payload)
+        response.raise_for_status()
+        result = response.json()
+        # Adjust the following line if the returned JSON structure differs.
+        return result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+    except Exception as e:
+        print(f"[ERROR] GPT-4o-mini API request failed: {e}")
+        return ""
 
 # -------------------------------------------------------------------
 # Function to set up the Selenium driver for Chrome
@@ -169,7 +203,6 @@ def login(driver):
 
         wait_for_site_to_be_ready(driver)
     except:
-        check_cookies(driver)
         print("Login failed")
 
 def wait_for_site_to_be_ready():
@@ -236,7 +269,7 @@ def classify_ticket_llm(description: str) -> dict:
     Classifies a SNOW ticket using an LLM, returning a dict like:
     {
       "student_feedback": str,
-      "most_defining_issue_keyword": str,
+      "most_defining_issue_keywords": list[str],  # List of 3 keywords
       "is_content_issue_ticket": bool,
       "is_environment_issue": bool,
       "confidence": float,
@@ -244,12 +277,12 @@ def classify_ticket_llm(description: str) -> dict:
     }
     """
     step("Classifying ticket using LLM")
-
-    json_example = '{"student_feedback":"", "most_defining_issue_keyword":"md5sum", "is_content_issue_ticket":true,"is_environment_issue":false, "confidence":0.9,"summary":"The md5sum command drops a different output than the one expected."}'
+    
+    json_example = '{"student_feedback":"", "most_defining_issue_keyword":["md5sum", "output", "command"], "is_content_issue_ticket":true,"is_environment_issue":false, "confidence":0.9,"summary":"The md5sum command drops a different output than the one expected."}'
     prompt = f"""
 Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
 - student_feedback (the user's feedback)
-- most_defining_issue_keyword (a sustantive word (not verbs or adjetives) from the *User feedback* that is the most unique and less generic that will be used to grep the guide text)
+- most_defining_issue_keyword (a list of 3 substantive words (not verbs or adjectives) from the *User feedback* that are the most unique and less generic that will be used to grep the guide text)
 - is_content_issue_ticket (true/false)
 - is_environment_issue (true/false)
 - confidence (a float from 0.0 to 1.0)
@@ -262,18 +295,21 @@ Reply in JSON only, no extra text.
 For example:
 {json_example}
 """
-    response = askOllama(prompt)
-    print("[Ollama response regarding typos]:\n", response)
+    #response = ask_gpt4_mini(prompt)
+    global classifying_response
+    classifying_response = askOllama(prompt)
+    print("[GPT4-mini response regarding typos]:\n", classifying_response)
     # Then parse JSON via Python. Temporary fallback if there's an error:
     try:
-        return json.loads(response)
+        return json.loads(classifying_response)
     except:
-        print("[ERROR] Could not parse JSON from LLM. Full response:", response)
+        print("[ERROR] Could not parse JSON from LLM. Full response:", classifying_response)
         return {
             "is_content_issue_ticket": False,
             "is_environment_issue": False,
             "confidence": 0.0,
-            "summary": ""
+            "summary": "",
+            "most_defining_issue_keyword": []
         }
 
 
@@ -311,37 +347,50 @@ def ensure_course_repo(course_id: str) -> str:
 # -------------------------------------------------------------------
 # Function to extract the lab script name from the course page
 # -------------------------------------------------------------------
-def get_lab_start_script_name(driver, course_url: str) -> str:
+def get_section_info(driver, course_url: str, is_even_section: bool) -> str:
     """
     Navigates to the course URL, performs login if necessary,
     and extracts the lab start command from the page.
     Returns the lab script name specified in a command such as 'lab start <script name>'.
     """
-    step("Extracting lab start script name from course page")
+    step("Extracting relevant information from section")
     try:
-        # First, navigate to the course page.
+        driver.execute_script("window.open()");
+        driver.switch_to.window(driver.window_handles[-1]);
         driver.get(course_url)
+        check_cookies(driver)
         # Optionally, if login is enforced here, call:
         # login(driver, lab_environment, rh_username, username, pin, github_username, github_password)
         # You can pass the required credentials from Ansible variables.
-        login(driver)
-        
+        #login(driver)
+
+        time.sleep(4)  # Allow time for the page to load completely
+
         # If your course page has tabs, you might need to select the "course" tab
         select_lab_environment_tab(driver, "course")
-        time.sleep(4)  # Allow time for the page to load completely
-        # Locate an element containing the "lab start" command
-        element = WebDriverWait(driver, 60).until(
-            EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'lab start')]"))
-        )
-        text = element.text
-        match = re.search(r"lab start\s+(\S+)", text, re.IGNORECASE)
-        if match:
-            lab_script_name = match.group(1)
-            print(f"[INFO] Extracted lab script name: {lab_script_name}")
-            return lab_script_name
+
+        # TODO: for comp-review might not be even, but last items of the chapter or last chapter's sections
+        # It is a guided exercise
+        if not is_even_section:
+            h3_subsection = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, f"//h3/a[not(contains(@id, 'objectives'))]//.."))
+            ).text
+            print(f"[INFO] Found relevant section info: {h3_subsection}")
+            return h3_subsection
+
         else:
-            print("[WARNING] Could not find script name using 'lab start' pattern.")
-            return ""
+            # Locate an element containing the "lab start" command
+            element = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'lab start')]"))
+            )
+
+            text = element.text
+            match = re.search(r"lab start\s+(\S+)", text, re.IGNORECASE)
+            if match:
+                lab_script_name = match.group(1)
+                print(f"[INFO] Extracted lab script name: {lab_script_name}")
+                return lab_script_name
+                            
     except Exception as e:
         print(f"[ERROR] Could not retrieve lab start script name from {course_url}: {e}")
         return ""
@@ -350,29 +399,35 @@ def get_lab_start_script_name(driver, course_url: str) -> str:
 # -------------------------------------------------------------------
 # Function to fetch relevant text from the local course repository
 # -------------------------------------------------------------------
-def fetch_local_guide_text(course_id: str, lab_script_name: str, repo_dir: str = None) -> str:
+def fetch_local_guide_text(section_info: str, repo_dir: str = None) -> str:
     """
     Fetches the relevant guide text from the course repository.
     If repo_dir is not provided, it is constructed from the course_id.
-    Uses lab_script_name to grep for the correct xml file.
+    Uses lab_script_name to grep for the correct adoc file.
     """
-    base_course = re.split(r"-", course_id)[0]
-    base_course = re.split(r"ea", base_course)[0]
-    if repo_dir is None:
-        repo_dir = os.path.join(LOCAL_CLONE_DIRECTORY, base_course)
+
     try:
-        grep_exercise_file = f"grep -ri '{lab_script_name}' {repo_dir}/{GUIDE_SUBDIR}/sg-chapters/topics | grep -E 'ge.xml|review.xml|lab.xml' | head -n1 | cut -d ':' -f1"
-        exercise_file = os.popen(grep_exercise_file).read().strip()
-        if not exercise_file:
-            return "", ""
-        parse_exercise_file = f"cat '{exercise_file}' | xq --xpath '//text()' | sed '/^\s*$/d' "
-        exercise_xml_text = os.popen(parse_exercise_file).read()
-        print(f"[INFO] Exercise file path: {exercise_file}")
-        
-        return parse_exercise_file, exercise_xml_text.strip()
+        if repo_dir is not None and section_info != "":            
+            file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR} | grep -E 'ge.adoc|lecture.adoc|review.adoc|lab.adoc' | head -n1 | cut -d ':' -f1"
+            print(f"[INFO] files that match the section info: {file_dir}")
+
+            try:
+                content_file = subprocess.check_output(file_dir, shell=True).decode().strip()
+                with open(content_file) as file:
+                    content_file = file.read().strip()
+            except Exception as e:
+                print(f"[ERROR] Could open file {content_file}: {e}")
+                return ""
+                
+            print(f"[INFO] Content file path: {content_file}")
+            
+            return content_file.strip()
+        else:
+            print("[INFO] Not enough information to fetch local guide text.")
+            return ""
     except Exception as e:
         print(f"[ERROR] Could not fetch local guide text: {e}")
-        return "", ""
+        return ""
 
 
 # -------------------------------------------------------------------
@@ -391,7 +446,9 @@ def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
     step("Navigating to the SNOW ticket")
     # 1. Navigate to the SNOW ticket
     snow_url = f"https://redhat.service-now.com/surl.do?n={snow_id}"
-    driver.get(snow_url)
+    driver.execute_script("window.open()");
+    driver.switch_to.window(driver.window_handles[-1]);
+    driver.get(snow_url);
     time.sleep(3)  # Simplified wait for example
 
     # 2. Parse the SNOW ticket description
@@ -428,45 +485,80 @@ def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
     url_match = re.search(r"URL:\s*(https?://\S+)", description)
     if url_match:
         course_url = url_match.group(1)
+        chapter_and_section = re.search(r'pages/(ch\d+s\d+)', course_url).group(1) if re.search(r'pages/(ch\d+s\d+)', course_url) else ""
+        # Extract section number and determine if it's even or odd
+        is_even_section = False
+        if chapter_and_section:
+            section_match = re.search(r's(\d+)', chapter_and_section)
+            if section_match:
+                section_num = int(section_match.group(1))
+                is_even_section = (section_num % 2 == 0)
+                print(f"[INFO] Section number {section_num} is {'even' if is_even_section else 'odd'}")
 
+    if course_id:
+        repo_dir = ensure_course_repo(course_id)
 
     # 6. Retrieve the lab start script name from the course page
-    lab_script_name = ""
-    if course_url:
-        lab_script_name = get_lab_start_script_name(driver, course_url)
+    section_info = ""
+    if course_url != "":
+        section_info = get_section_info(driver, course_url, is_even_section)
 
     # 7. Ensure the repository is available and fetch local guide text using the lab script name
     local_guide_text = ""
-    if course_id and lab_script_name:
-        repo_dir = ensure_course_repo(course_id)
-        parse_exercise_file, local_guide_text = fetch_local_guide_text(course_id, lab_script_name, repo_dir)
+    if section_info != "":
+        local_guide_text = fetch_local_guide_text(section_info, repo_dir)
+        print(f"[INFO] Local guide text: {local_guide_text}")
+    else:
+        print("[INFO] No course ID or lab script name found in the SNOW ticket.")
+        return
 
-    
     if data.get("is_content_issue_ticket", False):
         print(f"[INFO] This SNOW ticket {snow_id} is recognized as a 'content' issue feedback ticket.")
     else:
         print(f"[INFO] This SNOW ticket {snow_id} doesn't appear to be a simple 'content' issue.")
         return
 
-    # 8. Construct the prompt for advanced LLM analysis and call Ollama
+    # 8. Construct the prompt for advanced LLM analysis and call GPT4-mini
     # 9. Perform a grep search for the most defining issue keyword in the local guide text
-    most_defining_issue_keyword = data.get("most_defining_issue_keyword", "").split()[0]
+    most_defining_issue_keywords = data.get("most_defining_issue_keywords", ["", "", ""])
     grep_result = ""
-    if most_defining_issue_keyword:
-        grep_command = f"{parse_exercise_file} |grep -C10 '{most_defining_issue_keyword}'"
-        try:
-            grep_result = subprocess.check_output(grep_command, shell=True, text=True)
-            print(f"[INFO] Grep result for keyword '{most_defining_issue_keyword}':\n{grep_result}")
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] Grep command failed: {e}")
-            grep_result = local_guide_text
+    if most_defining_issue_keywords:
+        grep_results = []
+        for keyword in most_defining_issue_keywords:
+            if keyword != "":
+                grep_command = f"echo '{local_guide_text}' |grep -A3 '{keyword}'"
+                try:
+                    result = subprocess.run(grep_command, shell=True, text=True, capture_output=True).stdout
+                    grep_results.append(result)
+                    print(f"[INFO] Grep result for keyword '{keyword}':\n{result}")
+                except subprocess.CalledProcessError as e:
+                    print(f"[ERROR] Grep command failed: {e}")
+        
+        grep_result = "\n".join(grep_results)
+        print(f"[INFO] Grep result:\n{grep_result}")
     else:
         print("[INFO] No defining issue keyword found in the LLM response.")
 
+    analyze_content_issue(user_issue, grep_result)
+    print("[LLM response regarding typos]:\n", typo_detected_response)
+    print("[INFO] Based on the AI result, proceed with your next steps here...")
+    return
+
+def analyze_content_issue(user_issue: str, guide_text: str) -> str:
+    """
+    Analyzes a potential content issue by comparing user feedback with guide text.
+    
+    Args:
+        user_issue: The user's reported issue/feedback
+        guide_text: Relevant excerpt from the guide
+        
+    Returns:
+        str: JSON response from LLM analysis
+    """
     json_example = '''{
-            "thinking": "think here, step by step, compare the student's feedback with the guide text, and provide a detailed analysis of the issue",
+            "thinking": "think in this value step by step, compare the student's feedback with the guide text, and provide a detailed analysis of the issue",
             "is_content_issue_ticket": true,
-            "content_issue_location": "a short description or excerpt of the location where the content issue appears (if applicable)",
+            "content_issue_location": "a short description or excerpt of the location/step where the content issue appears",
             "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
             "confidence": "a float value between 0 and 1 indicating your confidence",
             "summary": "a short summary of your analysis"
@@ -478,7 +570,7 @@ We have a student who reported an issue with the guide text. The student's compl
 
 Below is an excerpt of the guided exercise text:
 --------------------------------
-{grep_result}
+{guide_text}
 --------------------------------
 
 Please analyze the guided exercise and determine if there is a typographical error or textual mismatch that could be causing the student's issue.
@@ -490,22 +582,39 @@ Return your analysis in exactly the following JSON format without any extra text
 
 Do not include any explanations or markdown formatting outside the JSON object.
 """
-    ollama_response = askOllama(prompt_text)
-    print("[Ollama response regarding typos]:\n", ollama_response)
-    print("[INFO] Based on the AI result, proceed with your next steps here...")
-    return
+    #response = ask_gpt4_mini(prompt_text)
+    global typo_detected_response
+    typo_detected_response = askOllama(prompt_text)
+    return typo_detected_response
 
 # -------------------------------------------------------------------
 # Main driver (example)
 # -------------------------------------------------------------------
 def main():
-    if not check_running_session():
-        open_profile()
-        time.sleep(3)  # Allow time for the browser to start
-    driver = get_chrome_driver()
-    sample_snow_id = "RHT2319171"  # Replace with a valid SNOW ticket id
-    handle_snow_typo_ticket(driver, sample_snow_id)
-    # driver.quit()  # close the browser if desired
+    #if not check_running_session():
+    #    open_profile()
+    #    time.sleep(3)  # Allow time for the browser to start
+    #driver = get_chrome_driver()
+    driver = webdriver.Chrome()
+    driver.get("https://rol.redhat.com/")
+    login(driver)
+    time.sleep(5)
+    check_cookies(driver)
+    time.sleep(5)
 
+    # List of SNOW tickets to process
+    snow_tickets = [
+        "RHT2315790",
+        "RHT2319171",  # Example ticket
+        "RHT2332936"
+    ]
+
+    # Process each ticket
+    for ticket_id in snow_tickets:
+        print(f"\nProcessing ticket {ticket_id}...")
+        handle_snow_typo_ticket(driver, ticket_id)
+
+    # driver.quit()  # close the browser if desired
+    time.sleep(500)
 if __name__ == "__main__":
     main()
