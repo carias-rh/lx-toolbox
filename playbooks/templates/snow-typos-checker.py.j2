@@ -14,6 +14,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 import requests
+import logging
 
 # -------------------------------------------------------------------
 # Configurable constants for local paths, etc.
@@ -64,7 +65,8 @@ def check_running_session():
 # -------------------------------------------------------------------
 # You can change the model to one available on your system.
 OLLAMA_MODEL = "granite3.1-dense:8b"
-OLLAMA_MODEL = "llama3.2:latest"
+OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"
+#OLLAMA_MODEL = "llama3.2:latest"
 
 
 def askOllama(prompt: str) -> str:
@@ -200,8 +202,6 @@ def login(driver):
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
-
-        wait_for_site_to_be_ready(driver)
     except:
         print("Login failed")
 
@@ -213,25 +213,7 @@ def wait_for_site_to_be_ready():
         check_cookies(driver)
         print("[ERROR] Login failed:", e)
 
-def wait_for_site_to_be_ready(driver, lab_environment):
-    """
-    Waits for the main site element to be clickable before proceeding.
-    """
-    try:
-        check_cookies(driver)
-        if lab_environment in ["rol", "china"]:
-            WebDriverWait(driver, 2).until(
-                EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))
-            )
-        elif lab_environment == "rol-stage":
-            WebDriverWait(driver, 2).until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="avatar"]'))
-            )
-        print("Site is ready")
-    except Exception as e:
-        time.sleep(0.5)
-        check_cookies(driver)
-        wait_for_site_to_be_ready(driver, lab_environment)
+
 
 def select_lab_environment_tab(driver, tab_name):
     """
@@ -254,8 +236,8 @@ def select_lab_environment_tab(driver, tab_name):
         if lab_environment_tab_status != "true":
             time.sleep(0.1)
             select_lab_environment_tab(driver, tab_name)
-    except Exception as e:
-        print("[WARNING] Lab environment tab not selected successfully. Retrying...", e)
+    except:
+        print("[WARNING] Lab environment tab not selected successfully. Retrying...")
         check_cookies(driver)
         time.sleep(2)
         select_lab_environment_tab(driver, tab_name)
@@ -269,7 +251,7 @@ def classify_ticket_llm(description: str) -> dict:
     Classifies a SNOW ticket using an LLM, returning a dict like:
     {
       "student_feedback": str,
-      "most_defining_issue_keywords": list[str],  # List of 3 keywords
+      "most_defining_issue_keyword": list[str],  # List of 3 keywords
       "is_content_issue_ticket": bool,
       "is_environment_issue": bool,
       "confidence": float,
@@ -277,7 +259,7 @@ def classify_ticket_llm(description: str) -> dict:
     }
     """
     step("Classifying ticket using LLM")
-    
+
     json_example = '{"student_feedback":"", "most_defining_issue_keyword":["md5sum", "output", "command"], "is_content_issue_ticket":true,"is_environment_issue":false, "confidence":0.9,"summary":"The md5sum command drops a different output than the one expected."}'
     prompt = f"""
 Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
@@ -295,8 +277,9 @@ Reply in JSON only, no extra text.
 For example:
 {json_example}
 """
-    #response = ask_gpt4_mini(prompt)
+    
     global classifying_response
+    #classifying_response = ask_gpt4_mini(prompt)
     classifying_response = askOllama(prompt)
     print("[GPT4-mini response regarding typos]:\n", classifying_response)
     # Then parse JSON via Python. Temporary fallback if there's an error:
@@ -327,10 +310,8 @@ def ensure_course_repo(course_id: str) -> str:
     Returns the repository directory path.
     """
     step("Ensuring course repository is available")
-    base_course = re.split(r"-", course_id)[0]
-    base_course = re.split(r"ea", base_course)[0]
-    repo_dir = os.path.join(LOCAL_CLONE_DIRECTORY, base_course)
-    repo_url = f"git@github.com:RedHatTraining/{base_course.lower()}.git"
+    repo_dir = os.path.join(LOCAL_CLONE_DIRECTORY, course_id)
+    repo_url = f"git@github.com:RedHatTraining/{course_id}.git"
     if not os.path.exists(repo_dir):
         print(f"[INFO] Repository not found at {repo_dir}. Cloning from {repo_url} ...")
         clone_cmd = f"git clone {repo_url} {repo_dir}"
@@ -347,7 +328,7 @@ def ensure_course_repo(course_id: str) -> str:
 # -------------------------------------------------------------------
 # Function to extract the lab script name from the course page
 # -------------------------------------------------------------------
-def get_section_info(driver, course_url: str, is_even_section: bool) -> str:
+def get_section_info(driver, course_url: str) -> str:
     """
     Navigates to the course URL, performs login if necessary,
     and extracts the lab start command from the page.
@@ -365,32 +346,18 @@ def get_section_info(driver, course_url: str, is_even_section: bool) -> str:
         #login(driver)
 
         time.sleep(4)  # Allow time for the page to load completely
-
+        
         # If your course page has tabs, you might need to select the "course" tab
         select_lab_environment_tab(driver, "course")
 
-        # TODO: for comp-review might not be even, but last items of the chapter or last chapter's sections
         # It is a guided exercise
-        if not is_even_section:
-            h3_subsection = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, f"//h3/a[not(contains(@id, 'objectives'))]//.."))
-            ).text
-            print(f"[INFO] Found relevant section info: {h3_subsection}")
-            return h3_subsection
+        relevant_section_info = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//h3/a[not(contains(@id, 'objectives'))]//.. | //*[contains(text(), 'lab start')]"))
+        ).text
 
-        else:
-            # Locate an element containing the "lab start" command
-            element = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'lab start')]"))
-            )
+        print(f"[INFO] Found relevant section keyword: {relevant_section_info}")
+        return relevant_section_info
 
-            text = element.text
-            match = re.search(r"lab start\s+(\S+)", text, re.IGNORECASE)
-            if match:
-                lab_script_name = match.group(1)
-                print(f"[INFO] Extracted lab script name: {lab_script_name}")
-                return lab_script_name
-                            
     except Exception as e:
         print(f"[ERROR] Could not retrieve lab start script name from {course_url}: {e}")
         return ""
@@ -406,143 +373,22 @@ def fetch_local_guide_text(section_info: str, repo_dir: str = None) -> str:
     Uses lab_script_name to grep for the correct adoc file.
     """
 
-    try:
-        if repo_dir is not None and section_info != "":            
-            file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR} | grep -E 'ge.adoc|lecture.adoc|review.adoc|lab.adoc' | head -n1 | cut -d ':' -f1"
-            print(f"[INFO] files that match the section info: {file_dir}")
-
-            try:
-                content_file = subprocess.check_output(file_dir, shell=True).decode().strip()
-                with open(content_file) as file:
-                    content_file = file.read().strip()
-            except Exception as e:
-                print(f"[ERROR] Could open file {content_file}: {e}")
-                return ""
-                
+    if repo_dir is not None and section_info != "":
+        file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR} | grep -E 'ge.adoc|lecture.adoc|review.adoc|lab.adoc' | head -n1 | cut -d ':' -f1"
+    
+        try:
+            content_file = subprocess.check_output(file_dir, shell=True).decode().strip()
             print(f"[INFO] Content file path: {content_file}")
-            
-            return content_file.strip()
-        else:
-            print("[INFO] Not enough information to fetch local guide text.")
-            return ""
-    except Exception as e:
-        print(f"[ERROR] Could not fetch local guide text: {e}")
+            with open(content_file) as file:
+                content_file = file.read().strip()
+        except Exception as e:
+            print(f"[ERROR] Could open file {content_file}: {e}")
+            return ""            
+        return content_file.strip()
+    else:
+        print("[INFO] Not enough information to fetch local guide text.")
         return ""
 
-
-# -------------------------------------------------------------------
-# Put everything together in a main workflow for a single SNOW ticket
-# -------------------------------------------------------------------
-def handle_snow_typo_ticket(driver: webdriver.Chrome, snow_id: str):
-    """
-    Processes a SNOW ticket by:
-    1. Navigating to the SNOW record.
-    2. Parsing the description.
-    3. Checking via LLM if it's a typo ticket.
-    4. If so, ensuring the course repository is available, fetching the lab start script name
-       from the course page (using the URL in the ticket), and then fetching the guide text,
-       then invoking further LLM analysis.
-    """
-    step("Navigating to the SNOW ticket")
-    # 1. Navigate to the SNOW ticket
-    snow_url = f"https://redhat.service-now.com/surl.do?n={snow_id}"
-    driver.execute_script("window.open()");
-    driver.switch_to.window(driver.window_handles[-1]);
-    driver.get(snow_url);
-    time.sleep(3)  # Simplified wait for example
-
-    # 2. Parse the SNOW ticket description
-    try:
-        switch_to_iframe(driver)
-        description_element = WebDriverWait(driver, 5).until(
-            EC.presence_of_element_located(
-                (By.XPATH, '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]')
-            )
-        )
-        description = description_element.get_attribute("value")
-    except Exception as e:
-        print(f"[ERROR] Could not read SNOW ticket description: {e}")
-        return
-
-    # 3. Extract user issue from the description
-    user_issue = re.search(r"Description:\s*(.*?)\s*Copyright", description, re.DOTALL).group(1).strip()
-
-    # 4. Check if it's a "typo" ticket
-    data = classify_ticket_llm(user_issue)
-    if not data.get("is_content_issue_ticket", False):
-        print(f"[INFO] This SNOW ticket {snow_id} doesn't appear to be a simple 'typo' issue.")
-        return
-
-    print(f"[INFO] SNOW ticket {snow_id} is recognized as a 'typo' feedback ticket.")
-
-    # 5. Extract course id, course URL from the description
-    course_id = ""
-    course_match = re.search(r"Course:\s*([A-Za-z0-9\-]+)", description)
-    if course_match:
-        course_id = course_match.group(1)
-
-    course_url = ""
-    url_match = re.search(r"URL:\s*(https?://\S+)", description)
-    if url_match:
-        course_url = url_match.group(1)
-        chapter_and_section = re.search(r'pages/(ch\d+s\d+)', course_url).group(1) if re.search(r'pages/(ch\d+s\d+)', course_url) else ""
-        # Extract section number and determine if it's even or odd
-        is_even_section = False
-        if chapter_and_section:
-            section_match = re.search(r's(\d+)', chapter_and_section)
-            if section_match:
-                section_num = int(section_match.group(1))
-                is_even_section = (section_num % 2 == 0)
-                print(f"[INFO] Section number {section_num} is {'even' if is_even_section else 'odd'}")
-
-    if course_id:
-        repo_dir = ensure_course_repo(course_id)
-
-    # 6. Retrieve the lab start script name from the course page
-    section_info = ""
-    if course_url != "":
-        section_info = get_section_info(driver, course_url, is_even_section)
-
-    # 7. Ensure the repository is available and fetch local guide text using the lab script name
-    local_guide_text = ""
-    if section_info != "":
-        local_guide_text = fetch_local_guide_text(section_info, repo_dir)
-        print(f"[INFO] Local guide text: {local_guide_text}")
-    else:
-        print("[INFO] No course ID or lab script name found in the SNOW ticket.")
-        return
-
-    if data.get("is_content_issue_ticket", False):
-        print(f"[INFO] This SNOW ticket {snow_id} is recognized as a 'content' issue feedback ticket.")
-    else:
-        print(f"[INFO] This SNOW ticket {snow_id} doesn't appear to be a simple 'content' issue.")
-        return
-
-    # 8. Construct the prompt for advanced LLM analysis and call GPT4-mini
-    # 9. Perform a grep search for the most defining issue keyword in the local guide text
-    most_defining_issue_keywords = data.get("most_defining_issue_keywords", ["", "", ""])
-    grep_result = ""
-    if most_defining_issue_keywords:
-        grep_results = []
-        for keyword in most_defining_issue_keywords:
-            if keyword != "":
-                grep_command = f"echo '{local_guide_text}' |grep -A3 '{keyword}'"
-                try:
-                    result = subprocess.run(grep_command, shell=True, text=True, capture_output=True).stdout
-                    grep_results.append(result)
-                    print(f"[INFO] Grep result for keyword '{keyword}':\n{result}")
-                except subprocess.CalledProcessError as e:
-                    print(f"[ERROR] Grep command failed: {e}")
-        
-        grep_result = "\n".join(grep_results)
-        print(f"[INFO] Grep result:\n{grep_result}")
-    else:
-        print("[INFO] No defining issue keyword found in the LLM response.")
-
-    analyze_content_issue(user_issue, grep_result)
-    print("[LLM response regarding typos]:\n", typo_detected_response)
-    print("[INFO] Based on the AI result, proceed with your next steps here...")
-    return
 
 def analyze_content_issue(user_issue: str, guide_text: str) -> str:
     """
@@ -556,36 +402,310 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-            "thinking": "think in this value step by step, compare the student's feedback with the guide text, and provide a detailed analysis of the issue",
-            "is_content_issue_ticket": true,
-            "content_issue_location": "a short description or excerpt of the location/step where the content issue appears",
+            "analysis": "think here step by step, understand what the guide text is about, and compare it with the student's feedback",
+            "is_valid_issue": true/false,
+            "content_issue_location": "location/step where the content issue appears",
             "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
             "confidence": "a float value between 0 and 1 indicating your confidence",
             "summary": "a short summary of your analysis"
             }'''
 
     prompt_text = f"""
-We have a student who reported an issue with the guide text. The student's complaint is:
-"{user_issue}"
+We have a student who reported an issue within the guide text. The student's feedback is:
+<student_feedback>
+{user_issue}
+</student_feedback>
 
-Below is an excerpt of the guided exercise text:
---------------------------------
+Below is an excerpt of the guide section:
+<guide_text>
 {guide_text}
---------------------------------
+</guide_text>
 
-Please analyze the guided exercise and determine if there is a typographical error or textual mismatch that could be causing the student's issue.
-Your analysis must consider headings, task summaries, instructions, and any text content that might be inconsistent with the complaint.
+Compare the student's feedback with the guide text, and provide a detailed analysis of the issue.
+Your analysis must consider only the instructions, theory and commands that are part of the text. 
+Remove from the response in the JSON any reference to titles or headings, as I already have that information.
 
 Return your analysis in exactly the following JSON format without any extra text:
-
+<json_example>
 {json_example}
+</json_example>
 
 Do not include any explanations or markdown formatting outside the JSON object.
 """
-    #response = ask_gpt4_mini(prompt_text)
-    global typo_detected_response
-    typo_detected_response = askOllama(prompt_text)
-    return typo_detected_response
+    global analysis_response
+    #analysis_response = ask_gpt4_mini(prompt_text)
+    analysis_response = askOllama(prompt_text)
+    return analysis_response
+
+
+
+def jira_login(driver):
+    #try:
+        driver.get("https://issues.redhat.com")
+        time.sleep(2)
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a'))).click()
+        
+        #check_cookies()
+        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username-verification"]'))).send_keys("{{ username }}" + "@redhat.com")
+        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
+        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
+    #except:
+    #    print("An exception occurred during jira login")
+
+def wait_jira_loaded(driver):
+    try:
+        WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH,'//*[@class="aui-button aui-button-primary aui-style create-issue "]')))
+    except:
+        WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@class="aui-nav-link login-link"]')))
+
+
+def get_snow_info(driver, snow_id):
+    driver.get('https://redhat.service-now.com/surl.do?n=' + snow_id + '')
+    switch_to_iframe(driver)
+
+    # Get description
+    description = driver.find_element("xpath", '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]').get_attribute('value')
+
+    # Get issue info
+    issue = re.search(r"Description:\s*(.*?)\s*Copyright", description, re.DOTALL).group(1).strip()
+    course = re.findall("Course:.*", description)[0].split(":  ")[1].upper().replace(" ", "")
+    version = re.findall("Version:.*", description)[0].split(":  ")[1]
+    url = re.findall("URL:.*", description)[0].split(":  ")[1]
+    try:
+        chapter = re.findall("ch[0-9][0-9]", url)[0].split("ch")[1]
+    except:
+        chapter= ""
+    try:
+        section = re.findall("s[0-9][0-9]", url)[0].split("s")[1]
+    except:
+        section = ""
+    title = re.findall("Section Title:.*", description)[0].split(":  ")[1]
+    rhnid = re.findall("User Name:.*", description)[0].split(":  ")[1]
+
+    snow_info = {
+        "snow_id": snow_id,
+        "Description": issue,
+        "Course": course,
+        "Version": version,
+        "URL": url,
+        "Chapter": chapter,
+        "Section": section,
+        "Title": title,
+        "RHNID": rhnid,
+    }
+    return snow_info
+
+def select_dropdown(element, input):
+    element.send_keys(Keys.CONTROL + "a")
+    element.send_keys(Keys.DELETE)
+    element.send_keys(input)
+    element.send_keys(Keys.TAB)
+
+def switch_to_tab(tabname):
+    WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, f'//ul[@role="tablist"]//strong[text()="{tabname}"]'))).click()
+
+
+
+def create_jira(driver, snow_info, analysis_response):
+    # Switch to new tab
+    driver.execute_script("window.open('');")
+    driver.switch_to.window(driver.window_handles[-1])
+
+    jira_login(driver)
+    driver.get('https://issues.redhat.com/projects/PTL/issues')
+
+    # Click Create
+    WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="create_link"]'))).click()
+
+    # Select Text mode
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[2]/button'))).click()
+
+    # Fill in Summary
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))).send_keys(f'{snow_info["Course"]}: ch{snow_info["Chapter"]}s{snow_info["Section"]} -  - {snow_info["snow_id"]}')
+
+    # Add Description
+    color1 = '{color:#0747a6}'
+    color2 = '{color}'
+    description = f"""
+        h3. {color1}*Please fill in the following information:*{color2}
+    ----
+    |*URL:*|[ch{snow_info["Chapter"]}s{snow_info["Section"]} |{snow_info["URL"]}]|
+    |*Reporter RHNID:*| {snow_info["RHNID"]} |
+    |*Section title:*|{snow_info["Title"]}|
+    |*Language*:| English |
+
+    *Issue description*
+
+    {snow_info["Description"]}
+
+    *Steps to reproduce:*
+
+    *Workaround:*
+    {analysis_response.get("suggested_correction", "")}
+
+    *Expected result:*"""
+
+    # Add description
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description"]'))).clear()
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description"]'))).send_keys(description)
+
+    # Select Visual mode back again
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[1]/button'))).click()
+
+    # Select Component (course)
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]'))).send_keys(snow_info["Course"])
+
+    # Add chapter and section
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_12316549"]'))).send_keys(snow_info['Chapter'])
+
+    # Select version
+    version = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="versions-textarea"]')))
+    version.send_keys(Keys.HOME)
+
+    # Change to priority tab and change priority
+    switch_to_tab('Priority')
+    priority_dropdown = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
+    select_dropdown(priority_dropdown, "Minor")
+    switch_to_tab('Field Tab')
+
+
+
+
+# -------------------------------------------------------------------
+# Put everything together in a main workflow for a single SNOW ticket
+# -------------------------------------------------------------------
+def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
+    """
+    Processes a SNOW ticket by:
+    3. Checking via LLM if it's a typo ticket.
+    4. If so, ensuring the course repository is available, fetching the lab start script name
+       from the course page (using the URL in the ticket), and then fetching the guide text,
+       then invoking further LLM analysis.
+    """
+
+    # 1. Classify the ticket
+    data = classify_ticket_llm(snow_info["Description"])
+    if not data.get("is_content_issue_ticket", False):
+        print(f"[INFO] This SNOW ticket {snow_info['snow_id']} doesn't appear to be a simple 'typo' issue.")
+        return
+
+    print(f"[INFO] SNOW ticket {snow_info['snow_id']} is recognized as a 'typo' feedback ticket.")
+
+    # 3. Ensure the repository is available
+    repo_dir = ensure_course_repo(snow_info["Course"].lower())
+
+    # 4. Retrieve some info from the course page to match with the local guide text
+    if snow_info["URL"] != "":
+        section_info = get_section_info(driver, snow_info["URL"])
+
+    # 5. Fetch local guide text using the guide info
+    local_guide_text = ""
+    if section_info != "":
+        local_guide_text = fetch_local_guide_text(section_info, repo_dir)
+    else:
+        print("[INFO] No course ID or lab script name found in the SNOW ticket.")
+        return
+    
+    if data.get("is_content_issue_ticket", False):
+        print(f"[INFO] This SNOW ticket {snow_info['snow_id']} is recognized as a 'content' issue feedback ticket.")
+    else:
+        print(f"[INFO] This SNOW ticket {snow_info['snow_id']} doesn't appear to be a simple 'content' issue.")
+        return
+
+    # 6. Perform a grep search for the most defining issue keyword in the local guide text or pass the whole text to the LLM
+    most_defining_issue_keyword = data.get("most_defining_issue_keyword", "")
+    print(f"[INFO] Most defining issue keyword: {most_defining_issue_keyword}")
+    grep_result = ""
+    if most_defining_issue_keyword:
+        grep_results = []
+        for keyword in most_defining_issue_keyword:
+            if keyword != "":
+                try:
+                    result = subprocess.run(
+                        ["grep", "-i", "-A2", keyword],
+                        input=local_guide_text,
+                        text=True,
+                        capture_output=True
+                    ).stdout
+                    grep_results.append(result)
+                    #print(f"[INFO] Grep result for keyword '{keyword}':\n{result}")
+                except subprocess.CalledProcessError as e:
+                    print(f"[ERROR] Grep command failed for keyword '{keyword}': {e}")
+        
+        guide_text = "\n".join(grep_results)
+        print(f"[INFO] Grep result:\n{guide_text}")
+    else:
+        guide_text = local_guide_text
+        print("[INFO] No defining issue keyword found in the LLM response.")
+
+    analysis_response = analyze_content_issue(snow_info["Description"], guide_text)
+    print("[LLM response]:\n", analysis_response)
+
+
+    # 7. Create a Jira ticket
+    # Parse the analysis response
+    analysis_response_json = json.loads(analysis_response)
+    if analysis_response_json.get("is_valid_issue", False):
+        create_jira(driver, snow_info, analysis_response_json)
+
+    # 8. Add work note in the SNOW ticket with the summary of the analysis
+    try:
+        # Create a work note with the analysis summary
+        work_note = f"Analysis of reported content issue:\n"
+        work_note += f"{analysis_response_json.get('summary', 'No summary available')}\n"
+
+        # Add the work note to the SNOW ticket
+        driver.switch_to.window(driver.window_handles[0])
+        switch_to_iframe(driver)
+        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(work_note)
+        
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] Failed to parse analysis response as JSON: {e}")
+    except Exception as e:
+        print(f"[ERROR] Failed to add work note to SNOW ticket: {e}")
+
+
+    # 9. Add a work note in the SNOW ticket to reply the student's feedback
+
+    
+    return
+
+
+def get_ticket_ids(driver) -> list:
+    """
+    Returns a list of ticket IDs from the ServiceNow ticket list.
+    It first checks if there are tickets on the page. If tickets are available,
+    it finds all anchor elements within the ticket table that have the class
+    'linked formlink' and extracts their text (the ticket IDs).
+    """
+    ticket_ids = []
+    try:
+        switch_to_iframe(driver)
+        # Check if there are any tickets available
+        tickets_in_line = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training"]/div[1]'))
+        ).text
+
+        if tickets_in_line.strip() == 'No records to display':
+            logging.info("No tickets to process for resolution.")
+            return ticket_ids
+
+        # Locate the ticket table body
+        table_body = WebDriverWait(driver, 3).until(
+            EC.presence_of_element_located((By.XPATH, '//tbody[@class="list2_body -sticky-group-headers"]'))
+        )
+
+        # Extract each ticket link (anchor) with the specified class.
+        ticket_elements = table_body.find_elements(By.XPATH, './/a[@class="linked formlink"]')
+        for ticket in ticket_elements:
+            ticket_id = ticket.text.strip()
+            if ticket_id:
+                ticket_ids.append(ticket_id)
+    except Exception as e:
+        logging.error(f"Error retrieving ticket IDs: {e}")
+
+    return ticket_ids
+
 
 # -------------------------------------------------------------------
 # Main driver (example)
@@ -595,26 +715,47 @@ def main():
     #    open_profile()
     #    time.sleep(3)  # Allow time for the browser to start
     #driver = get_chrome_driver()
-    driver = webdriver.Chrome()
-    driver.get("https://rol.redhat.com/")
-    login(driver)
-    time.sleep(5)
-    check_cookies(driver)
-    time.sleep(5)
-
-    # List of SNOW tickets to process
-    snow_tickets = [
-        "RHT2315790",
-        "RHT2319171",  # Example ticket
-        "RHT2332936"
-    ]
 
     # Process each ticket
+    drivers = []  # List to store driver instances
+    new_driver = webdriver.Chrome()
+    drivers.append(new_driver)
+    new_driver.get("https://rol.redhat.com/")
+
+    # Process the ticket in the new tab
+    login(new_driver)
+    time.sleep(3)
+    check_cookies(new_driver)
+    time.sleep(2)
+    new_driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN1%252C2%252C-2%252C14%252C13%252C15%252C16%252C17%252C18%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    new_driver.refresh()
+
+    snow_tickets = get_ticket_ids(new_driver)
+    print(f"[INFO] Found {len(snow_tickets)} tickets to process.")
+
     for ticket_id in snow_tickets:
-        print(f"\nProcessing ticket {ticket_id}...")
-        handle_snow_typo_ticket(driver, ticket_id)
+        try:
+            # Create a new Chrome driver instance that opens a new browser window
+            new_driver = webdriver.Chrome()
+            drivers.append(new_driver)
+            new_driver.get("https://rol.redhat.com/")
+
+            # Process the ticket in the new tab
+            login(new_driver)
+            time.sleep(5)
+            check_cookies(new_driver)
+            time.sleep(5)
+
+            print(f"\nProcessing ticket {ticket_id}...")
+            snow_info = get_snow_info(new_driver, ticket_id)
+            handle_snow_ticket(new_driver, snow_info)
+        except Exception as e:
+            print(f"[ERROR] Failed to process ticket {ticket_id}: {e}")
+            continue
 
     # driver.quit()  # close the browser if desired
-    time.sleep(500)
+    time.sleep(1000000000)
+
+
 if __name__ == "__main__":
     main()
