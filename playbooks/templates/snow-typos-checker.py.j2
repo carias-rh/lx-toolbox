@@ -13,8 +13,12 @@ from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
+
 import requests
 import logging
+from urllib.parse import quote
 
 # -------------------------------------------------------------------
 # Configurable constants for local paths, etc.
@@ -58,6 +62,28 @@ def check_running_session():
         return int(pid)
     else:
         return 0
+
+# -------------------------------------------------------------------
+# Function to set up the Selenium driver for Chrome
+# -------------------------------------------------------------------
+def get_chrome_driver() -> webdriver.Chrome:
+    """
+    Returns a Selenium Chrome WebDriver configured to use the
+    remote debugging port and user data directory.
+    """
+    options = webdriver.ChromeOptions()
+    options.add_argument("--ignore-certificate-errors")
+    options.add_argument("--window-size=1600,1200")
+    # Attach to our debug port and user data directory
+    options.add_experimental_option("debuggerAddress", f"localhost:{CHROME_DEBUG_PORT}")
+    options.add_argument(f"--user-data-dir={CHROME_USER_DATA_DIR}")
+
+    try:
+        driver = webdriver.Chrome(options=options)
+        return driver
+    except Exception as e:
+        print(f"[ERROR] Unable to start Chrome driver: {e}")
+        raise
 
 
 # -------------------------------------------------------------------
@@ -121,27 +147,6 @@ def ask_gpt4_mini(prompt: str) -> str:
         print(f"[ERROR] GPT-4o-mini API request failed: {e}")
         return ""
 
-# -------------------------------------------------------------------
-# Function to set up the Selenium driver for Chrome
-# -------------------------------------------------------------------
-def get_chrome_driver() -> webdriver.Chrome:
-    """
-    Returns a Selenium Chrome WebDriver configured to use the
-    remote debugging port and user data directory.
-    """
-    options = webdriver.ChromeOptions()
-    options.add_argument("--ignore-certificate-errors")
-    options.add_argument("--window-size=1600,1200")
-    # Attach to our debug port and user data directory
-    options.add_experimental_option("debuggerAddress", f"localhost:{CHROME_DEBUG_PORT}")
-    options.add_argument(f"--user-data-dir={CHROME_USER_DATA_DIR}")
-
-    try:
-        driver = webdriver.Chrome(options=options)
-        return driver
-    except Exception as e:
-        print(f"[ERROR] Unable to start Chrome driver: {e}")
-        raise
 
 def switch_to_iframe(driver):
     driver.switch_to.default_content()
@@ -182,17 +187,11 @@ def check_cookies(driver):
     except Exception:
         pass
 
-
-def login(driver):
-    """
-    Logs into the course website based on the lab_environment setting.
-    The values for credentials should be passed in from Ansible.
-    """
-    step("Login into RHLS production environment")
+def login_rol(driver):
+    step("Login into ROL platform")
     try:
-
         check_cookies(driver)
-        WebDriverWait(driver, 2).until(EC.element_to_be_clickable(
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(
             (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input"))).send_keys("{{ rh_username }}@redhat.com")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
 
@@ -204,6 +203,38 @@ def login(driver):
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
     except:
         print("Login failed")
+
+
+def login_snow(driver):
+    """
+    Logs into the course website based on the lab_environment setting.
+    The values for credentials should be passed in from Ansible.
+    """
+    step("Login into RHLS production environment")
+    try:
+
+        # RH SSO
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
+    except:
+        print("Login failed")
+
+def jira_login(driver):
+    try:
+        driver.get("https://issues.redhat.com/projects/PTL/issues")
+        time.sleep(5)
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a'))).click()
+        time.sleep(10)
+
+        check_cookies(driver)
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username-verification"]'))).send_keys("{{ username }}" + "@redhat.com")
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
+        time.sleep(5)
+        driver.get("https://issues.redhat.com/projects/PTL/issues")
+    except:
+        print("An exception occurred during jira login")
 
 def wait_for_site_to_be_ready():
     try:
@@ -264,7 +295,7 @@ def classify_ticket_llm(description: str) -> dict:
     prompt = f"""
 Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
 - student_feedback (the user's feedback)
-- most_defining_issue_keyword (a list of 3 substantive words (not verbs or adjectives) from the *User feedback* that are the most unique and less generic that will be used to grep the guide text)
+- most_defining_issue_keyword (a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic)
 - is_content_issue_ticket (true/false)
 - is_environment_issue (true/false)
 - confidence (a float from 0.0 to 1.0)
@@ -339,13 +370,13 @@ def get_section_info(driver, course_url: str) -> str:
         driver.execute_script("window.open()");
         driver.switch_to.window(driver.window_handles[-1]);
         driver.get(course_url)
-        check_cookies(driver)
+        login_rol(driver)
         # Optionally, if login is enforced here, call:
         # login(driver, lab_environment, rh_username, username, pin, github_username, github_password)
         # You can pass the required credentials from Ansible variables.
         #login(driver)
 
-        time.sleep(4)  # Allow time for the page to load completely
+        time.sleep(5)  # Allow time for the page to load completely
         
         # If your course page has tabs, you might need to select the "course" tab
         select_lab_environment_tab(driver, "course")
@@ -402,7 +433,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-            "analysis": "think here step by step, understand what the guide text is about, and compare it with the student's feedback",
+            "analysis": "think in this value step by step, compare the student's feedback with the guide text, and provide a detailed analysis of the issue",",
             "is_valid_issue": true/false,
             "content_issue_location": "location/step where the content issue appears",
             "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
@@ -439,28 +470,9 @@ Do not include any explanations or markdown formatting outside the JSON object.
 
 
 
-def jira_login(driver):
-    #try:
-        driver.get("https://issues.redhat.com")
-        time.sleep(2)
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a'))).click()
-        
-        #check_cookies()
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username-verification"]'))).send_keys("{{ username }}" + "@redhat.com")
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
-    #except:
-    #    print("An exception occurred during jira login")
-
-def wait_jira_loaded(driver):
-    try:
-        WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH,'//*[@class="aui-button aui-button-primary aui-style create-issue "]')))
-    except:
-        WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, '//*[@class="aui-nav-link login-link"]')))
-
-
 def get_snow_info(driver, snow_id):
     driver.get('https://redhat.service-now.com/surl.do?n=' + snow_id + '')
+    time.sleep(10)
     switch_to_iframe(driver)
 
     # Get description
@@ -471,6 +483,10 @@ def get_snow_info(driver, snow_id):
     course = re.findall("Course:.*", description)[0].split(":  ")[1].upper().replace(" ", "")
     version = re.findall("Version:.*", description)[0].split(":  ")[1]
     url = re.findall("URL:.*", description)[0].split(":  ")[1]
+    if "role.rhu.redhat.com/rol-rhu" in url:
+        url = url.replace("role.rhu.redhat.com/rol-rhu", "rol.redhat.com/rol")
+
+    # Get chapter and section
     try:
         chapter = re.findall("ch[0-9][0-9]", url)[0].split("ch")[1]
     except:
@@ -493,6 +509,7 @@ def get_snow_info(driver, snow_id):
         "Title": title,
         "RHNID": rhnid,
     }
+    driver.refresh()
     return snow_info
 
 def select_dropdown(element, input):
@@ -501,18 +518,14 @@ def select_dropdown(element, input):
     element.send_keys(input)
     element.send_keys(Keys.TAB)
 
-def switch_to_tab(tabname):
+def switch_to_tab(driver, tabname):
     WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, f'//ul[@role="tablist"]//strong[text()="{tabname}"]'))).click()
 
 
-
 def create_jira(driver, snow_info, analysis_response):
-    # Switch to new tab
-    driver.execute_script("window.open('');")
-    driver.switch_to.window(driver.window_handles[-1])
 
-    jira_login(driver)
-    driver.get('https://issues.redhat.com/projects/PTL/issues')
+    driver.get("https://issues.redhat.com/projects/PTL/issues")
+    time.sleep(5)
 
     # Click Create
     WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="create_link"]'))).click()
@@ -563,12 +576,49 @@ def create_jira(driver, snow_info, analysis_response):
     version.send_keys(Keys.HOME)
 
     # Change to priority tab and change priority
-    switch_to_tab('Priority')
+    switch_to_tab(driver, 'Priority')
     priority_dropdown = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
     select_dropdown(priority_dropdown, "Minor")
-    switch_to_tab('Field Tab')
+    switch_to_tab(driver, 'Field Tab')
 
 
+def search_jira_ticket(driver, snow_info):
+    """
+    Searches for similar Jira tickets by constructing a customized URL.
+    It uses the analysis_response_json info to query the LLM and extract the single most
+    unique and defining word that best captures the core issue. This word is then used in 
+    the JQL query to find previous tickets with the same issue.
+    
+    The URL format should be that of a Jira search, not a specific issue.
+    """
+    # Construct a prompt to extract the single most unique and defining word from the analysis details.
+    prompt =  (
+        f"You are an expert technical keyword extractor."
+        f"From this information, identify the single most defining and significant technical term that encapsulate the core issue reported."
+        f"Consider any technical names—this can include lab script names (like 'declarative-review'), directory names (/home/student/DO280), OpenShift deployment names, Ansible modules, specific commands, or any other technical identifier mentioned."
+        f"Output only ONE term with no additional explanation from the student's feedback."
+        f"<feedback> {snow_info['Description']} </feedback>"
+
+    )
+
+    llm_response = askOllama(prompt)
+    extracted_keyword = llm_response.strip()
+    print(f"[INFO] LLM extracted keyword: {extracted_keyword}")
+    
+    # Use the extracted keyword if available; otherwise, fallback to the initial keyword.
+    final_keyword = extracted_keyword if extracted_keyword else initial_keyword
+
+    # Get the course value from snow_info to be used as the component.
+    course = snow_info.get("Course", "")
+
+    # Build the JQL query including unresolved tickets.
+    jql = f'project = PTL AND resolution = Unresolved AND component = "{course}" AND text ~ "{final_keyword}" ORDER BY priority DESC, updated DESC'
+    encoded_jql = quote(jql)
+    search_url = f"https://issues.redhat.com/issues/?jql={encoded_jql}"
+
+    print(f"[INFO] Jira search URL: {search_url}")
+    driver.get(search_url)
+    time.sleep(5)  # Allow time for the search results page to load.
 
 
 # -------------------------------------------------------------------
@@ -622,18 +672,15 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
             if keyword != "":
                 try:
                     result = subprocess.run(
-                        ["grep", "-i", "-A2", keyword],
+                        ["grep", "-i", keyword],
                         input=local_guide_text,
                         text=True,
                         capture_output=True
                     ).stdout
                     grep_results.append(result)
-                    #print(f"[INFO] Grep result for keyword '{keyword}':\n{result}")
                 except subprocess.CalledProcessError as e:
                     print(f"[ERROR] Grep command failed for keyword '{keyword}': {e}")
-        
         guide_text = "\n".join(grep_results)
-        print(f"[INFO] Grep result:\n{guide_text}")
     else:
         guide_text = local_guide_text
         print("[INFO] No defining issue keyword found in the LLM response.")
@@ -642,20 +689,19 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
     print("[LLM response]:\n", analysis_response)
 
 
-    # 7. Create a Jira ticket
     # Parse the analysis response
     analysis_response_json = json.loads(analysis_response)
-    if analysis_response_json.get("is_valid_issue", False):
-        create_jira(driver, snow_info, analysis_response_json)
 
-    # 8. Add work note in the SNOW ticket with the summary of the analysis
+    # 7. Add work note in the SNOW ticket with the summary of the analysis
     try:
-        # Create a work note with the analysis summary
-        work_note = f"Analysis of reported content issue:\n"
+        # Create a work note with the summary
+        work_note = f"Summary of the analysis:\n"
         work_note += f"{analysis_response_json.get('summary', 'No summary available')}\n"
 
         # Add the work note to the SNOW ticket
         driver.switch_to.window(driver.window_handles[0])
+        driver.refresh()
+        time.sleep(5)
         switch_to_iframe(driver)
         WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(work_note)
         
@@ -664,8 +710,26 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
     except Exception as e:
         print(f"[ERROR] Failed to add work note to SNOW ticket: {e}")
 
+    # 8. Add a work note in the SNOW ticket to reply the student's feedback
 
-    # 9. Add a work note in the SNOW ticket to reply the student's feedback
+
+    # 9. Create a Jira ticket
+    if analysis_response_json.get("is_valid_issue", False):
+        # Switch to new tab
+        # Move to the latest tab before opening a new one
+        driver.switch_to.window(driver.window_handles[-1])
+        driver.execute_script("window.open('');")
+        driver.switch_to.window(driver.window_handles[-1])
+        jira_login(driver)
+
+        # 9.1 Search for similar Jira tickets
+        search_jira_ticket(driver, snow_info)
+
+        # 9.2 Create a Jira ticket in a new tab
+        driver.execute_script("window.open('');")
+        driver.switch_to.window(driver.window_handles[-1])
+        create_jira(driver, snow_info, analysis_response_json)
+
 
     
     return
@@ -707,6 +771,11 @@ def get_ticket_ids(driver) -> list:
     return ticket_ids
 
 
+
+
+#options.add_argument(f"--user-data-dir={CHROME_USER_DATA_DIR}")
+
+
 # -------------------------------------------------------------------
 # Main driver (example)
 # -------------------------------------------------------------------
@@ -718,30 +787,56 @@ def main():
 
     # Process each ticket
     drivers = []  # List to store driver instances
-    new_driver = webdriver.Chrome()
+
+    new_driver = webdriver.Firefox()
+
     drivers.append(new_driver)
-    new_driver.get("https://rol.redhat.com/")
+    new_driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
 
     # Process the ticket in the new tab
-    login(new_driver)
-    time.sleep(3)
-    check_cookies(new_driver)
-    time.sleep(2)
-    new_driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN1%252C2%252C-2%252C14%252C13%252C15%252C16%252C17%252C18%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
-    new_driver.refresh()
+    login_snow(new_driver)
+    time.sleep(10)
+    #login_rol(new_driver)
+
+#    snow_info = {
+#        "snow_id": "1234567890",
+#        "Description": "Cannot build http-client image, cannot pull source image: Error: creating build container: initializing source docker://registry.lab.example.com/rhel9/php-82:1-15: reading manifest 1-15 in registry.lab.example.com/rhel9/php-82: unauthorized: access to the requested resource is not authorized",
+#        "Course": "RH199",
+#        "Version": "1.0",
+#        "URL": "https://www.redhat.com",
+#        "Chapter": "1",
+#        "Section": "1",
+#        "Title": "Test Title",
+#        "RHNID": "test@redhat.com"
+#    }
+#
+#    #jira_login(new_driver)
+#    time.sleep(4)
+#    analysis_response_json =  {
+#            "analysis": "The student's feedback indicates that the 'labs declarative-review' and 'declarative-kustomize' sections are failing at waiting for the cluster phase. To analyze this, we need to examine the guide text for relevant instructions or commands related to waiting for the cluster phase.",
+#            "is_valid_issue": True,
+#            "content_issue_location": "The specific location/step where the content issue appears is not provided in the guide text excerpt.",
+#            "suggested_correction": "Include explicit commands or steps to wait for the cluster phase, such as 'kubectl wait --for=condition=Ready pod --all --timeout=600s' or similar. Ensure proper error handling and retries if necessary.",
+#            "confidence": 0.85,
+#            "summary": "Student reports failure in waiting for cluster phase during 'declarative-review' and 'declarative-kustomize' labs. Guide text needs to include relevant commands/steps for this process."
+#            }
+#    search_jira_ticket(new_driver, snow_info)
+
 
     snow_tickets = get_ticket_ids(new_driver)
     print(f"[INFO] Found {len(snow_tickets)} tickets to process.")
 
     for ticket_id in snow_tickets:
         try:
-            # Create a new Chrome driver instance that opens a new browser window
-            new_driver = webdriver.Chrome()
+            # Create a new Firefox driver instance that opens a new browser window
+            new_driver = webdriver.Firefox()
+            new_driver.maximize_window()
             drivers.append(new_driver)
-            new_driver.get("https://rol.redhat.com/")
+
+            new_driver.get(f"https://redhat.service-now.com/surl.do?n={ticket_id}")
 
             # Process the ticket in the new tab
-            login(new_driver)
+            login_snow(new_driver)
             time.sleep(5)
             check_cookies(new_driver)
             time.sleep(5)
@@ -759,3 +854,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
