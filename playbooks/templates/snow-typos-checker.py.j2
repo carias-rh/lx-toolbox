@@ -596,7 +596,7 @@ def search_jira_ticket(driver, snow_info):
         f"You are an expert technical keyword extractor."
         f"From this information, identify the single most defining and significant technical term that encapsulate the core issue reported."
         f"Consider any technical names—this can include lab script names (like 'declarative-review'), directory names (/home/student/DO280), OpenShift deployment names, Ansible modules, specific commands, or any other technical identifier mentioned."
-        f"Output only ONE term with no additional explanation from the student's feedback."
+        f"Output only ONE term with no additional explanation from the student's feedback. Just ONE keyword, no quotes, no explanation, no nothing else."
         f"<feedback> {snow_info['Description']} </feedback>"
 
     )
