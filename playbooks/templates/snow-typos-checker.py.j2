@@ -610,9 +610,13 @@ def search_jira_ticket(driver, snow_info):
 
     # Get the course value from snow_info to be used as the component.
     course = snow_info.get("Course", "")
+    if snow_info["Section"] != "":
+        chapter_and_section = f'ch{snow_info["Chapter"]}s{snow_info["Section"]}'
+    else:
+        chapter_and_section = f'ch{snow_info["Chapter"]}'
 
     # Build the JQL query including unresolved tickets.
-    jql = f'project = PTL AND resolution = Unresolved AND component = "{course}" AND text ~ "{final_keyword}" ORDER BY priority DESC, updated DESC'
+    jql = f'project = PTL AND resolution = Unresolved AND description ~ {chapter_and_section} AND component = "{course}" AND text ~ {final_keyword} ORDER BY priority DESC, updated DESC'
     encoded_jql = quote(jql)
     search_url = f"https://issues.redhat.com/issues/?jql={encoded_jql}"
 
@@ -729,9 +733,6 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         driver.execute_script("window.open('');")
         driver.switch_to.window(driver.window_handles[-1])
         create_jira(driver, snow_info, analysis_response_json)
-
-
-    
     return
 
 
