@@ -204,6 +204,67 @@ def login_rol(driver):
     except:
         print("Login failed")
 
+def start_lab(driver):
+    step("Starting lab")
+    try:
+        select_lab_environment_tab(driver, "lab")
+        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Start") or contains(text(), "Create")]'))).click()
+        increase_autostop(driver)
+        increase_lifespan(driver)
+    except:
+        print("Failed to start lab")
+    time.sleep(5)
+
+
+
+def check_lab_status_button(first_or_second_button):
+    if first_or_second_button == "first":
+        # Check lab status and start it if stopped or not created. The exception is needed because some courses don't work with the function contains(text(),"")
+        try:
+            # Try with first button first
+            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][1][contains(text(), "Create") or contains(text(), "Delete") or contains(text(), "Deleting") or contains(text(), "Creating")]'))).text
+        except:
+            # Else try with second button
+            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+    elif first_or_second_button == "second":
+        try:
+            # Try with second button first
+            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+        except:
+            # Else try with first button
+            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+    #print("Lab button is: " + lab_status_button)
+    return lab_status_button
+
+
+def increase_autostop(driver):
+    step("Increasing auto-stop counter")
+    try:
+        select_lab_environment_tab(driver, "lab")
+        # Wait until lab has been created and is running
+        if check_lab_status_button("first") == "CREATING": time.sleep(30)
+        elif check_lab_status_button("second") == "STARTING": time.sleep(15)
+
+        increase_autostop = WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
+
+        for i in range(30):
+            increase_autostop.click()
+    except:
+        pass
+
+
+def increase_lifespan(driver):
+    step("Increasing auto-destroy counter")
+    try:
+        select_lab_environment_tab(driver, "lab")
+        increase_lifespan = WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')))
+
+        for i in range(30):
+            increase_lifespan.click()
+    except:
+        pass
 
 def login_snow(driver):
     """
@@ -295,7 +356,7 @@ def classify_ticket_llm(description: str) -> dict:
     prompt = f"""
 Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
 - student_feedback (the user's feedback)
-- most_defining_issue_keyword (a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic)
+- most_defining_issue_keyword (a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic. Also, consider as a single keyword a whole linux command with parameters (i.e "sudo chown -R jboss:jboss /opt/domain"))
 - is_content_issue_ticket (true/false)
 - is_environment_issue (true/false)
 - confidence (a float from 0.0 to 1.0)
@@ -468,7 +529,41 @@ Do not include any explanations or markdown formatting outside the JSON object.
     analysis_response = askOllama(prompt_text)
     return analysis_response
 
+def analyze_environment_issue(user_issue: str) -> str:
+    """
+    Analyzes a potential environment issue by comparing user feedback with guide text.
+    
+    Args:
+        user_issue: The user's reported issue/feedback
+        
+    Returns:
+        str: JSON response from LLM analysis
+    """
+    json_example = '''{
+            "analysis": "think in this value step by step, compare the student's feedback with the guide text, and provide a detailed analysis of the issue",",
+            "is_valid_issue": true/false if a debug of the lab environment is needed,
+            "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
+            "confidence": "a float value between 0 and 1 indicating your confidence",
+            "summary": "a short summary of your analysis"
+            }'''
 
+    prompt_text = f"""
+We have a student who reported an issue within the lab environment. The student's feedback is:
+<student_feedback>
+{user_issue}
+</student_feedback>
+
+Return your analysis in exactly the following JSON format without any extra text:
+<json_example>
+{json_example}
+</json_example>
+
+Do not include any explanations or markdown formatting outside the JSON object.
+"""
+    global analysis_response
+    #analysis_response = ask_gpt4_mini(prompt_text)
+    analysis_response = askOllama(prompt_text)
+    return analysis_response
 
 def get_snow_info(driver, snow_id):
     driver.get('https://redhat.service-now.com/surl.do?n=' + snow_id + '')
@@ -662,77 +757,83 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
     
     if data.get("is_content_issue_ticket", False):
         print(f"[INFO] This SNOW ticket {snow_info['snow_id']} is recognized as a 'content' issue feedback ticket.")
-    else:
-        print(f"[INFO] This SNOW ticket {snow_info['snow_id']} doesn't appear to be a simple 'content' issue.")
-        return
 
-    # 6. Perform a grep search for the most defining issue keyword in the local guide text or pass the whole text to the LLM
-    most_defining_issue_keyword = data.get("most_defining_issue_keyword", "")
-    print(f"[INFO] Most defining issue keyword: {most_defining_issue_keyword}")
-    grep_result = ""
-    if most_defining_issue_keyword:
-        grep_results = []
-        for keyword in most_defining_issue_keyword:
-            if keyword != "":
-                try:
-                    result = subprocess.run(
-                        ["grep", "-i", keyword],
-                        input=local_guide_text,
-                        text=True,
-                        capture_output=True
-                    ).stdout
-                    grep_results.append(result)
-                except subprocess.CalledProcessError as e:
-                    print(f"[ERROR] Grep command failed for keyword '{keyword}': {e}")
-        guide_text = "\n".join(grep_results)
-    else:
-        guide_text = local_guide_text
-        print("[INFO] No defining issue keyword found in the LLM response.")
+        # 6. Perform a grep search for the most defining issue keyword in the local guide text or pass the whole text to the LLM
+        most_defining_issue_keyword = data.get("most_defining_issue_keyword", "")
+        print(f"[INFO] Most defining issue keyword: {most_defining_issue_keyword}")
+        grep_result = ""
+        if most_defining_issue_keyword:
+            grep_results = []
+            for keyword in most_defining_issue_keyword:
+                if keyword != "":
+                    try:
+                        result = subprocess.run(
+                            ["grep", "-i", keyword],
+                            input=local_guide_text,
+                            text=True,
+                            capture_output=True
+                        ).stdout
+                        grep_results.append(result)
+                    except subprocess.CalledProcessError as e:
+                        print(f"[ERROR] Grep command failed for keyword '{keyword}': {e}")
+            guide_text = "\n".join(grep_results)
+        else:
+            guide_text = local_guide_text
+            print("[INFO] No defining issue keyword found in the LLM response.")
 
-    analysis_response = analyze_content_issue(snow_info["Description"], guide_text)
-    print("[LLM response]:\n", analysis_response)
+        analysis_content_response = analyze_content_issue(snow_info["Description"], guide_text)
+        print("[LLM response]:\n", analysis_content_response)
+        analysis_response_json = json.loads(analysis_content_response)
 
+    elif data.get("is_environment_issue", False):
+        print(f"[INFO] This SNOW ticket {snow_info['snow_id']} is recognized as an 'environment' issue feedback ticket.")
 
-    # Parse the analysis response
-    analysis_response_json = json.loads(analysis_response)
+        analysis_environment_response = analyze_environment_issue(snow_info["Description"])
+        print("[LLM response]:\n", analysis_environment_response)
+        analysis_response_json = json.loads(analysis_environment_response)
 
-    # 7. Add work note in the SNOW ticket with the summary of the analysis
-    try:
-        # Create a work note with the summary
-        work_note = f"Summary of the analysis:\n"
-        work_note += f"{analysis_response_json.get('summary', 'No summary available')}\n"
+        if analysis_response_json.get("is_valid_issue", False):
+            start_lab(driver)
+                
 
-        # Add the work note to the SNOW ticket
-        driver.switch_to.window(driver.window_handles[0])
-        driver.refresh()
-        time.sleep(5)
-        switch_to_iframe(driver)
-        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(work_note)
-        
-    except json.JSONDecodeError as e:
-        print(f"[ERROR] Failed to parse analysis response as JSON: {e}")
-    except Exception as e:
-        print(f"[ERROR] Failed to add work note to SNOW ticket: {e}")
-
-    # 8. Add a work note in the SNOW ticket to reply the student's feedback
-
-
-    # 9. Create a Jira ticket
     if analysis_response_json.get("is_valid_issue", False):
-        # Switch to new tab
-        # Move to the latest tab before opening a new one
-        driver.switch_to.window(driver.window_handles[-1])
-        driver.execute_script("window.open('');")
-        driver.switch_to.window(driver.window_handles[-1])
-        jira_login(driver)
+        # 7. Add work note in the SNOW ticket with the summary of the analysis
+        try:
+            # Create a work note with the summary
+            work_note = f"Summary of the analysis:\n"
+            work_note += f"{analysis_response_json.get('summary', 'No summary available')}\n"
 
-        # 9.1 Search for similar Jira tickets
-        search_jira_ticket(driver, snow_info)
+            # Add the work note to the SNOW ticket
+            driver.switch_to.window(driver.window_handles[0])
+            driver.refresh()
+            time.sleep(5)
+            switch_to_iframe(driver)
+            WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(work_note)
+            
+        except json.JSONDecodeError as e:
+            print(f"[ERROR] Failed to parse analysis response as JSON: {e}")
+        except Exception as e:
+            print(f"[ERROR] Failed to add work note to SNOW ticket: {e}")
 
-        # 9.2 Create a Jira ticket in a new tab
-        driver.execute_script("window.open('');")
-        driver.switch_to.window(driver.window_handles[-1])
-        create_jira(driver, snow_info, analysis_response_json)
+        # 8. Add a work note in the SNOW ticket to reply the student's feedback
+
+
+        # 9. Create a Jira ticket
+        if analysis_response_json.get("is_valid_issue", False):
+            # Switch to new tab
+            # Move to the latest tab before opening a new one
+            driver.switch_to.window(driver.window_handles[-1])
+            driver.execute_script("window.open('');")
+            driver.switch_to.window(driver.window_handles[-1])
+            jira_login(driver)
+
+            # 9.1 Search for similar Jira tickets
+            search_jira_ticket(driver, snow_info)
+
+            # 9.2 Create a Jira ticket in a new tab
+            driver.execute_script("window.open('');")
+            driver.switch_to.window(driver.window_handles[-1])
+            create_jira(driver, snow_info, analysis_response_json)
     return
 
 
