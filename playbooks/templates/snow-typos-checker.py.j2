@@ -734,11 +734,6 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
 
     # 1. Classify the ticket
     data = classify_ticket_llm(snow_info["Description"])
-    if not data.get("is_content_issue_ticket", False):
-        print(f"[INFO] This SNOW ticket {snow_info['snow_id']} doesn't appear to be a simple 'typo' issue.")
-        return
-
-    print(f"[INFO] SNOW ticket {snow_info['snow_id']} is recognized as a 'typo' feedback ticket.")
 
     # 3. Ensure the repository is available
     repo_dir = ensure_course_repo(snow_info["Course"].lower())
