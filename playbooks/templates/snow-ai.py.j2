@@ -361,7 +361,7 @@ def classify_ticket_llm(description: str) -> dict:
         }'''
     prompt = f"""
         Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
-        - student_feedback (the user's feedback as it is, without any changes, in english)
+        - student_feedback (the user's feedback as it is, without any changes, translated to english from any language)
         - most_defining_issue_keyword (a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic. Also, consider as a single keyword a whole linux command with parameters (i.e "sudo chown -R jboss:jboss /opt/domain"))
         - is_content_issue_ticket (true/false)
         - is_environment_issue (true/false)
@@ -504,7 +504,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-        "analysis": "think in this value step by step, compare the student's feedback with the guide text, and provide a detailed analysis of the issue",",
+        "analysis": "think in this value step by step, compare the student_feedback with the guide_text, and provide a detailed analysis of the issue. Be critical with the student's feedback, as it is not always correct, and the guide_text is the source of truth. Extend the analysis as much as possible.",
         "is_valid_issue": true/false,
         "content_issue_location": "location/step where the content issue appears",
         "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
