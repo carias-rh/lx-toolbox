@@ -11,6 +11,6 @@
   tasks:
     - name: Generate SNOW Typos Checker script
       ansible.builtin.template:
-        src: templates/snow-typos-checker.py.j2
-        dest: "/tmp/snow-typos-checker.py"
+        src: templates/snow-ai.py.j2
+        dest: "/tmp/snow-ai.py"
         mode: '0755'

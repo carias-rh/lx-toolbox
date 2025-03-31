@@ -9,6 +9,7 @@ import re
 import subprocess
 import time
 import json
+import logging
 from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -17,8 +18,18 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 
 import requests
-import logging
 from urllib.parse import quote
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('snow_typos_checker.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # -------------------------------------------------------------------
 # Configurable constants for local paths, etc.
@@ -32,10 +43,10 @@ CHROME_USER_DATA_DIR = "{{ ansible_env.HOME}}/.config/google-chrome/snow-typos"
 counter = 1
 # Prints the current step
 def step(step_str, patience=1):
-    global counter
-    print(f"Step {counter}: {step_str}")
+    global step_counter
+    print(f"Step {step_counter}: {step_str}")
     print('-' * 40)
-    counter += 1
+    step_counter += 1
     time.sleep(patience)
 
 # -------------------------------------------------------------------
@@ -82,7 +93,7 @@ def get_chrome_driver() -> webdriver.Chrome:
         driver = webdriver.Chrome(options=options)
         return driver
     except Exception as e:
-        print(f"[ERROR] Unable to start Chrome driver: {e}")
+        logger.error(f"Unable to start Chrome driver: {e}")
         raise
 
 
@@ -111,7 +122,7 @@ def askOllama(prompt: str) -> str:
         )
         return result.stdout.strip()
     except Exception as e:
-        print(f"[ERROR] Could not run Ollama: {e}")
+        logger.error(f"Could not run Ollama: {e}")
         return ""
 
 
@@ -126,7 +137,7 @@ def ask_gpt4_mini(prompt: str) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     api_url = "https://api.openai.com/v1/chat/completions"
     if not api_key or not api_url:
-        print("[ERROR] GPT4_MINI_API_KEY or GPT4_MINI_API_URL environment variable not set.")
+        logger.error("GPT4_MINI_API_KEY or GPT4_MINI_API_URL environment variable not set.")
         return ""
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -146,7 +157,7 @@ def ask_gpt4_mini(prompt: str) -> str:
         # Adjust the following line if the returned JSON structure differs.
         return result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
     except Exception as e:
-        print(f"[ERROR] GPT-4o-mini API request failed: {e}")
+        logger.error(f"GPT-4o-mini API request failed: {e}")
         return ""
 
 
@@ -174,7 +185,7 @@ def accept_cookies(driver):
         driver.refresh()
     except Exception as e:
         driver.refresh()
-        print("[WARNING] accept_cookies failed:", e)
+        logger.warning("accept_cookies failed:", e)
 
 def check_cookies(driver):
     """
@@ -204,7 +215,7 @@ def login_rol(driver):
         #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
         #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
     except:
-        print("Login failed")
+        logger.error("Login failed")
 
 def start_lab(driver):
     step("Starting lab")
@@ -214,7 +225,7 @@ def start_lab(driver):
         increase_autostop(driver)
         increase_lifespan(driver)
     except:
-        print("Failed to start lab")
+        logger.error("Failed to start lab")
     time.sleep(5)
 
 
@@ -281,14 +292,14 @@ def login_snow(driver):
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
     except:
-        print("Login failed")
+        logger.error("Login failed")
 
 def jira_login(driver):
     try:
         driver.get("https://issues.redhat.com/projects/PTL/issues")
         time.sleep(5)
         WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a'))).click()
-        time.sleep(10)
+        time.sleep(3)
 
         #check_cookies(driver)
         #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username-verification"]'))).send_keys("{{ username }}" + "@redhat.com")
@@ -297,7 +308,7 @@ def jira_login(driver):
         #time.sleep(5)
         #driver.get("https://issues.redhat.com/projects/PTL/issues")
     except Exception as e:
-        print("An exception occurred during jira login:", e)
+        logger.error("An exception occurred during jira login:", e)
 
 
 
@@ -324,7 +335,7 @@ def select_lab_environment_tab(driver, tab_name):
             time.sleep(0.1)
             select_lab_environment_tab(driver, tab_name)
     except:
-        print("[WARNING] Lab environment tab not selected successfully. Retrying...")
+        logger.warning("Lab environment tab not selected successfully. Retrying...")
         check_cookies(driver)
         time.sleep(2)
         select_lab_environment_tab(driver, tab_name)
@@ -371,7 +382,7 @@ def classify_ticket_llm(description: str) -> dict:
     try:
         return json.loads(classifying_response)
     except:
-        print("[ERROR] Could not parse JSON from LLM. Full response:", classifying_response)
+        logger.error("Could not parse JSON from LLM. Full response:", classifying_response)
         return {
             "student_feedback": "",
             "most_defining_issue_keyword": [],
@@ -398,13 +409,13 @@ def ensure_course_repo(course_id: str) -> str:
     repo_dir = os.path.join(LOCAL_CLONE_DIRECTORY, course_id)
     repo_url = f"git@github.com:RedHatTraining/{course_id}.git"
     if not os.path.exists(repo_dir):
-        print(f"[INFO] Repository not found at {repo_dir}. Cloning from {repo_url} ...")
+        logger.info(f"Repository not found at {repo_dir}. Cloning from {repo_url} ...")
         clone_cmd = f"git clone {repo_url} {repo_dir}"
         result = os.system(clone_cmd)
         if result != 0:
-            print(f"[ERROR] Failed to clone repository: {repo_url}")
+            logger.error(f"Failed to clone repository: {repo_url}")
     else:
-        print(f"[INFO] Repository found at {repo_dir}. Pulling latest changes...")
+        logger.info(f"Repository found at {repo_dir}. Pulling latest changes...")
         pull_cmd = f"cd {repo_dir} && git pull"
         os.system(pull_cmd)
     return repo_dir
@@ -440,11 +451,11 @@ def get_section_info(driver, course_url: str) -> str:
             EC.presence_of_element_located((By.XPATH, "//h3/a[not(contains(@id, 'objectives'))]//.. | //*[contains(text(), 'lab start')]"))
         ).text
 
-        print(f"[INFO] Found relevant section keyword: {relevant_section_info}")
+        logger.info(f"Found relevant section keyword: {relevant_section_info}")
         return relevant_section_info
 
     except Exception as e:
-        print(f"[ERROR] Could not retrieve lab start script name from {course_url}: {e}")
+        logger.error(f"Could not retrieve lab start script name from {course_url}: {e}")
         return ""
 
 
@@ -462,21 +473,21 @@ def fetch_local_guide_text(section_info: str, repo_dir: str = None) -> str:
         # Check for non-breaking space in "Red{nbsp}Hat" and replace with regular space
         if "Red Hat" in section_info:
             section_info = section_info.replace("Red Hat", "Red{nbsp}Hat")
-            print(f"[INFO] Replaced non-breaking space in 'Red Hat': {section_info}")
+            logger.info(f"Replaced non-breaking space in 'Red Hat': {section_info}")
 
         file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR} | grep -E 'ge.adoc|lecture.adoc|review.adoc|lab.adoc' | head -n1 | cut -d ':' -f1"
     
         try:
             content_file = subprocess.check_output(file_dir, shell=True).decode().strip()
-            print(f"[INFO] Content file path: {content_file}")
+            logger.info(f"Content file path: {content_file}")
             with open(content_file) as file:
                 content_file = file.read().strip()
         except Exception as e:
-            print(f"[ERROR] Could open file {content_file}: {e}")
+            logger.error(f"Could open file {content_file}: {e}")
             return ""            
         return content_file.strip()
     else:
-        print("[INFO] Not enough information to fetch local guide text.")
+        logger.info("Not enough information to fetch local guide text.")
         return ""
 
 
@@ -619,7 +630,7 @@ def switch_to_tab(driver, tabname):
 
 def create_jira(driver, snow_info, analysis_response):
 
-    print(f"[INFO] Creating Jira ticket for {snow_info['snow_id']}")
+    logger.info(f"Creating Jira ticket for {snow_info['snow_id']}")
 
     driver.get("https://issues.redhat.com/projects/PTL/issues")
     time.sleep(10)
@@ -664,10 +675,10 @@ def create_jira(driver, snow_info, analysis_response):
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[1]/button'))).click()
 
     # Change to priority tab and change priority
-    switch_to_tab('Priority')
+    switch_to_tab(driver, 'Priority')
     priority_dropdown = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
     select_dropdown(priority_dropdown, "Minor")
-    switch_to_tab('Field Tab')
+    switch_to_tab(driver, 'Field Tab')
 
     # Select Component (course)
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]'))).send_keys(snow_info["Course"])
@@ -703,7 +714,7 @@ def search_jira_ticket(driver, snow_info):
 
     llm_response = askOllama(prompt)
     extracted_keyword = json.loads(llm_response).get("keyword", "")
-    print(f"[INFO] LLM extracted keyword: {extracted_keyword}")
+    logger.info(f"LLM extracted keyword: {extracted_keyword}")
     
     # Use the extracted keyword if available; otherwise, fallback to the initial keyword.
     final_keyword = extracted_keyword if extracted_keyword else initial_keyword
@@ -727,7 +738,7 @@ def search_jira_ticket(driver, snow_info):
     encoded_jql = quote(jql)
     search_url = f"https://issues.redhat.com/issues/?jql={encoded_jql}"
 
-    print(f"[INFO] Jira search URL: {search_url}")
+    logger.info(f"Jira search URL: {search_url}")
     driver.get(search_url)
     time.sleep(5)  # Allow time for the search results page to load.
 
@@ -736,6 +747,7 @@ def reply_to_student(driver, snow_info, data):
     """
     Replies to the student's feedback in the SNOW ticket.
     """
+    # Standard reply for content issue tickets such as opening a jira ticket
     if data.get("is_content_issue_ticket", False):
         reply_text = f"""
 Dear {snow_info["full_name"].split(" ")[0]},
@@ -749,6 +761,8 @@ Carlos Arias
 Red Hat Learner Experience Team
 """
         WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text)
+
+    # Standard reply for environment issue in openshift labs
     elif data.get("is_environment_issue", False) and course in ["DO180", "DO280", "DO188", "DO288", "DO380", "DO480", "DO316", "DO322", "DO328", "DO370", "DO400"]:
         reply_text = f"""
 Dear {snow_info["full_name"].split(" ")[0]},
@@ -794,15 +808,15 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
     if section_info != "":
         local_guide_text = fetch_local_guide_text(section_info, repo_dir)
     else:
-        print("[INFO] No course ID or lab script name found in the SNOW ticket.")
+        logger.info("No course ID or lab script name found in the SNOW ticket.")
         return
     
     if data.get("is_content_issue_ticket", False):
-        print(f"[INFO] This SNOW ticket {snow_info['snow_id']} is recognized as a 'content' issue feedback ticket.")
+        logger.info(f"This SNOW ticket {snow_info['snow_id']} is recognized as a 'content' issue feedback ticket.")
 
         # 6. Perform a grep search for the most defining issue keyword in the local guide text or pass the whole text to the LLM
         most_defining_issue_keyword = data.get("most_defining_issue_keyword", "")
-        print(f"[INFO] Most defining issue keyword: {most_defining_issue_keyword}")
+        logger.info(f"Most defining issue keyword: {most_defining_issue_keyword}")
         grep_result = ""
         if most_defining_issue_keyword:
             grep_results = []
@@ -817,26 +831,26 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
                         ).stdout
                         grep_results.append(result)                            
                     except subprocess.CalledProcessError as e:
-                        print(f"[ERROR] Grep command failed for keyword '{keyword}': {e}")
+                        logger.error(f"Grep command failed for keyword '{keyword}': {e}")
             # Check if the grep results are getting too large
             if sum(len(result.splitlines()) for result in grep_results) > 15:
-                print("[INFO] Grep results exceed 15 lines, using full guide text instead.")
+                logger.info("Grep results exceed 15 lines, using full guide text instead.")
                 guide_text = local_guide_text
             else:
                 guide_text = "\n".join(grep_results)
         else:
             guide_text = local_guide_text
-            print("[INFO] No defining issue keyword found in the LLM response.")
+            logger.info("No defining issue keyword found in the LLM response.")
 
         analysis_content_response = analyze_content_issue(snow_info["Description"], guide_text)
-        print("[LLM response]:\n", analysis_content_response)
+        print(f"[LLM response]:\n{analysis_content_response}")
         analysis_response_json = json.loads(analysis_content_response)
 
     elif data.get("is_environment_issue", False):
-        print(f"[INFO] This SNOW ticket {snow_info['snow_id']} is recognized as an 'environment' issue feedback ticket.")
+        logger.info(f"This SNOW ticket {snow_info['snow_id']} is recognized as an 'environment' issue feedback ticket.")
 
         analysis_environment_response = analyze_environment_issue(snow_info["Description"])
-        print("[LLM response]:\n", analysis_environment_response)
+        print(f"[LLM response]:\n{analysis_environment_response}")
         analysis_response_json = json.loads(analysis_environment_response)
 
         if analysis_response_json.get("is_valid_issue", False):
@@ -894,7 +908,7 @@ def get_ticket_ids(driver) -> list:
         ).text
 
         if tickets_in_line.strip() == 'No records to display':
-            logging.info("No tickets to process for resolution.")
+            logger.info("No tickets to process for resolution.")
             return ticket_ids
 
         # Locate the ticket table body
@@ -909,7 +923,7 @@ def get_ticket_ids(driver) -> list:
             if ticket_id:
                 ticket_ids.append(ticket_id)
     except Exception as e:
-        logging.error(f"Error retrieving ticket IDs: {e}")
+        logger.error(f"Error retrieving ticket IDs: {e}")
 
     return ticket_ids
 
@@ -943,11 +957,11 @@ def main():
 
 
     snow_tickets = get_ticket_ids(new_driver)
-    print(f"[INFO] Found {len(snow_tickets)} tickets to process.")
+    logger.info(f"[INFO] Found {len(snow_tickets)} tickets to process.")
 
     for ticket_id in snow_tickets:
         try:
-            print(f"\nProcessing ticket {ticket_id}...")
+            logger.info(f"Processing ticket {ticket_id}...")
             # Create a new Firefox driver instance that opens a new browser window
             new_driver = webdriver.Firefox()
             new_driver.maximize_window()
@@ -962,13 +976,10 @@ def main():
             time.sleep(5)
             snow_info = get_snow_info(new_driver, ticket_id)
             handle_snow_ticket(new_driver, snow_info)
+            step_counter = 1
         except Exception as e:
-            print(f"[ERROR] Failed to process ticket {ticket_id}: {e}")
+            logger.error(f"Failed to process ticket {ticket_id}: {e}")
             continue
-
-    # driver.quit()  # close the browser if desired
-    #time.sleep(1000000000)
-
 
 if __name__ == "__main__":
     main()

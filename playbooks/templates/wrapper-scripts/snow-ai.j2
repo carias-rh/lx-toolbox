@@ -40,24 +40,11 @@ while [[ $# -gt 0 ]]; do
     shift 0
 done
 
-# If tickets are provided, process each ticket individually
-if [ ${#TICKETS[@]} -gt 0 ]; then
-    for ticket in "${TICKETS[@]}"; do
-        echo "Processing SNOW ticket: $ticket"
+# Use Selenium to gather all tickets from SNOW
+echo "Using Selenium to gather all SNOW tickets..."
 {% endraw %}
-        /usr/bin/ansible-playbook {{ playbook_dir }}/snow-typos.yml -e snow_id="$ticket" -e selenium_driver="chrome"
+/usr/bin/ansible-playbook {{ playbook_dir }}/snow-ai.yml
 {% raw %}
-        echo "---> Starting SNOW Typos Checker selenium script for ticket $ticket <---"
-        /usr/bin/python3 /tmp/snow-typos-checker.py &
-        sleep 2
-    done
-else
-    # No tickets provided, use Selenium to gather all tickets from SNOW
-    echo "No ticket provided. Using Selenium to gather all SNOW tickets..."
-{% endraw %}
-    /usr/bin/ansible-playbook {{ playbook_dir }}/snow-typos.yml -e selenium_driver="chrome"
-{% raw %}
-    echo "---> Starting SNOW Typos Checker selenium script in batch mode <---"
-    /usr/bin/python3 /tmp/snow-typos-checker.py &
-fi
+echo "---> Starting SNOW AI selenium script in batch mode <---"
+/usr/bin/python3 /tmp/snow-ai.py &
 {% endraw %} 
