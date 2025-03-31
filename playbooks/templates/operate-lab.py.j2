@@ -70,7 +70,7 @@ def go_to_course(course_id):
 
 def check_cookies():
     try:
-        WebDriverWait(driver, 2).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
+        WebDriverWait(driver, 10).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
         accept_cookies()
     except:
         pass
@@ -263,14 +263,13 @@ def impersonate():
         # Introduce username
         WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="formInlineUsername"]'))).send_keys("{{ impersonate_username }}")
         # Click on switch
-        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[4]/div[2]/div/div/div[2]/form/button"))).click()
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, "//button[text()='Switch User']"))).click()
         time.sleep(5)
-
         WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[2]/button')))
 
-    except:
-        print("An exception occurred while impersonating {{ impersonate_username }}")
-        impersonate()
+    except Exception as e:
+        print(f"An exception occurred while impersonating {{ impersonate_username }}: {e}")
+
 
 # Looks for the workstation console button and opens the console in a new tab
 def open_workstation():
