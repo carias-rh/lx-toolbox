@@ -16,6 +16,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
 
 import requests
 from urllib.parse import quote
@@ -39,6 +41,7 @@ GUIDE_SUBDIR = "content"
 OLLAMA_COMMAND = "/usr/local/bin/ollama"  # Adjust if your Ollama binary is named differently
 CHROME_DEBUG_PORT = 9123    # Example local Chrome debugger port for your session
 CHROME_USER_DATA_DIR = "{{ ansible_env.HOME}}/.config/google-chrome/snow-typos"
+FIREFOX_USER_DATA_DIR = "{{ ansible_env.HOME}}/.mozilla/firefox/yzdf71sh.snow-ai"
 
 step_counter = 1
 # Prints the current step
@@ -105,7 +108,9 @@ def get_chrome_driver() -> webdriver.Chrome:
 #OLLAMA_MODEL = "granite3.1-dense:8b"
 #OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"   # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
-OLLAMA_MODEL = "gemma3:12b"
+OLLAMA_MODEL = "gemma3:12b" 
+#OLLAMA_MODEL = "gemma3:1b"
+
 
 
 def askOllama(prompt: str) -> str:
@@ -295,7 +300,7 @@ def login_snow(driver):
     except:
         logger.error("Login failed")
 
-def jira_login(driver):
+def login_jira(driver):
     try:
         driver.get("https://issues.redhat.com/projects/PTL/issues")
         time.sleep(5)
@@ -356,7 +361,6 @@ def classify_ticket_llm(description: str) -> dict:
         "most_defining_issue_keyword":["md5sum", "output", "command"],
         "is_content_issue_ticket":true,
         "is_environment_issue":false, 
-        "confidence":0.9,
         "summary":"The md5sum command drops a different output than the one expected."
         }'''
     prompt = f"""
@@ -433,15 +437,7 @@ def get_section_info(driver, course_url: str) -> str:
     """
     step("Extracting relevant information from section")
     try:
-        driver.execute_script("window.open()");
-        driver.switch_to.window(driver.window_handles[-1]);
         driver.get(course_url)
-        login_rol(driver)
-        # Optionally, if login is enforced here, call:
-        # login(driver, lab_environment, rh_username, username, pin, github_username, github_password)
-        # You can pass the required credentials from Ansible variables.
-        #login(driver)
-
         time.sleep(5)  # Allow time for the page to load completely
         
         # If your course page has tabs, you might need to select the "course" tab
@@ -504,12 +500,14 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-        "analysis": "think in this value step by step, compare the student_feedback with the guide_text, and provide a detailed analysis of the issue. Be critical with the student's feedback, as it is not always correct, and the guide_text is the source of truth. Extend the analysis as much as possible.",
+        "analysis": "think in this value step by step, try to understand and make sense of the student_feedback, 
+                     then comprehend the the guide_text excerpt and compare to see if the student's claims are correct. 
+                     Provide a detailed analysis of the issue. Be critical with the student's feedback, as it is not always correct, 
+                     and the guide_text is the source of truth. Extend the analysis as much as possible.",
         "is_valid_issue": true/false,
-        "content_issue_location": "location/step where the content issue appears",
-        "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
-        "summary": "a short summary of your analysis",
-        "jira-title": "a short title for the Jira ticket, all in lowercase"
+        "suggested_correction": "a brief suggestion for correction if applicable",
+        "summary": "a short summary of your previous analysis in the 'analysis' field",
+        "jira-title": "a short title for the Jira ticket, all characters in lowercase and without special characters"
         }'''
 
     prompt_text = f"""
@@ -551,11 +549,11 @@ def analyze_environment_issue(user_issue: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-        "analysis": "think in this value step by step, compare the student's feedback with the guide text, and provide a detailed analysis of the issue",",
+        "analysis": "think in this value step by step, try to understand the student's feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL VMs",",
         "is_valid_issue": true/false if a debug of the lab environment is needed,
         "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
         "summary": "a short summary of your analysis",
-        "jira-title": "a short title for the Jira ticket"
+        "jira-title": "a short title for the Jira ticket, all characters in lowercase and without special characters"
         }'''
 
     prompt_text = f"""
@@ -794,6 +792,9 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
        then invoking further LLM analysis.
     """
 
+    # Save servicenow window handle
+    service_now_window = driver.current_window_handle
+
     # 1. Classify the ticket
     data = classify_ticket_llm(snow_info["Description"])
 
@@ -802,6 +803,8 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
 
     # 4. Retrieve some info from the course page to match with the local guide text
     if snow_info["URL"] != "":
+        driver.execute_script("window.open()");
+        driver.switch_to.window(driver.window_handles[-1]);
         section_info = get_section_info(driver, snow_info["URL"])
 
     # 5. Fetch local guide text using the guide info
@@ -864,7 +867,7 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         work_note += f"{analysis_response_json.get('summary', 'No summary available')}\n"
 
         # Add the work note to the SNOW ticket
-        driver.switch_to.window(driver.window_handles[0])
+        driver.switch_to.window(service_now_window)
         driver.refresh()
         time.sleep(5)
         switch_to_iframe(driver)
@@ -877,11 +880,10 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         # 9. Create a Jira ticket
         # Switch to new tab
         # Move to the latest tab before opening a new one
-
         driver.switch_to.window(driver.window_handles[-1])
         driver.execute_script("window.open('');")
         driver.switch_to.window(driver.window_handles[-1])
-        jira_login(driver)
+        #jira_login(driver)
 
         # 9.1 Search for similar Jira tickets
         search_jira_ticket(driver, snow_info)
@@ -938,50 +940,53 @@ def get_ticket_ids(driver) -> list:
 # Main driver (example)
 # -------------------------------------------------------------------
 def main():
-    #if not check_running_session():
-    #    open_profile()
-    #    time.sleep(3)  # Allow time for the browser to start
-    #driver = get_chrome_driver()
+    # Initialize the driver
+    global step_counter
+    step_counter = 1
+    options = Options()
+    options.add_argument(f"--user-data-dir={FIREFOX_USER_DATA_DIR}")
+    driver = webdriver.Firefox(options=options)
+    driver.maximize_window()
 
-    # Process each ticket
-    drivers = []  # List to store driver instances
+    # Login into ServiceNow
+    driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253D5267c5b81bf9c0104862b8cc1d4bcba5%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    login_snow(driver)
 
-    new_driver = webdriver.Firefox()
-    new_driver.maximize_window()
+    # Login into rol.redhat.com
+    driver.switch_to.new_window('tab')
+    driver.get("https://rol.redhat.com")
+    login_rol(driver)
 
-    drivers.append(new_driver)
-    new_driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
-    #new_driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253D5267c5b81bf9c0104862b8cc1d4bcba5%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    # Login into jira
+    driver.switch_to.new_window('tab')
+    driver.get("https://issues.redhat.com/secure/Dashboard.jspa")
+    login_jira(driver)
 
-    # Process the ticket in the new tab
-    login_snow(new_driver)
-    time.sleep(15)
+    # Switch back to the original tab
+    driver.switch_to.window(driver.window_handles[0])
 
-
-    snow_tickets = get_ticket_ids(new_driver)
+    # Get the ticket ids
+    snow_tickets = get_ticket_ids(driver)
     logger.info(f"[INFO] Found {len(snow_tickets)} tickets to process.")
 
     for ticket_id in snow_tickets:
         try:
             logger.info(f"Processing ticket {ticket_id}...")
             # Create a new Firefox driver instance that opens a new browser window
-            new_driver = webdriver.Firefox()
-            new_driver.maximize_window()
-            drivers.append(new_driver)
+            driver.switch_to.new_window('window')
 
-            new_driver.get(f"https://redhat.service-now.com/surl.do?n={ticket_id}")
+
+            driver.get(f"https://redhat.service-now.com/surl.do?n={ticket_id}")
 
             # Process the ticket in the new window
-            login_snow(new_driver)
             time.sleep(5)
-            check_cookies(new_driver)
-            time.sleep(5)
-            snow_info = get_snow_info(new_driver, ticket_id)
-            handle_snow_ticket(new_driver, snow_info)
+            snow_info = get_snow_info(driver, ticket_id)
+            handle_snow_ticket(driver, snow_info)
             step_counter = 1
         except Exception as e:
-            step_counter = 1
             logger.error(f"Failed to process ticket {ticket_id}: {e}")
+            step_counter = 1
             continue
 
 if __name__ == "__main__":
