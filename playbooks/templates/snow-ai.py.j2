@@ -471,6 +471,11 @@ def fetch_local_guide_text(section_info: str, repo_dir: str = None) -> str:
         if "Red Hat" in section_info:
             section_info = section_info.replace("Red Hat", "Red{nbsp}Hat")
             logger.info(f"Replaced non-breaking space in 'Red Hat': {section_info}")
+        
+        # Remove "Quiz:" from section_info if present
+        if "Quiz:" in section_info:
+            section_info = section_info.replace("Quiz:", "").strip()
+            logger.info(f"Removed 'Quiz:' from section info: {section_info}")
 
         file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR} | grep -E 'ge.adoc|lecture.adoc|review.adoc|lab.adoc' | head -n1 | cut -d ':' -f1"
     
@@ -507,7 +512,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         "is_valid_issue": true/false,
         "suggested_correction": "a brief suggestion for correction if applicable",
         "summary": "a short summary of your previous analysis in the 'analysis' field",
-        "jira-title": "a short title for the Jira ticket, all characters in lowercase and without special characters"
+        "jira-title": "a short title for the Jira ticket, all characters in lowercase separated by spaces, no dashes"
         }'''
 
     prompt_text = f"""
@@ -553,7 +558,7 @@ def analyze_environment_issue(user_issue: str) -> str:
         "is_valid_issue": true/false if a debug of the lab environment is needed,
         "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
         "summary": "a short summary of your analysis",
-        "jira-title": "a short title for the Jira ticket, all characters in lowercase and without special characters"
+        "jira-title": "a short title for the Jira ticket, all characters in lowercase separated by spaces, no dashes"
         }'''
 
     prompt_text = f"""
@@ -968,7 +973,7 @@ def main():
 
     # Get the ticket ids
     snow_tickets = get_ticket_ids(driver)
-    logger.info(f"[INFO] Found {len(snow_tickets)} tickets to process.")
+    logger.info(f"Found {len(snow_tickets)} tickets to process.")
 
     for ticket_id in snow_tickets:
         try:
