@@ -131,41 +131,6 @@ def askOllama(prompt: str) -> str:
         return ""
 
 
-def ask_gpt4_mini(prompt: str) -> str:
-    """
-    Calls the GPT-4 Mini API with the given prompt and returns the response.
-    Uses the API key and URL from the environment variables GPT4_MINI_API_KEY and GPT4_MINI_API_URL.
-    """
-    import os
-    import requests
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    api_url = "https://api.openai.com/v1/chat/completions"
-    if not api_key or not api_url:
-        logger.error("GPT4_MINI_API_KEY or GPT4_MINI_API_URL environment variable not set.")
-        return ""
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "gpt-4o-mini",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 10000,
-        "temperature": 0.7,
-        "top_p": 1
-    }
-    try:
-        response = requests.post(api_url, headers=headers, json=payload)
-        response.raise_for_status()
-        result = response.json()
-        # Adjust the following line if the returned JSON structure differs.
-        return result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-    except Exception as e:
-        logger.error(f"GPT-4o-mini API request failed: {e}")
-        return ""
-
-
 def switch_to_iframe(driver):
     driver.switch_to.default_content()
     macroponent = WebDriverWait(driver, 3).until(
@@ -205,23 +170,6 @@ def check_cookies(driver):
     except Exception:
         pass
 
-def login_rol(driver):
-    step("Login into ROL platform")
-    try:
-        time.sleep(5)
-        check_cookies(driver)
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input"))).send_keys("{{ rh_username }}@redhat.com")
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
-
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
-
-        # RH SSO
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
-    except:
-        logger.error("Login failed")
-
 def start_lab(driver):
     step("Starting lab")
     try:
@@ -232,7 +180,6 @@ def start_lab(driver):
     except:
         logger.error("Failed to start lab")
     time.sleep(5)
-
 
 
 def check_lab_status_button(first_or_second_button):
@@ -285,39 +232,6 @@ def increase_lifespan(driver):
     except:
         pass
 
-def login_snow(driver):
-    """
-    Logs into the course website based on the lab_environment setting.
-    The values for credentials should be passed in from Ansible.
-    """
-    step("Login into RHLS production environment")
-    try:
-
-        # RH SSO
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
-    except:
-        logger.error("Login failed")
-
-def login_jira(driver):
-    try:
-        driver.get("https://issues.redhat.com/projects/PTL/issues")
-        time.sleep(5)
-        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a'))).click()
-        time.sleep(3)
-
-        #check_cookies(driver)
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username-verification"]'))).send_keys("{{ username }}" + "@redhat.com")
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
-        #time.sleep(5)
-        #driver.get("https://issues.redhat.com/projects/PTL/issues")
-    except Exception as e:
-        logger.error("An exception occurred during jira login:", e)
-
-
-
 
 def select_lab_environment_tab(driver, tab_name):
     """
@@ -367,8 +281,8 @@ def classify_ticket_llm(description: str) -> dict:
         Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
         - student_feedback: the user's feedback as it is, without any changes, translated to english from any language
         - most_defining_issue_keyword: a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic. Also, consider as a single keyword a whole linux command with parameters (i.e "sudo chown -R jboss:jboss /opt/domain")
-        - is_content_issue_ticket: true/false 
-        - is_environment_issue: true/false if the student's feedback is about a problem with the lab environment, it can include a 'lab start' script FAIL, a VM not booting or stuck, etc.
+        - is_content_issue_ticket: (true/false)
+        - is_environment_issue: (true/false), feedback may include words such as 'lab start', script FAIL, VM not booting or stuck, lab taking to long to start, etc.
         - summary: in a short sentence, summarize the user's feedback
 
         User feedback:
@@ -381,7 +295,6 @@ def classify_ticket_llm(description: str) -> dict:
     
     global classifying_response
     classifying_response = askOllama(prompt)
-    #classifying_response = ask_gpt4_mini(prompt)
 
     print("[LLM response]:\n", classifying_response)
     # Then parse JSON via Python. Temporary fallback if there's an error:
@@ -539,8 +452,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         """
 
     global analysis_response
-    #analysis_response = askOllama(prompt_text)
-    analysis_response = ask_gpt4_mini(prompt_text)
+    analysis_response = askOllama(prompt_text)
     return analysis_response
 
 def analyze_environment_issue(user_issue: str) -> str:
@@ -574,7 +486,6 @@ def analyze_environment_issue(user_issue: str) -> str:
         """
     global analysis_response
     analysis_response = askOllama(prompt_text)
-    #analysis_response = ask_gpt4_mini(prompt_text)
     return analysis_response
 
 def get_snow_info(driver, snow_id):
@@ -714,7 +625,6 @@ def search_jira_ticket(driver, snow_info):
 
     )
     llm_response = askOllama(prompt)
-    #llm_response = ask_gpt4_mini(prompt)
     extracted_keyword = json.loads(llm_response).get("keyword", "")
     logger.info(f"LLM extracted keyword: {extracted_keyword}")
     
@@ -759,7 +669,7 @@ We created a Jira ticket to fix it in the next release.
 Thanks again for your contributions to improving the course guide! 
 
 Best Regards,
-Carlos Arias
+{{ teammate_name }}
 Red Hat Learner Experience Team
 """
         WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text)
@@ -778,7 +688,7 @@ If by the time you read this message it is still not working fine, I would sugge
 Please, let me know if the issue persists.
 
 Best Regards,
-Carlos Arias
+{{ teammate_name }}
 Red Hat Learner Experience Team
 """
         WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text)
@@ -965,18 +875,20 @@ def main():
 
     # Login into ServiceNow
     driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
-    #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253D5267c5b81bf9c0104862b8cc1d4bcba5%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
-    login_snow(driver)
-
+    #login_snow(driver)
+    time.sleep(25)
+    
     # Login into rol.redhat.com
     driver.switch_to.new_window('tab')
     driver.get("https://rol.redhat.com")
-    login_rol(driver)
+    #login_rol(driver)
+    time.sleep(10)
 
     # Login into jira
     driver.switch_to.new_window('tab')
     driver.get("https://issues.redhat.com/secure/Dashboard.jspa")
-    login_jira(driver)
+    #login_jira(driver)
+    time.sleep(10)
 
     # Switch back to the original tab
     driver.switch_to.window(driver.window_handles[0])
