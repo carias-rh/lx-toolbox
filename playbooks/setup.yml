@@ -3,21 +3,12 @@
   become: true
 
   tasks:
-    # - name: Install epel repository
-    #   command: dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
-    #   ignore_errors: true
-    #   tags: install
-    #
     - name: Ensure dependencies are installed.
       ansible.builtin.package:
         name:
-       # - oathtool
-       # - perl-Digest-SHA-1
-       # - epel-release
           - python3-pip
-       # - firefox.x86_64
-       # - chromium.x86_64
-       # - perl-Digest-SHA-1:6.02-1.el8.x86_64
+          - firefox.x86_64
+          - chromium.x86_64
         state: present
       tags: install
   
@@ -31,12 +22,18 @@
       shell: 'curl -sSL https://bit.ly/install-xq | sudo bash'
       tags: install
 
+    - name: Install Ollama
+      ansible.builtin.shell: curl -fsSL https://ollama.com/install.sh | sh
+      args:
+        creates: /usr/bin/ollama
+      tags: install
+      
     - name: Download selenium drivers
       ansible.builtin.get_url:
         url: "{{ item }}"
         dest: "/tmp/{{ item | split('/')| last }}"
       loop:
-        - "https://github.com/mozilla/geckodriver/releases/download/v0.34.0/geckodriver-v0.34.0-linux64.tar.gz"
+        - "https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz"
       tags: drivers
 
     - name: Extract selenium drivers into /usr/bin/
@@ -44,9 +41,8 @@
         src: "/tmp/{{ item }}"
         dest: "/usr/bin/"
       loop:
-        - geckodriver-v0.34.0-linux64.tar.gz
+        - geckodriver-v0.36.0-linux64.tar.gz
       tags: drivers
-
 
     - name: Install wrapper scripts into /usr/bin/
       ansible.builtin.template:
@@ -62,6 +58,7 @@
         - jira.j2
         - snow.j2
         - snow-ai.j2
+<<<<<<< HEAD
       tags: scripts
 
 #    - name: generate secret and
@@ -81,3 +78,6 @@
 #      debug:
 #        var: generated_secret.stdout
 #      tags: secret
+=======
+      tags: scripts
+>>>>>>> 104c583 (Update setup.yml to install additional dependencies and Ollama)
