@@ -107,8 +107,8 @@ def get_chrome_driver() -> webdriver.Chrome:
 #OLLAMA_MODEL = "granite3.1-dense:8b"
 #OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"   # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
-OLLAMA_MODEL = "gemma3:12b" 
-#OLLAMA_MODEL = "gemma3:1b"
+#OLLAMA_MODEL = "gemma3:12b" 
+OLLAMA_MODEL = "gemma3:1b"
 
 
 
@@ -881,7 +881,7 @@ def main():
     driver.switch_to.new_window('tab')
     driver.get("https://rol.redhat.com")
     #login_rol(driver)
-    time.sleep(10)
+    time.sleep(20)
 
     # Login into jira
     driver.switch_to.new_window('tab')
@@ -889,35 +889,31 @@ def main():
     #login_jira(driver)
     time.sleep(10)
 
+    # Switch back to the original tab
+    driver.switch_to.window(service_now_tickets_window)
+
+    # Get the ticket ids
+    snow_tickets = get_ticket_ids(driver)
+    logger.info(f"Found {len(snow_tickets)} tickets to process.")
+
+    for ticket_id in snow_tickets:
+        try:
+            logger.info(f"Processing ticket {ticket_id}...")
+            # Create a new Firefox driver instance that opens a new browser window
+            driver.switch_to.new_window('window')
 
 
-    while True:
-        # Switch back to the original tab
-        driver.switch_to.window(service_now_tickets_window)
+            driver.get(f"https://redhat.service-now.com/surl.do?n={ticket_id}")
 
-        # Get the ticket ids
-        snow_tickets = get_ticket_ids(driver)
-        logger.info(f"Found {len(snow_tickets)} tickets to process.")
-
-        for ticket_id in snow_tickets:
-            try:
-                logger.info(f"Processing ticket {ticket_id}...")
-                # Create a new Firefox driver instance that opens a new browser window
-                driver.switch_to.new_window('window')
-
-
-                driver.get(f"https://redhat.service-now.com/surl.do?n={ticket_id}")
-
-                # Process the ticket in the new window
-                time.sleep(5)
-                snow_info = get_snow_info(driver, ticket_id)
-                handle_snow_ticket(driver, snow_info)
-                step_counter = 1
-            except Exception as e:
-                logger.error(f"Failed to process ticket {ticket_id}: {e}")
-                step_counter = 1
-                continue
-        time.sleep(10)
+            # Process the ticket in the new window
+            time.sleep(5)
+            snow_info = get_snow_info(driver, ticket_id)
+            handle_snow_ticket(driver, snow_info)
+            step_counter = 1
+        except Exception as e:
+            logger.error(f"Failed to process ticket {ticket_id}: {e}")
+            step_counter = 1
+            continue
 if __name__ == "__main__":
     main()
 
