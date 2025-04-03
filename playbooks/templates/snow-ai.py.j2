@@ -186,17 +186,17 @@ def check_lab_status_button(first_or_second_button):
         # Check lab status and start it if stopped or not created. The exception is needed because some courses don't work with the function contains(text(),"")
         try:
             # Try with first button first
-            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][1][contains(text(), "Create") or contains(text(), "Delete") or contains(text(), "Deleting") or contains(text(), "Creating")]'))).text
+            lab_status_button = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][1][contains(text(), "Create") or contains(text(), "Delete") or contains(text(), "Deleting") or contains(text(), "Creating")]'))).text
         except:
             # Else try with second button
-            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+            lab_status_button = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
     elif first_or_second_button == "second":
         try:
             # Try with second button first
-            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+            lab_status_button = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
         except:
             # Else try with first button
-            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+            lab_status_button = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
     #print("Lab button is: " + lab_status_button)
     return lab_status_button
 
@@ -204,11 +204,11 @@ def check_lab_status_button(first_or_second_button):
 def increase_autostop(driver):
     step("Increasing auto-stop counter")
     try:
-        time.sleep(10)
         select_lab_environment_tab(driver, "lab")
         # Wait until lab has been created and is running
         if check_lab_status_button("first") == "CREATING": time.sleep(60)
-        elif check_lab_status_button("second") == "STARTING": time.sleep(30)
+        elif check_lab_status_button("second") == "STARTING": time.sleep(60)
+        elif check_lab_status_button("second") == "STOP": time.sleep(1)
 
         increase_autostop = WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
@@ -270,18 +270,21 @@ def classify_ticket_llm(description: str) -> dict:
     step("Classifying ticket using LLM")
 
     json_example = '''{
-        "student_feedback":"", 
+        "student_feedback":"in english, the user's feedback as it is, without any changes. Substitute double quotes with single quotes.", 
         "most_defining_issue_keyword":["md5sum", "output", "command"],
         "is_content_issue_ticket":true,
         "is_environment_issue":false, 
         "summary":"The md5sum command drops a different output than the one expected."
         }'''
     prompt = f"""
-        Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
-        - student_feedback: the user's feedback as it is, without any changes, translated to english from any language
+        Classify the user's feedback regarding a Red Hat Training course, there are two types of tickets:
+        - content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, etc.
+        - environment_issue_ticket: if the feedback includes words such as 'lab start', 'FAIL', something like 'VM not booting or stuck', or 'lab is taking to long to start', it's an environment issue.
+        Return JSON with fields:
+        - student_feedback: the user's feedback in english, as it is, without any changes. Substitute double quotes with single quotes.
         - most_defining_issue_keyword: a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic. Also, consider as a single keyword a whole linux command with parameters (i.e "sudo chown -R jboss:jboss /opt/domain")
         - is_content_issue_ticket: (true/false)
-        - is_environment_issue: (true/false), feedback may include words such as 'lab start', script FAIL, VM not booting or stuck, lab taking to long to start, etc.
+        - is_environment_issue: (true/false)
         - summary: in a short sentence, summarize the user's feedback
 
         User feedback:
@@ -418,10 +421,10 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-        "excerpt": "the excerpt from the guide_text that the student's feedback refers to",
+        "excerpt": "the excerpt from the guide_text that the student's feedback refers to. Substitute double quotes in this field with single quotes.",
         "analysis": "think step by step, first try to understand student_feedback, then explain what the student is trying to communicate,
                      then comprehend the the guide_text excerpt, then compare to see if the student's claims are correct. 
-                     Detail the analysis as much as possible.",
+                     Detail the analysis as much as possible. Substitute double quotes in this field with single quotes.",
         "is_valid_issue": true/false if the student's feedback is legitimate and there is an issue in the guide to be corrected,
         "suggested_correction": "Indicate what words' lines or commands should be changed in the guide_text to fix the issue, do not include any explanations or markdown formatting outside the JSON object.",
         "summary": "a short/medium summary of the 'analysis' field",
@@ -529,6 +532,7 @@ def get_snow_info(driver, snow_id):
         "RHNID": rhnid,
     }
     driver.refresh()
+    logger.info(f"Snow info: {snow_info}")
     return snow_info
 
 def select_dropdown(element, input):
@@ -765,9 +769,6 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         analysis_content_response = analyze_content_issue(snow_info["Description"], guide_text)
         print(f"[LLM response]:\n{analysis_content_response}")
 
-        # Escape backslashes
-        analysis_content_response = analysis_content_response.replace("\\", "\\\\")
-
         # Parse the JSON
         try:
             analysis_response_json = json.loads(analysis_content_response)
@@ -779,13 +780,19 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
 
         analysis_environment_response = analyze_environment_issue(snow_info["Description"])
         print(f"[LLM response]:\n{analysis_environment_response}")
-        analysis_response_json = json.loads(analysis_environment_response)
+        # Parse the JSON
+        try:
+            analysis_response_json = json.loads(analysis_environment_response)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decoding failed: {e}")
 
-        if analysis_response_json.get("is_valid_issue", False):
-            start_lab(driver)
-                
+        
+                        
 
     if analysis_response_json.get("is_valid_issue", False):
+        # 6. Start the lab
+        start_lab(driver)
+
         # 7. Add work note in the SNOW ticket with the summary of the analysis
         work_note = f"Summary of the analysis:\n"
         work_note += f"{analysis_response_json.get('summary', 'No summary available')}\n"
