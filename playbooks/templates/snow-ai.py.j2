@@ -151,7 +151,7 @@ def ask_gpt4_mini(prompt: str) -> str:
     payload = {
         "model": "gpt-4o-mini",
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 500,
+        "max_tokens": 10000,
         "temperature": 0.7,
         "top_p": 1
     }
@@ -365,11 +365,11 @@ def classify_ticket_llm(description: str) -> dict:
         }'''
     prompt = f"""
         Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
-        - student_feedback (the user's feedback as it is, without any changes, translated to english from any language)
-        - most_defining_issue_keyword (a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic. Also, consider as a single keyword a whole linux command with parameters (i.e "sudo chown -R jboss:jboss /opt/domain"))
-        - is_content_issue_ticket (true/false)
-        - is_environment_issue (true/false)
-        - summary (in a short sentence)
+        - student_feedback: the user's feedback as it is, without any changes, translated to english from any language
+        - most_defining_issue_keyword: a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic. Also, consider as a single keyword a whole linux command with parameters (i.e "sudo chown -R jboss:jboss /opt/domain")
+        - is_content_issue_ticket: true/false 
+        - is_environment_issue: true/false if the student's feedback is about a problem with the lab environment, it can include a 'lab start' script FAIL, a VM not booting or stuck, etc.
+        - summary: in a short sentence, summarize the user's feedback
 
         User feedback:
         \"\"\"{description}\"\"\"
@@ -380,8 +380,9 @@ def classify_ticket_llm(description: str) -> dict:
         """
     
     global classifying_response
-    #classifying_response = ask_gpt4_mini(prompt)
     classifying_response = askOllama(prompt)
+    #classifying_response = ask_gpt4_mini(prompt)
+
     print("[LLM response]:\n", classifying_response)
     # Then parse JSON via Python. Temporary fallback if there's an error:
     try:
@@ -505,42 +506,41 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-        "analysis": "think in this value step by step, try to understand and make sense of the student_feedback, 
-                     then comprehend the the guide_text excerpt and compare to see if the student's claims are correct. 
-                     Provide a detailed analysis of the issue. Be critical with the student's feedback, as it is not always correct, 
-                     and the guide_text is the source of truth. Extend the analysis as much as possible.",
-        "is_valid_issue": true/false,
-        "suggested_correction": "a brief suggestion for correction if applicable",
-        "summary": "a short summary of your previous analysis in the 'analysis' field",
-        "jira-title": "a short title for the Jira ticket, all characters in lowercase separated by spaces, no dashes"
+        "excerpt": "the excerpt from the guide_text that the student's feedback refers to",
+        "analysis": "think step by step, first try to understand student_feedback, then explain what the student is trying to communicate,
+                     then comprehend the the guide_text excerpt, then compare to see if the student's claims are correct. 
+                     Detail the analysis as much as possible.",
+        "is_valid_issue": true/false if the student's feedback is legitimate and there is an issue in the guide to be corrected,
+        "suggested_correction": "Indicate what words' lines or commands should be changed in the guide_text to fix the issue, do not include any explanations or markdown formatting outside the JSON object.",
+        "summary": "a short/medium summary of the 'analysis' field",
+        "jira-title": "a short and precise title of the issue, all characters in lowercase separated by spaces, no dashes"
         }'''
 
     prompt_text = f"""
+        You are an useful Red Hat Training expert who is able tounderstand the flow of the exercises and labs in the course guide.
         We have a student who reported an issue within the guide text. The student's feedback is:
         <student_feedback>
         {user_issue}
         </student_feedback>
 
-        Below is an excerpt of the guide section:
+        Identify in the following guide_text the excerpt (text and commands) to which the student's feedback refers, include previous lines of the guide_text for context:
         <guide_text>
         {guide_text}
         </guide_text>
 
-        Compare the student's feedback with the guide text, and provide a detailed analysis of the issue.
-        Your analysis must consider only the instructions, theory and commands that are part of the text. 
+
+        Compare the student's feedback with the excerpt, and provide a detailed analysis of the issue.
         Remove from the response in the JSON any reference to titles or headings, as I already have that information.
 
         Return your analysis in exactly the following JSON format without any extra text:
-        <json_example>
         {json_example}
-        </json_example>
 
         Do not include any explanations or markdown formatting outside the JSON object.
         """
 
     global analysis_response
-    #analysis_response = ask_gpt4_mini(prompt_text)
-    analysis_response = askOllama(prompt_text)
+    #analysis_response = askOllama(prompt_text)
+    analysis_response = ask_gpt4_mini(prompt_text)
     return analysis_response
 
 def analyze_environment_issue(user_issue: str) -> str:
@@ -554,7 +554,7 @@ def analyze_environment_issue(user_issue: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-        "analysis": "think in this value step by step, try to understand the student's feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL VMs",",
+        "analysis": "think in this value step by step, describe what the student is trying to communicate in their feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL VMs",",
         "is_valid_issue": true/false if a debug of the lab environment is needed,
         "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
         "summary": "a short summary of your analysis",
@@ -568,15 +568,13 @@ def analyze_environment_issue(user_issue: str) -> str:
         </student_feedback>
 
         Return your analysis in exactly the following JSON format without any extra text:
-        <json_example>
         {json_example}
-        </json_example>
 
         Do not include any explanations or markdown formatting outside the JSON object.
         """
     global analysis_response
-    #analysis_response = ask_gpt4_mini(prompt_text)
     analysis_response = askOllama(prompt_text)
+    #analysis_response = ask_gpt4_mini(prompt_text)
     return analysis_response
 
 def get_snow_info(driver, snow_id):
@@ -715,8 +713,8 @@ def search_jira_ticket(driver, snow_info):
         f"<feedback> {snow_info['Description']} </feedback>"
 
     )
-
     llm_response = askOllama(prompt)
+    #llm_response = ask_gpt4_mini(prompt)
     extracted_keyword = json.loads(llm_response).get("keyword", "")
     logger.info(f"LLM extracted keyword: {extracted_keyword}")
     
@@ -813,47 +811,59 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         section_info = get_section_info(driver, snow_info["URL"])
 
     # 5. Fetch local guide text using the guide info
-    local_guide_text = ""
-    if section_info != "":
-        local_guide_text = fetch_local_guide_text(section_info, repo_dir)
-    else:
-        logger.info("No course ID or lab script name found in the SNOW ticket.")
-        return
-    
     if data.get("is_content_issue_ticket", False):
         logger.info(f"This SNOW ticket {snow_info['snow_id']} is recognized as a 'content' issue feedback ticket.")
-
-        # 6. Perform a grep search for the most defining issue keyword in the local guide text or pass the whole text to the LLM
-        most_defining_issue_keyword = data.get("most_defining_issue_keyword", "")
-        logger.info(f"Most defining issue keyword: {most_defining_issue_keyword}")
-        grep_result = ""
-        if most_defining_issue_keyword:
-            grep_results = []
-            for keyword in most_defining_issue_keyword:
-                if keyword != "":
-                    try:
-                        result = subprocess.run(
-                            ["grep", "-i", keyword],
-                            input=local_guide_text,
-                            text=True,
-                            capture_output=True
-                        ).stdout
-                        grep_results.append(result)                            
-                    except subprocess.CalledProcessError as e:
-                        logger.error(f"Grep command failed for keyword '{keyword}': {e}")
-            # Check if the grep results are getting too large
-            if sum(len(result.splitlines()) for result in grep_results) > 15:
-                logger.info("Grep results exceed 15 lines, using full guide text instead.")
-                guide_text = local_guide_text
-            else:
-                guide_text = "\n".join(grep_results)
+        local_guide_text = ""
+        if section_info != "":
+            local_guide_text = fetch_local_guide_text(section_info, repo_dir)
         else:
-            guide_text = local_guide_text
-            logger.info("No defining issue keyword found in the LLM response.")
+            logger.info("No course ID or lab script name found in the SNOW ticket.")
+            
+
+        ## 6. Perform a grep search for the most defining issue keyword in the local guide text or pass the whole text to the LLM
+        #most_defining_issue_keyword = data.get("most_defining_issue_keyword", "")
+        #logger.info(f"Most defining issue keyword: {most_defining_issue_keyword}")
+        #grep_result = ""
+        #if most_defining_issue_keyword:
+        #    grep_results = []
+        #    for keyword in most_defining_issue_keyword:
+        #        if keyword != "":
+        #            try:
+        #                result = subprocess.run(
+        #                    ["grep", "-i", keyword],
+        #                    input=local_guide_text,
+        #                    text=True,
+        #                    capture_output=True
+        #                ).stdout
+        #                grep_results.append(result)                            
+        #            except subprocess.CalledProcessError as e:
+        #                logger.error(f"Grep command failed for keyword '{keyword}': {e}")
+        #    # Check if the grep results are getting too large
+        #    if sum(len(result.splitlines()) for result in grep_results) > 40:
+        #        logger.info("Grep results exceed 40 lines, using full guide text instead.")
+        #        guide_text = local_guide_text
+        #    else:
+        #        guide_text = "\n".join(grep_results)
+        #else:
+        #    guide_text = local_guide_text
+        #    logger.info("No defining issue keyword found in the LLM response.")
+
+        guide_text = local_guide_text
+        print('############################################################################################')
+        logger.info(f"Guide text:\n {guide_text}")
+        print('############################################################################################')
 
         analysis_content_response = analyze_content_issue(snow_info["Description"], guide_text)
         print(f"[LLM response]:\n{analysis_content_response}")
-        analysis_response_json = json.loads(analysis_content_response)
+
+        # Escape backslashes
+        analysis_content_response = analysis_content_response.replace("\\", "\\\\")
+
+        # Parse the JSON
+        try:
+            analysis_response_json = json.loads(analysis_content_response)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decoding failed: {e}")
 
     elif data.get("is_environment_issue", False):
         logger.info(f"This SNOW ticket {snow_info['snow_id']} is recognized as an 'environment' issue feedback ticket.")

@@ -40,8 +40,6 @@ while [[ $# -gt 0 ]]; do
     shift 0
 done
 
-# Use Selenium to gather all tickets from SNOW
-echo "Using Selenium to gather all SNOW tickets..."
 {% endraw %}
 /usr/bin/ansible-playbook {{ playbook_dir }}/snow-ai.yml
 {% raw %}
