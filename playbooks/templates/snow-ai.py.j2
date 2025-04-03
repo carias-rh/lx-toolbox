@@ -367,8 +367,8 @@ def classify_ticket_llm(description: str) -> dict:
         Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
         - student_feedback: the user's feedback as it is, without any changes, translated to english from any language
         - most_defining_issue_keyword: a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic. Also, consider as a single keyword a whole linux command with parameters (i.e "sudo chown -R jboss:jboss /opt/domain")
-        - is_content_issue_ticket: true/false 
-        - is_environment_issue: true/false if the student's feedback is about a problem with the lab environment, it can include a 'lab start' script FAIL, a VM not booting or stuck, etc.
+        - is_content_issue_ticket: (true/false)
+        - is_environment_issue: (true/false), feedback may include words such as 'lab start', script FAIL, VM not booting or stuck, lab taking to long to start, etc.
         - summary: in a short sentence, summarize the user's feedback
 
         User feedback:
