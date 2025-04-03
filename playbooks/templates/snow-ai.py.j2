@@ -41,7 +41,6 @@ GUIDE_SUBDIR = "content"
 OLLAMA_COMMAND = "/usr/local/bin/ollama"  # Adjust if your Ollama binary is named differently
 CHROME_DEBUG_PORT = 9123    # Example local Chrome debugger port for your session
 CHROME_USER_DATA_DIR = "{{ ansible_env.HOME}}/.config/google-chrome/snow-typos"
-FIREFOX_USER_DATA_DIR = "{{ ansible_env.HOME}}/.mozilla/firefox/yzdf71sh.snow-ai"
 
 step_counter = 1
 # Prints the current step
@@ -868,9 +867,7 @@ def main():
     # Initialize the driver
     global step_counter
     step_counter = 1
-    options = Options()
-    options.add_argument(f"--user-data-dir={FIREFOX_USER_DATA_DIR}")
-    driver = webdriver.Firefox(options=options)
+    driver = webdriver.Firefox()
     driver.maximize_window()
 
     # Login into ServiceNow
