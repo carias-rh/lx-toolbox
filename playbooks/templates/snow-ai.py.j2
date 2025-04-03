@@ -875,6 +875,8 @@ def main():
 
     # Login into ServiceNow
     driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    service_now_tickets_window = driver.current_window_handle
+
     #login_snow(driver)
     time.sleep(25)
     
@@ -890,32 +892,35 @@ def main():
     #login_jira(driver)
     time.sleep(10)
 
-    # Switch back to the original tab
-    driver.switch_to.window(driver.window_handles[0])
-
-    # Get the ticket ids
-    snow_tickets = get_ticket_ids(driver)
-    logger.info(f"Found {len(snow_tickets)} tickets to process.")
-
-    for ticket_id in snow_tickets:
-        try:
-            logger.info(f"Processing ticket {ticket_id}...")
-            # Create a new Firefox driver instance that opens a new browser window
-            driver.switch_to.new_window('window')
 
 
-            driver.get(f"https://redhat.service-now.com/surl.do?n={ticket_id}")
+    while True:
+        # Switch back to the original tab
+        driver.switch_to.window(service_now_tickets_window)
 
-            # Process the ticket in the new window
-            time.sleep(5)
-            snow_info = get_snow_info(driver, ticket_id)
-            handle_snow_ticket(driver, snow_info)
-            step_counter = 1
-        except Exception as e:
-            logger.error(f"Failed to process ticket {ticket_id}: {e}")
-            step_counter = 1
-            continue
+        # Get the ticket ids
+        snow_tickets = get_ticket_ids(driver)
+        logger.info(f"Found {len(snow_tickets)} tickets to process.")
 
+        for ticket_id in snow_tickets:
+            try:
+                logger.info(f"Processing ticket {ticket_id}...")
+                # Create a new Firefox driver instance that opens a new browser window
+                driver.switch_to.new_window('window')
+
+
+                driver.get(f"https://redhat.service-now.com/surl.do?n={ticket_id}")
+
+                # Process the ticket in the new window
+                time.sleep(5)
+                snow_info = get_snow_info(driver, ticket_id)
+                handle_snow_ticket(driver, snow_info)
+                step_counter = 1
+            except Exception as e:
+                logger.error(f"Failed to process ticket {ticket_id}: {e}")
+                step_counter = 1
+                continue
+        time.sleep(10)
 if __name__ == "__main__":
     main()
 
