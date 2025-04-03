@@ -1,0 +1,48 @@
+{%- raw -%}
+#!/bin/bash
+
+# Displays the usage help message
+usage() {
+    echo "Usage: $(basename $0) [options]"
+    echo ""
+    echo "Options:"
+    echo "  -t, --ticket   <ticket_number>   Provide a SNOW ticket number. This option can be used multiple times."
+    echo "  -h, --help                       Show this help message and exit."
+    echo ""
+    echo "If no ticket number is provided, the script will use Selenium to gather all the list of tickets from SNOW."
+}
+
+# Parse command line options
+TICKETS=()
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+        -t|--ticket)
+            if [ -n "$2" ] && [[ $2 != -* ]]; then
+                TICKETS+=("$2")
+                shift 2
+            else
+                echo "Error: --ticket requires a non-empty argument."
+                usage
+                exit 1
+            fi
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+    esac
+    shift 0
+done
+
+{% endraw %}
+/usr/bin/ansible-playbook {{ playbook_dir }}/snow-ai.yml
+{% raw %}
+echo "---> Starting SNOW AI selenium script in batch mode <---"
+/usr/bin/python3 /tmp/snow-ai.py &
+{% endraw %} 

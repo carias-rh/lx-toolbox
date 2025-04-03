@@ -33,14 +33,31 @@ def switch_to_iframe():
     iframe = shadow_root.find_element(By.CSS_SELECTOR, 'iframe#gsft_main')
     WebDriverWait(driver, 3).until(EC.frame_to_be_available_and_switch_to_it(iframe))
 
+def check_cookies():
+    try:
+        WebDriverWait(driver, 2).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')))
+        accept_cookies()
+    except:
+        pass
+
+def accept_cookies():
+        try:
+            WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']"))).click()
+            driver.refresh()
+        except:
+            driver.refresh()
+            pass
+
 def snow_login(snow_id):
     try:
         driver.get('https://redhat.service-now.com/surl.do?n=' + snow_id + '')
+        check_cookies()
 
         # RH SSO
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
+        time.sleep(10)
 
     except:
         print("An exception occurred while accepting during snow login")
@@ -49,6 +66,8 @@ def jira_login():
     try:
         driver.get("https://issues.redhat.com")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a'))).click()
+        time.sleep(2)
+        check_cookies()
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username-verification"]'))).send_keys("{{ username }}" + "@redhat.com")
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
@@ -115,12 +134,12 @@ def select_dropdown(element, input):
     element.send_keys(Keys.TAB)
 
 def switch_to_tab(tabname):
-    WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, f'//ul[@role="tablist"]//strong[text()="{tabname}"]'))).click()
-
-
+    WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, f'//ul[@role="tablist"]//li[@class="menu-item first" or @class="menu-item "]//strong[text()="{tabname}"]'))).click()
 
 def create_jira(snow_info):
     driver.get('https://issues.redhat.com/projects/PTL/issues')
+    time.sleep(5)
+
     # Click Create
     WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="create_link"]'))).click()
 
@@ -159,6 +178,12 @@ def create_jira(snow_info):
     # Select Visual mode back again
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[1]/button'))).click()
 
+    # Change to priority tab and change priority
+    switch_to_tab('Priority')
+    priority_dropdown = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
+    select_dropdown(priority_dropdown, "Minor")
+    switch_to_tab('Field Tab')
+
     # Select Component (course)
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]'))).send_keys(snow_info["Course"])
 
@@ -168,12 +193,7 @@ def create_jira(snow_info):
     # Select version
     version = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="versions-textarea"]')))
     version.send_keys(Keys.HOME)
-
-    # Change to priority tab and change priority
-    switch_to_tab('Priority')
-    priority_dropdown = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
-    select_dropdown(priority_dropdown, "Minor")
-    switch_to_tab('Field Tab')
+    version.send_keys(snow_info["Course"])
 
 
 # Main
@@ -186,5 +206,6 @@ if not check_running_session():
     create_jira(snow_info)
 else:
     driver = webdriver.Chrome(options=options)
+
     snow_info = get_snow_info("{{ snow_id }}")
     create_jira(snow_info)

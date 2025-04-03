@@ -61,6 +61,7 @@
         - qa.j2
         - jira.j2
         - snow.j2
+        - snow-ai.j2
       tags: scripts
 
 #    - name: generate secret and

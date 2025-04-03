@@ -1,1 +1,4 @@
-curl 'https://rol.redhat.com/rol/api/courses'   -H $'cookie: csrftoken=o1AsnI1kpG5T5TZS1JLjQ3B9rOf23ApM; sessionid=23sjft10dmf8orrdl2tsrwvk5xza3337;'  --compressed | jq -r '.[].path' |uniq |egrep -iv  "^$|_|custom|vc|premium|plus|subscription|sku|gss|boot-camp|enablement|exam|support" | egrep "[a-z][a-z][0-9]*[ea]*-[0-9]\.[0-9]"  > ../courses-list.txt
+#!/usr/bin/bash
+#curl 'https://rol.redhat.com/rol/api/courses' -H $'cookie: csrftoken=QQ5L6kIlYW44Fyhtvjqzsg5My14vSE1e; sessionid=ruyy5cs8t958tlnvrs13w871emhvvtuu;'  --compressed | jq -r '.[].path' |uniq |egrep -iv  "^$|_|custom|vc|premium|plus|subscription|sku|gss|boot-camp|enablement|exam|support" | grep -E "[a-z][a-z][0-9]*[ea]*-[0-9]\.[0-9]"  > ../courses-list.txt
+
+cat courses.json| jq '.[] |."path"' | cut -d '"' -f2 |uniq |egrep -iv "^$|_|custom|vc|premium|plus|subscription|sku|gss|boot-camp|enablement|exam|support" | grep -E "[a-z][a-z][0-9]*[ea]*-[0-9]\.[0-9]"  > ../courses-list.txt >                                       
