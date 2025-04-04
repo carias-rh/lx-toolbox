@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # -------------------------------------------------------------------
 LOCAL_CLONE_DIRECTORY = "{{ playbook_dir }}/files/"
 GUIDE_SUBDIR = "content"
+GUIDE_SUBDIR_XML = "guides/en-US/sg-chapters/topics"
 OLLAMA_COMMAND = "/usr/local/bin/ollama"  # Adjust if your Ollama binary is named differently
 CHROME_DEBUG_PORT = 9123    # Example local Chrome debugger port for your session
 CHROME_USER_DATA_DIR = "{{ ansible_env.HOME}}/.config/google-chrome/snow-typos"
@@ -270,25 +271,28 @@ def classify_ticket_llm(description: str) -> dict:
     step("Classifying ticket using LLM")
 
     json_example = '''{
-        "student_feedback":"in english, the user's feedback as it is, without any changes. Substitute double quotes with single quotes.", 
-        "most_defining_issue_keyword":["md5sum", "output", "command"],
+        "student_feedback":"hay un error en el laboratorio  ", 
+        "translated_student_feedback":"there is an error in the lab",
+        "summary":"The student is reporting an error in the lab",
         "is_content_issue_ticket":true,
         "is_environment_issue":false, 
-        "summary":"The md5sum command drops a different output than the one expected."
         }'''
     prompt = f"""
+        You are an expert classifier of Red Hat Training tickets.
         Classify the user's feedback regarding a Red Hat Training course, there are two types of tickets:
         - content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, etc.
         - environment_issue_ticket: if the feedback includes words such as 'lab start', 'FAIL', something like 'VM not booting or stuck', or 'lab is taking to long to start', it's an environment issue.
-        Return JSON with fields:
+        Return JSON with the following fields:
         - student_feedback: the user's feedback in english, as it is, without any changes. Substitute double quotes with single quotes.
-        - most_defining_issue_keyword: a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic. Also, consider as a single keyword a whole linux command with parameters (i.e "sudo chown -R jboss:jboss /opt/domain")
+        - translated_student_feedback: translate the user's feedback to english
+        - summary: in a short sentence, summarize the user's feedback
         - is_content_issue_ticket: (true/false)
         - is_environment_issue: (true/false)
-        - summary: in a short sentence, summarize the user's feedback
 
-        User feedback:
+        This is the student's feedback:
+        <student_feedback>
         \"\"\"{description}\"\"\"
+        </student_feedback>
 
         Reply in JSON only, no extra text.
         For example:
@@ -306,10 +310,9 @@ def classify_ticket_llm(description: str) -> dict:
         logger.error("Could not parse JSON from LLM. Full response:", classifying_response)
         return {
             "student_feedback": "",
-            "most_defining_issue_keyword": [],
+            "summary": "",
             "is_content_issue_ticket": False,
             "is_environment_issue": False,
-            "summary": "",
         }
 
 
@@ -393,17 +396,26 @@ def fetch_local_guide_text(section_info: str, repo_dir: str = None) -> str:
             section_info = section_info.replace("Quiz:", "").strip()
             logger.info(f"Removed 'Quiz:' from section info: {section_info}")
 
-        file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR} | grep -E 'ge.adoc|lecture.adoc|review.adoc|lab.adoc' | head -n1 | cut -d ':' -f1"
-    
+        
         try:
-            content_file = subprocess.check_output(file_dir, shell=True).decode().strip()
-            logger.info(f"Content file path: {content_file}")
-            with open(content_file) as file:
+            adoc_file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR} | grep -E 'ge.adoc|lecture.adoc|review.adoc|lab.adoc' | head -n1 | cut -d ':' -f1" 
+            adoc_file = subprocess.check_output(adoc_file_dir, shell=True).decode().strip()
+            logger.info(f"Adoc file path: {adoc_file}")
+            with open(adoc_file) as file:
                 content_file = file.read().strip()
         except Exception as e:
-            logger.error(f"Could open file {content_file}: {e}")
-            return ""            
-        return content_file.strip()
+            logger.error(f"Could open file adoc file {adoc_file}: {e}")
+            try:
+                xml_file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR_XML} | grep -E 'ge.xml|lecture.xml|review.xml|lab.xml' | head -n1 | cut -d ':' -f1" 
+                xml_file = subprocess.check_output(xml_file_dir, shell=True).decode().strip()
+                logger.info(f"XML file path: {xml_file}")
+                with open(xml_file) as file:
+                    content_file = file.read().strip()
+                    return xml_file
+            except Exception as e:
+                logger.error(f"Could open file xml file {xml_file}: {e}")
+                return ""            
+        return content_file
     else:
         logger.info("Not enough information to fetch local guide text.")
         return ""
@@ -432,7 +444,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         }'''
 
     prompt_text = f"""
-        You are an useful Red Hat Training expert who is able tounderstand the flow of the exercises and labs in the course guide.
+        You are an useful Red Hat Training expert who is able to understand the flow of the exercises and labs in the course guide.
         We have a student who reported an issue within the guide text. The student's feedback is:
         <student_feedback>
         {user_issue}
@@ -450,7 +462,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         Return your analysis in exactly the following JSON format without any extra text:
         {json_example}
 
-        Do not include any explanations or markdown formatting outside the JSON object.
+        Do not include any explanations, xml or markdown formatting outside the JSON object.
         """
 
     global analysis_response
@@ -484,7 +496,7 @@ def analyze_environment_issue(user_issue: str) -> str:
         Return your analysis in exactly the following JSON format without any extra text:
         {json_example}
 
-        Do not include any explanations or markdown formatting outside the JSON object.
+        Do not include any explanations, xml or markdown formatting outside the JSON object.
         """
     global analysis_response
     analysis_response = askOllama(prompt_text)
@@ -726,42 +738,12 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
     # 5. Fetch local guide text using the guide info
     if data.get("is_content_issue_ticket", False):
         logger.info(f"This SNOW ticket {snow_info['snow_id']} is recognized as a 'content' issue feedback ticket.")
-        local_guide_text = ""
+        guide_text = ""
         if section_info != "":
-            local_guide_text = fetch_local_guide_text(section_info, repo_dir)
+            guide_text = fetch_local_guide_text(section_info, repo_dir)
         else:
             logger.info("No course ID or lab script name found in the SNOW ticket.")
             
-
-        ## 6. Perform a grep search for the most defining issue keyword in the local guide text or pass the whole text to the LLM
-        #most_defining_issue_keyword = data.get("most_defining_issue_keyword", "")
-        #logger.info(f"Most defining issue keyword: {most_defining_issue_keyword}")
-        #grep_result = ""
-        #if most_defining_issue_keyword:
-        #    grep_results = []
-        #    for keyword in most_defining_issue_keyword:
-        #        if keyword != "":
-        #            try:
-        #                result = subprocess.run(
-        #                    ["grep", "-i", keyword],
-        #                    input=local_guide_text,
-        #                    text=True,
-        #                    capture_output=True
-        #                ).stdout
-        #                grep_results.append(result)                            
-        #            except subprocess.CalledProcessError as e:
-        #                logger.error(f"Grep command failed for keyword '{keyword}': {e}")
-        #    # Check if the grep results are getting too large
-        #    if sum(len(result.splitlines()) for result in grep_results) > 40:
-        #        logger.info("Grep results exceed 40 lines, using full guide text instead.")
-        #        guide_text = local_guide_text
-        #    else:
-        #        guide_text = "\n".join(grep_results)
-        #else:
-        #    guide_text = local_guide_text
-        #    logger.info("No defining issue keyword found in the LLM response.")
-
-        guide_text = local_guide_text
         print('############################################################################################')
         logger.info(f"Guide text:\n {guide_text}")
         print('############################################################################################')
