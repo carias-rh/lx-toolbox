@@ -221,15 +221,15 @@ def start_lab(driver):
     step("Starting lab")
     try:
         select_lab_environment_tab(driver, "lab")
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Start") or contains(text(), "Create")]'))).click()
-        increase_autostop(driver)
-        increase_lifespan(driver)
+        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Start") or contains(text(), "Create")]'))).click()
     except:
-        logger.error("Failed to start lab")
-    time.sleep(5)
+        logger.error("Failed to create/start lab")
+    increase_autostop(driver)
+    increase_lifespan(driver)
 
 
-def check_lab_status_button(first_or_second_button):
+
+def check_lab_status_button(driver, first_or_second_button):
     if first_or_second_button == "first":
         # Check lab status and start it if stopped or not created. The exception is needed because some courses don't work with the function contains(text(),"")
         try:
@@ -254,14 +254,14 @@ def increase_autostop(driver):
     try:
         select_lab_environment_tab(driver, "lab")
         # Wait until lab has been created and is running
-        if check_lab_status_button("first") == "CREATING": time.sleep(60)
-        elif check_lab_status_button("second") == "STARTING": time.sleep(60)
-        elif check_lab_status_button("second") == "STOP": time.sleep(1)
+        if check_lab_status_button(driver, "first") == "CREATING": time.sleep(60)
+        elif check_lab_status_button(driver, "second") == "STARTING": time.sleep(60)
+        elif check_lab_status_button(driver, "second") == "STOP": time.sleep(1)
 
         increase_autostop = WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
 
-        for i in range(30):
+        for i in range(12):
             increase_autostop.click()
     except:
         pass
@@ -274,7 +274,7 @@ def increase_lifespan(driver):
         increase_lifespan = WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')))
 
-        for i in range(30):
+        for i in range(14):
             increase_lifespan.click()
     except:
         pass
@@ -925,13 +925,27 @@ def get_ticket_ids(driver) -> list:
 
 
 
-#options.add_argument(f"--user-data-dir={CHROME_USER_DATA_DIR}")
 
 
 # -------------------------------------------------------------------
 # Main driver (example)
 # -------------------------------------------------------------------
 def main():
+
+#    if not check_running_session():
+#        open_profile()
+#        driver = get_chrome_driver()
+#        driver.get("https://rol.redhat.com")
+#        login_rol(driver)
+#        start_lab(driver)
+#    else:
+#        driver = get_chrome_driver()
+#        start_lab(driver)
+#
+#    # Break execution of main function
+#    logger.info("Exiting main function execution")
+#    return
+
     # Initialize the driver
     global step_counter
     step_counter = 1
