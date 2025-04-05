@@ -38,10 +38,10 @@ logger = logging.getLogger(__name__)
 # -------------------------------------------------------------------
 LOCAL_CLONE_DIRECTORY = "{{ playbook_dir }}/files/"
 GUIDE_SUBDIR = "content"
+GUIDE_SUBDIR_XML = "guides/en-US/sg-chapters/topics"
 OLLAMA_COMMAND = "/usr/local/bin/ollama"  # Adjust if your Ollama binary is named differently
 CHROME_DEBUG_PORT = 9123    # Example local Chrome debugger port for your session
 CHROME_USER_DATA_DIR = "{{ ansible_env.HOME}}/.config/google-chrome/snow-typos"
-FIREFOX_USER_DATA_DIR = "{{ ansible_env.HOME}}/.mozilla/firefox/yzdf71sh.snow-ai"
 
 step_counter = 1
 # Prints the current step
@@ -119,9 +119,9 @@ def askOllama(prompt: str) -> str:
     Make sure 'ollama' is installed on your system and in PATH.
     """
     try:
-        # Use 'ollama run <model> "<prompt>"'
+        # Use 'ollama run <model> "<prompt>"' with context window size set to 128k
         result = subprocess.run(
-            [OLLAMA_COMMAND, "run", OLLAMA_MODEL, "--format", "json", prompt],
+            [OLLAMA_COMMAND, "run", OLLAMA_MODEL, "/set", "parameter", "num_ctx", "128000", "--format", "json", prompt],
             capture_output=True,
             text=True
         )
@@ -212,13 +212,8 @@ def login_rol(driver):
         check_cookies(driver)
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input"))).send_keys("{{ rh_username }}@redhat.com")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
-
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
 
-        # RH SSO
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
     except:
         logger.error("Login failed")
 
@@ -234,23 +229,22 @@ def start_lab(driver):
     time.sleep(5)
 
 
-
 def check_lab_status_button(first_or_second_button):
     if first_or_second_button == "first":
         # Check lab status and start it if stopped or not created. The exception is needed because some courses don't work with the function contains(text(),"")
         try:
             # Try with first button first
-            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][1][contains(text(), "Create") or contains(text(), "Delete") or contains(text(), "Deleting") or contains(text(), "Creating")]'))).text
+            lab_status_button = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][1][contains(text(), "Create") or contains(text(), "Delete") or contains(text(), "Deleting") or contains(text(), "Creating")]'))).text
         except:
             # Else try with second button
-            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+            lab_status_button = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
     elif first_or_second_button == "second":
         try:
             # Try with second button first
-            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+            lab_status_button = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
         except:
             # Else try with first button
-            lab_status_button = WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
+            lab_status_button = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH,'//*[@id="tab-course-lab-environment"]//*[@type="button"][2][contains(text(), "Start") or contains(text(), "Stop") or contains(text(), "Starting")]'))).text
     #print("Lab button is: " + lab_status_button)
     return lab_status_button
 
@@ -258,11 +252,11 @@ def check_lab_status_button(first_or_second_button):
 def increase_autostop(driver):
     step("Increasing auto-stop counter")
     try:
-        time.sleep(10)
         select_lab_environment_tab(driver, "lab")
         # Wait until lab has been created and is running
         if check_lab_status_button("first") == "CREATING": time.sleep(60)
-        elif check_lab_status_button("second") == "STARTING": time.sleep(30)
+        elif check_lab_status_button("second") == "STARTING": time.sleep(60)
+        elif check_lab_status_button("second") == "STOP": time.sleep(1)
 
         increase_autostop = WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
@@ -307,12 +301,6 @@ def login_jira(driver):
         WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a'))).click()
         time.sleep(3)
 
-        #check_cookies(driver)
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username-verification"]'))).send_keys("{{ username }}" + "@redhat.com")
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
-        #WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
-        #time.sleep(5)
-        #driver.get("https://issues.redhat.com/projects/PTL/issues")
     except Exception as e:
         logger.error("An exception occurred during jira login:", e)
 
@@ -357,22 +345,29 @@ def classify_ticket_llm(description: str) -> dict:
     step("Classifying ticket using LLM")
 
     json_example = '''{
-        "student_feedback":"", 
-        "most_defining_issue_keyword":["md5sum", "output", "command"],
+        "student_feedback":"hay un error en el laboratorio  ", 
+        "translated_student_feedback":"there is an error in the lab",
+        "summary":"The student is reporting an error in the lab",
         "is_content_issue_ticket":true,
         "is_environment_issue":false, 
-        "summary":"The md5sum command drops a different output than the one expected."
         }'''
     prompt = f"""
-        Classify the user's feedback regarding a Red Hat Training course, a typo can be a mismatch or inconsistency between the user's complaint and the text in the guide. Return JSON with fields:
-        - student_feedback: the user's feedback as it is, without any changes, translated to english from any language
-        - most_defining_issue_keyword: a list of 3 substantive/names words such as 'ansible.builtin.lineinfile' (not verbs or adjectives) from the student_feedback that are the most unique and less generic. Also, consider as a single keyword a whole linux command with parameters (i.e "sudo chown -R jboss:jboss /opt/domain")
-        - is_content_issue_ticket: (true/false)
-        - is_environment_issue: (true/false), feedback may include words such as 'lab start', script FAIL, VM not booting or stuck, lab taking to long to start, etc.
-        - summary: in a short sentence, summarize the user's feedback
+        You are an expert classifier of Red Hat Training tickets.
+        Classify the user's feedback regarding a Red Hat Training course, there are two types of tickets:
+        - content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, etc.
+        - environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', it's an environment issue.
 
-        User feedback:
+        Return JSON with the following fields:
+        - student_feedback: the user's feedback in english, as it is, without any changes. Substitute double quotes with single quotes.
+        - translated_student_feedback: translate the user's feedback to english. If the student's feedback is in english don't include this field.
+        - summary: in a short sentence, summarize the user's feedback
+        - is_content_issue_ticket: (true/false)
+        - is_environment_issue: (true/false)
+
+        This is the student's feedback:
+        <student_feedback>
         \"\"\"{description}\"\"\"
+        </student_feedback>
 
         Reply in JSON only, no extra text.
         For example:
@@ -391,10 +386,10 @@ def classify_ticket_llm(description: str) -> dict:
         logger.error("Could not parse JSON from LLM. Full response:", classifying_response)
         return {
             "student_feedback": "",
-            "most_defining_issue_keyword": [],
+            "translated_student_feedback": "",
+            "summary": "",
             "is_content_issue_ticket": False,
             "is_environment_issue": False,
-            "summary": "",
         }
 
 
@@ -478,17 +473,26 @@ def fetch_local_guide_text(section_info: str, repo_dir: str = None) -> str:
             section_info = section_info.replace("Quiz:", "").strip()
             logger.info(f"Removed 'Quiz:' from section info: {section_info}")
 
-        file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR} | grep -E 'ge.adoc|lecture.adoc|review.adoc|lab.adoc' | head -n1 | cut -d ':' -f1"
-    
+        
         try:
-            content_file = subprocess.check_output(file_dir, shell=True).decode().strip()
-            logger.info(f"Content file path: {content_file}")
-            with open(content_file) as file:
+            adoc_file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR} | grep -E 'ge.adoc|lecture.adoc|review.adoc|lab.adoc' | head -n1 | cut -d ':' -f1" 
+            adoc_file = subprocess.check_output(adoc_file_dir, shell=True).decode().strip()
+            logger.info(f"Adoc file path: {adoc_file}")
+            with open(adoc_file) as file:
                 content_file = file.read().strip()
         except Exception as e:
-            logger.error(f"Could open file {content_file}: {e}")
-            return ""            
-        return content_file.strip()
+            logger.error(f"Could open file adoc file {adoc_file}: {e}")
+            try:
+                xml_file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR_XML} | grep -E 'ge.xml|lecture.xml|review.xml|lab.xml' | head -n1 | cut -d ':' -f1" 
+                xml_file = subprocess.check_output(xml_file_dir, shell=True).decode().strip()
+                logger.info(f"XML file path: {xml_file}")
+                with open(xml_file) as file:
+                    content_file = file.read().strip()
+                    return content_file
+            except Exception as e:
+                logger.error(f"Could open file xml file {xml_file}: {e}")
+                return ""            
+        return content_file
     else:
         logger.info("Not enough information to fetch local guide text.")
         return ""
@@ -506,10 +510,11 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-        "excerpt": "the excerpt from the guide_text that the student's feedback refers to",
+        "student_feedback": "the student's feedback, as it is, without any changes. Substitute double quotes with single quotes.",
+        "excerpt": "the excerpt from the guide_text that the student's feedback refers to. Substitute double quotes in this field with single quotes.",
         "analysis": "think step by step, first try to understand student_feedback, then explain what the student is trying to communicate,
                      then comprehend the the guide_text excerpt, then compare to see if the student's claims are correct. 
-                     Detail the analysis as much as possible.",
+                     Detail the analysis as much as possible. Substitute double quotes in this field with single quotes.",
         "is_valid_issue": true/false if the student's feedback is legitimate and there is an issue in the guide to be corrected,
         "suggested_correction": "Indicate what words' lines or commands should be changed in the guide_text to fix the issue, do not include any explanations or markdown formatting outside the JSON object.",
         "summary": "a short/medium summary of the 'analysis' field",
@@ -517,7 +522,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         }'''
 
     prompt_text = f"""
-        You are an useful Red Hat Training expert who is able tounderstand the flow of the exercises and labs in the course guide.
+        You are an useful Red Hat Training expert who is able to understand the flow of the exercises and labs in the course guide.
         We have a student who reported an issue within the guide text. The student's feedback is:
         <student_feedback>
         {user_issue}
@@ -535,12 +540,12 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         Return your analysis in exactly the following JSON format without any extra text:
         {json_example}
 
-        Do not include any explanations or markdown formatting outside the JSON object.
+        Do not include any explanations, xml or markdown formatting outside the JSON object.
         """
 
     global analysis_response
-    #analysis_response = askOllama(prompt_text)
-    analysis_response = ask_gpt4_mini(prompt_text)
+    analysis_response = askOllama(prompt_text)
+    #analysis_response = ask_gpt4_mini(prompt_text)
     return analysis_response
 
 def analyze_environment_issue(user_issue: str) -> str:
@@ -570,7 +575,7 @@ def analyze_environment_issue(user_issue: str) -> str:
         Return your analysis in exactly the following JSON format without any extra text:
         {json_example}
 
-        Do not include any explanations or markdown formatting outside the JSON object.
+        Do not include any explanations, xml or markdown formatting outside the JSON object.
         """
     global analysis_response
     analysis_response = askOllama(prompt_text)
@@ -619,6 +624,7 @@ def get_snow_info(driver, snow_id):
         "RHNID": rhnid,
     }
     driver.refresh()
+    logger.info(f"Snow info: {snow_info}")
     return snow_info
 
 def select_dropdown(element, input):
@@ -651,8 +657,6 @@ def create_jira(driver, snow_info, analysis_response):
     color1 = '{color:#0747a6}'
     color2 = '{color}'
     description = f"""
-        h3. {color1}*Please fill in the following information:*{color2}
-    ----
     |*URL:*|[ch{snow_info["Chapter"]}s{snow_info["Section"]} |{snow_info["URL"]}]|
     |*Reporter RHNID:*| {snow_info["RHNID"]} |
     |*Section title:*|{snow_info["Title"]}|
@@ -660,7 +664,7 @@ def create_jira(driver, snow_info, analysis_response):
 
     *Issue description*
 
-    {snow_info["Description"]}
+    {analysis_response.get("translated_student_feedback", snow_info["Description"])}
 
     *Steps to reproduce:*
 
@@ -759,7 +763,7 @@ We created a Jira ticket to fix it in the next release.
 Thanks again for your contributions to improving the course guide! 
 
 Best Regards,
-Carlos Arias
+{{ teammate_name }}
 Red Hat Learner Experience Team
 """
         WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text)
@@ -778,7 +782,7 @@ If by the time you read this message it is still not working fine, I would sugge
 Please, let me know if the issue persists.
 
 Best Regards,
-Carlos Arias
+{{ teammate_name }}
 Red Hat Learner Experience Team
 """
         WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text)
@@ -813,51 +817,18 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
     # 5. Fetch local guide text using the guide info
     if data.get("is_content_issue_ticket", False):
         logger.info(f"This SNOW ticket {snow_info['snow_id']} is recognized as a 'content' issue feedback ticket.")
-        local_guide_text = ""
+        guide_text = ""
         if section_info != "":
-            local_guide_text = fetch_local_guide_text(section_info, repo_dir)
+            guide_text = fetch_local_guide_text(section_info, repo_dir)
         else:
             logger.info("No course ID or lab script name found in the SNOW ticket.")
             
-
-        ## 6. Perform a grep search for the most defining issue keyword in the local guide text or pass the whole text to the LLM
-        #most_defining_issue_keyword = data.get("most_defining_issue_keyword", "")
-        #logger.info(f"Most defining issue keyword: {most_defining_issue_keyword}")
-        #grep_result = ""
-        #if most_defining_issue_keyword:
-        #    grep_results = []
-        #    for keyword in most_defining_issue_keyword:
-        #        if keyword != "":
-        #            try:
-        #                result = subprocess.run(
-        #                    ["grep", "-i", keyword],
-        #                    input=local_guide_text,
-        #                    text=True,
-        #                    capture_output=True
-        #                ).stdout
-        #                grep_results.append(result)                            
-        #            except subprocess.CalledProcessError as e:
-        #                logger.error(f"Grep command failed for keyword '{keyword}': {e}")
-        #    # Check if the grep results are getting too large
-        #    if sum(len(result.splitlines()) for result in grep_results) > 40:
-        #        logger.info("Grep results exceed 40 lines, using full guide text instead.")
-        #        guide_text = local_guide_text
-        #    else:
-        #        guide_text = "\n".join(grep_results)
-        #else:
-        #    guide_text = local_guide_text
-        #    logger.info("No defining issue keyword found in the LLM response.")
-
-        guide_text = local_guide_text
         print('############################################################################################')
         logger.info(f"Guide text:\n {guide_text}")
         print('############################################################################################')
 
         analysis_content_response = analyze_content_issue(snow_info["Description"], guide_text)
         print(f"[LLM response]:\n{analysis_content_response}")
-
-        # Escape backslashes
-        analysis_content_response = analysis_content_response.replace("\\", "\\\\")
 
         # Parse the JSON
         try:
@@ -870,13 +841,19 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
 
         analysis_environment_response = analyze_environment_issue(snow_info["Description"])
         print(f"[LLM response]:\n{analysis_environment_response}")
-        analysis_response_json = json.loads(analysis_environment_response)
+        # Parse the JSON
+        try:
+            analysis_response_json = json.loads(analysis_environment_response)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decoding failed: {e}")
 
-        if analysis_response_json.get("is_valid_issue", False):
-            start_lab(driver)
-                
+        
+                        
 
     if analysis_response_json.get("is_valid_issue", False):
+        # 6. Start the lab
+        start_lab(driver)
+
         # 7. Add work note in the SNOW ticket with the summary of the analysis
         work_note = f"Summary of the analysis:\n"
         work_note += f"{analysis_response_json.get('summary', 'No summary available')}\n"
@@ -958,14 +935,12 @@ def main():
     # Initialize the driver
     global step_counter
     step_counter = 1
-    options = Options()
-    options.add_argument(f"--user-data-dir={FIREFOX_USER_DATA_DIR}")
-    driver = webdriver.Firefox(options=options)
+    driver = webdriver.Firefox()
     driver.maximize_window()
 
     # Login into ServiceNow
-    driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
-    #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253D5267c5b81bf9c0104862b8cc1d4bcba5%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253D5267c5b81bf9c0104862b8cc1d4bcba5%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     login_snow(driver)
 
     # Login into rol.redhat.com
