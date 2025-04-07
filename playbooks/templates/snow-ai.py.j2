@@ -106,7 +106,7 @@ def get_chrome_driver() -> webdriver.Chrome:
 # You can change the model to one available on your system.
 #OLLAMA_MODEL = "llama3.2:latest"
 #OLLAMA_MODEL = "granite3.1-dense:8b"
-#OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"   # <--- This is the best model for this task so far
+#OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
 #OLLAMA_MODEL = "gemma3:12b" 
 OLLAMA_MODEL = "gemma3:1b"
@@ -119,9 +119,9 @@ def askOllama(prompt: str) -> str:
     Make sure 'ollama' is installed on your system and in PATH.
     """
     try:
-        # Use 'ollama run <model> "<prompt>"'
+        # Use 'ollama run <model> "<prompt>"' with context window size set to 128k
         result = subprocess.run(
-            [OLLAMA_COMMAND, "run", OLLAMA_MODEL, "--format", "json", prompt],
+            [OLLAMA_COMMAND, "run", OLLAMA_MODEL, "/set", "parameter", "num_ctx", "128000", "--format", "json", prompt],
             capture_output=True,
             text=True
         )
@@ -174,15 +174,15 @@ def start_lab(driver):
     step("Starting lab")
     try:
         select_lab_environment_tab(driver, "lab")
-        WebDriverWait(driver, 30).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Start") or contains(text(), "Create")]'))).click()
-        increase_autostop(driver)
-        increase_lifespan(driver)
+        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Start") or contains(text(), "Create")]'))).click()
     except:
-        logger.error("Failed to start lab")
-    time.sleep(5)
+        logger.error("Failed to create/start lab")
+    increase_autostop(driver)
+    increase_lifespan(driver)
 
 
-def check_lab_status_button(first_or_second_button):
+
+def check_lab_status_button(driver, first_or_second_button):
     if first_or_second_button == "first":
         # Check lab status and start it if stopped or not created. The exception is needed because some courses don't work with the function contains(text(),"")
         try:
@@ -207,14 +207,14 @@ def increase_autostop(driver):
     try:
         select_lab_environment_tab(driver, "lab")
         # Wait until lab has been created and is running
-        if check_lab_status_button("first") == "CREATING": time.sleep(60)
-        elif check_lab_status_button("second") == "STARTING": time.sleep(60)
-        elif check_lab_status_button("second") == "STOP": time.sleep(1)
+        if check_lab_status_button(driver, "first") == "CREATING": time.sleep(60)
+        elif check_lab_status_button(driver, "second") == "STARTING": time.sleep(60)
+        elif check_lab_status_button(driver, "second") == "STOP": time.sleep(1)
 
         increase_autostop = WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
 
-        for i in range(30):
+        for i in range(12):
             increase_autostop.click()
     except:
         pass
@@ -227,7 +227,7 @@ def increase_lifespan(driver):
         increase_lifespan = WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')))
 
-        for i in range(30):
+        for i in range(14):
             increase_lifespan.click()
     except:
         pass
@@ -281,10 +281,11 @@ def classify_ticket_llm(description: str) -> dict:
         You are an expert classifier of Red Hat Training tickets.
         Classify the user's feedback regarding a Red Hat Training course, there are two types of tickets:
         - content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, etc.
-        - environment_issue_ticket: if the feedback includes words such as 'lab start', 'FAIL', something like 'VM not booting or stuck', or 'lab is taking to long to start', it's an environment issue.
+        - environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', it's an environment issue.
+
         Return JSON with the following fields:
         - student_feedback: the user's feedback in english, as it is, without any changes. Substitute double quotes with single quotes.
-        - translated_student_feedback: translate the user's feedback to english
+        - translated_student_feedback: translate the user's feedback to english. If the student's feedback is in english don't include this field.
         - summary: in a short sentence, summarize the user's feedback
         - is_content_issue_ticket: (true/false)
         - is_environment_issue: (true/false)
@@ -301,7 +302,7 @@ def classify_ticket_llm(description: str) -> dict:
     
     global classifying_response
     classifying_response = askOllama(prompt)
-
+    
     print("[LLM response]:\n", classifying_response)
     # Then parse JSON via Python. Temporary fallback if there's an error:
     try:
@@ -310,6 +311,7 @@ def classify_ticket_llm(description: str) -> dict:
         logger.error("Could not parse JSON from LLM. Full response:", classifying_response)
         return {
             "student_feedback": "",
+            "translated_student_feedback": "",
             "summary": "",
             "is_content_issue_ticket": False,
             "is_environment_issue": False,
@@ -411,7 +413,7 @@ def fetch_local_guide_text(section_info: str, repo_dir: str = None) -> str:
                 logger.info(f"XML file path: {xml_file}")
                 with open(xml_file) as file:
                     content_file = file.read().strip()
-                    return xml_file
+                    return content_file
             except Exception as e:
                 logger.error(f"Could open file xml file {xml_file}: {e}")
                 return ""            
@@ -433,6 +435,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
+        "student_feedback": "''' + user_issue + '''",
         "excerpt": "the excerpt from the guide_text that the student's feedback refers to. Substitute double quotes in this field with single quotes.",
         "analysis": "think step by step, first try to understand student_feedback, then explain what the student is trying to communicate,
                      then comprehend the the guide_text excerpt, then compare to see if the student's claims are correct. 
@@ -459,8 +462,11 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         Compare the student's feedback with the excerpt, and provide a detailed analysis of the issue.
         Remove from the response in the JSON any reference to titles or headings, as I already have that information.
 
-        Return your analysis in exactly the following JSON format without any extra text:
+        Return your analysis in exactly the following JSON example format without any extra text. Note that the description of what to put in each field is in every value of the JSON example:
+        <json_example>
         {json_example}
+        </json_example>
+
 
         Do not include any explanations, xml or markdown formatting outside the JSON object.
         """
@@ -577,8 +583,6 @@ def create_jira(driver, snow_info, analysis_response):
     color1 = '{color:#0747a6}'
     color2 = '{color}'
     description = f"""
-        h3. {color1}*Please fill in the following information:*{color2}
-    ----
     |*URL:*|[ch{snow_info["Chapter"]}s{snow_info["Section"]} |{snow_info["URL"]}]|
     |*Reporter RHNID:*| {snow_info["RHNID"]} |
     |*Section title:*|{snow_info["Title"]}|
@@ -586,7 +590,7 @@ def create_jira(driver, snow_info, analysis_response):
 
     *Issue description*
 
-    {snow_info["Description"]}
+    {analysis_response.get("translated_student_feedback", snow_info["Description"])}
 
     *Steps to reproduce:*
 
@@ -846,7 +850,6 @@ def get_ticket_ids(driver) -> list:
 
 
 
-#options.add_argument(f"--user-data-dir={CHROME_USER_DATA_DIR}")
 
 
 # -------------------------------------------------------------------
@@ -862,20 +865,16 @@ def main():
     # Login into ServiceNow
     driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     service_now_tickets_window = driver.current_window_handle
-
-    #login_snow(driver)
     time.sleep(25)
-    
+
     # Login into rol.redhat.com
     driver.switch_to.new_window('tab')
     driver.get("https://rol.redhat.com")
-    #login_rol(driver)
-    time.sleep(20)
+    time.sleep(25)
 
     # Login into jira
     driver.switch_to.new_window('tab')
     driver.get("https://issues.redhat.com/secure/Dashboard.jspa")
-    #login_jira(driver)
     time.sleep(10)
 
     # Switch back to the original tab
@@ -903,6 +902,7 @@ def main():
             logger.error(f"Failed to process ticket {ticket_id}: {e}")
             step_counter = 1
             continue
+
 if __name__ == "__main__":
     main()
 
