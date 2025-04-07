@@ -183,7 +183,6 @@ def search_name(email):
     WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//input[@id="in_username"]'))).send_keys(email)
     WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//button[@class="btn btn--submit"]'))).click()
     WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//h4[@class="title"]/a'))).click()
-    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//div[@class="my-team__tab"]/*[contains(text(), "User Summary")]')))
     first_name = str(WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.XPATH, '/html/body/div/main/div[1]/div[2]/section/div/div[2]/div/div/span'))).text).capitalize()
     last_name = str(WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.XPATH, '/html/body/div/main/div[1]/div[2]/section/div/div[3]/div/div/span'))).text).capitalize()
     full_name = f"{first_name} {last_name}"
@@ -309,8 +308,9 @@ def auto_assign_tickets(teammate_name):
                 try:
                     email = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
                     full_name = search_name(email)
-                except:
+                except Exception as e:
                     logging.error("No email in the description")
+                    handle_exception(e)
 
                 switch_to_iframe()
 
@@ -321,8 +321,9 @@ def auto_assign_tickets(teammate_name):
                 # Fill in email
                 WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]'))).clear()
                 WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.u_email_from_address"]'))).send_keys(email)
-            except:
+            except Exception as e:
                 logging.error("Failed to fill in name or email")
+                handle_exception(e)
 
             # Get the summary and fill in the short description
             try:
@@ -335,8 +336,9 @@ def auto_assign_tickets(teammate_name):
                 WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.short_description"]'))).send_keys(
                     course[0].split(":  ")[1].upper().replace(" ", "") + "-" + version[0].split(":  ")[1] + " Feedback: " + summary[
                                                                                                                             :200] + "...")
-            except:
+            except Exception as e:
                 logging.debug("Failed to fill short_description")
+                handle_exception(e)
 
             # Fill the Project Code field with the course for easier categorization
             try:
@@ -344,8 +346,9 @@ def auto_assign_tickets(teammate_name):
                     (By.XPATH, '/html/body/div[2]/form/div[1]/span[2]/span[1]'))).click()
                 WebDriverWait(driver, 5).until(EC.element_to_be_clickable(
                     (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.project_code"]'))).send_keys(course[0].split(":  ")[1].upper().replace(" ", ""))
-            except:
+            except Exception as e:
                 logging.debug("Failed to fill Project Code")
+                handle_exception(e)
 
 
 {% endif %}
@@ -558,7 +561,7 @@ snow_login()
 lms_login()
 
 target_reporters = [
-    "lauber", "rht-jordisola", "rht-zgutterman", "abhkuma@redhat.com", "lxncastill",
+    "gls-ftaylor", "lauber", "rht-jordisola", "rht-zgutterman", "abhkuma@redhat.com", "lxncastill",
     "rh-ee-smaity", "nehsingh@redhat.com", "rht-bchardim", "yuvaraj-rhls", "rht-pagomez",
     "vig@redhat.com", "rhn-gls-rtaniguchi", "abpatel@redhat.com", "rh-ee-tshi", "rht-sbonnevi",
     "rht-psolarvi", "wraja@redhat.com", "chetan-rhls", "rdacosta1@redhat.com", "ssanyal@redhat.com",
