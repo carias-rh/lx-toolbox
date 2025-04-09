@@ -28,6 +28,21 @@ spec:
                   value: :99
                 - name: PYTHONUNBUFFERED
                   value: "1"
+                - name: LMS_CLIENT_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: lms-credentials
+                      key: LMS_CLIENT_ID                  
+                - name: LMS_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: lms-credentials
+                      key: LMS_CLIENT_SECRET
+                - name: LMS_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: lms-credentials
+                      key: LMS_USERNAME                  
               image: quay.io/carias_rh/lx-toolbox:latest
               imagePullPolicy: Always
               name: snow-t2
