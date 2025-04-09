@@ -5,6 +5,7 @@ import time, sys, os.path, traceback
 import re
 import logging
 import json
+import requests
 
 from urllib.request import urlopen
 from selenium import webdriver
@@ -175,23 +176,66 @@ def lms_login():
     driver.switch_to.window(driver.window_handles[0])
 
 
-def search_name(email):
-    driver.switch_to.window(driver.window_handles[1])
-    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//div[@class="primary-nav"]//li[@class="dd nav-admin"]'))).click()
-    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@class="subnav-admin_menu"]'))).click()
-    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "User Summary")]'))).click()
-    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//input[@id="in_username"]'))).send_keys(email)
-    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//button[@class="btn btn--submit"]'))).click()
-    WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//h4[@class="title"]/a'))).click()
-    first_name = str(WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.XPATH, '/html/body/div/main/div[1]/div[2]/section/div/div[2]/div/div/span'))).text).capitalize()
-    last_name = str(WebDriverWait(driver, 60).until(EC.presence_of_element_located((By.XPATH, '/html/body/div/main/div[1]/div[2]/section/div/div[3]/div/div/span'))).text).capitalize()
-    full_name = f"{first_name} {last_name}"
-    logging.info(full_name)
-    time.sleep(2)
-    driver.switch_to.window(driver.window_handles[0])
-    time.sleep(1)
-    return full_name
+def search_name(username):
+    # Use the LMS API to retrieve user details based on the email
+    token = get_lms_token()
+    if not token:
+        logging.error("LMS_TOKEN environment variable is not set.")
+        return email
 
+    headers = {
+        'Accept': '*/*',
+        'Authorization': f'Bearer {token}'
+    }
+
+    url = f"https://training-lms.redhat.com/ws/user?username={username}"
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+        user_data = data.get('user', {})
+        if not user_data:
+            logging.error("LMS API response missing user data")
+            return username
+
+        full_name = user_data.get('fullName', '')
+
+        if not full_name:
+            logging.error("LMS API response missing required name fields")
+            first_name = user_data.get('firstName', '')
+            last_name = user_data.get('lastName', '')
+            full_name = f"{first_name.capitalize()} {last_name.capitalize()}"
+            return full_name
+
+
+        return full_name
+    except Exception as e:
+        logging.error("Error fetching LMS user data: " + str(e))
+        return username
+
+def get_lms_token():
+    """Retrieve LMS token using client credentials via the LMS API."""
+    token_url = "https://training-lms.redhat.com/auth/oauth2/token"
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    data = {
+        'username': os.environ.get('LMS_USERNAME'),
+        'client_id': os.environ.get('LMS_CLIENT_ID'),
+        'client_secret': os.environ.get('LMS_CLIENT_SECRET'),
+        'grant_type': 'client_credentials'
+    }
+    try:
+        response = requests.post(token_url, headers=headers, data=data)
+        response.raise_for_status()
+        token_response = response.json()
+        token = token_response.get('access_token')
+        if not token:
+            logging.error("LMS token not found in response")
+            return None
+        return token
+    except Exception as e:
+        logging.error("Error getting LMS token: " + str(e))
+        return None
 
 def fill_in_categorization_fields():
 {% if team_name == 'RHT Learner Experience' %}
@@ -300,17 +344,12 @@ def auto_assign_tickets(teammate_name):
             # Extract user name from description and fill in the field
             try:
                 username = re.findall("User Name:.*", description)
-                username = username[0].split(":  ")[1]
+                username = username[0].split(":  ")[1].strip()
+                full_name = search_name(username)
 
                 # Extract user email from description and fill in the field
                 user_email = re.findall("User Email:.*", description)
-                # RedHatters' issues usually come without email, just their RHNID in "User Name: " field, so it will fail the following email regex being empty and will jump to the except
-                try:
-                    email = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
-                    full_name = search_name(email)
-                except Exception as e:
-                    logging.error("No email in the description")
-                    handle_exception(e)
+                email = re.findall(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", user_email[0])[0]
 
                 switch_to_iframe()
 
@@ -558,7 +597,6 @@ def resolve_tickets_for_reporters(target_reporters):
 go_to_main_site()
 snow_login()
 {% if team_name == 'RHT Learner Experience - T2' %}
-lms_login()
 
 target_reporters = [
     "gls-ftaylor", "lauber", "rht-jordisola", "rht-zgutterman", "abhkuma@redhat.com", "lxncastill",
