@@ -176,12 +176,11 @@ def lms_login():
     driver.switch_to.window(driver.window_handles[0])
 
 
-def search_name(username):
-    # Use the LMS API to retrieve user details based on the email
+def search_name(username):    
     token = get_lms_token()
     if not token:
         logging.error("LMS_TOKEN environment variable is not set.")
-        return email
+        return username
 
     headers = {
         'Accept': '*/*',
@@ -189,8 +188,20 @@ def search_name(username):
     }
 
     url = f"https://training-lms.redhat.com/ws/user?username={username}"
+
     try:
         response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            pass
+        elif response.status_code == 400:
+            response_data = response.json()
+            if isinstance(response_data, list) and len(response_data) > 0:
+                error = response_data[0]
+                if error.get('errorCode') == -20001:
+                    # User not found, try with internal_ prefix
+                    internal_username = f"internal_{username}"
+                    internal_url = f"https://training-lms.redhat.com/ws/user?username={internal_username}"
+                    response = requests.get(internal_url, headers=headers)
         response.raise_for_status()
         data = response.json()
 
@@ -208,10 +219,9 @@ def search_name(username):
             full_name = f"{first_name.capitalize()} {last_name.capitalize()}"
             return full_name
 
-
         return full_name
     except Exception as e:
-        logging.error("Error fetching LMS user data: " + str(e))
+        logging.error(f"Error fetching LMS user data:  {response.json()}")
         return username
 
 def get_lms_token():
