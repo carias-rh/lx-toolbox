@@ -37,8 +37,7 @@ logger = logging.getLogger(__name__)
 # Configurable constants for local paths, etc.
 # -------------------------------------------------------------------
 LOCAL_CLONE_DIRECTORY = "{{ playbook_dir }}/files/"
-GUIDE_SUBDIR = "content"
-GUIDE_SUBDIR_XML = "guides/en-US/sg-chapters/topics"
+
 OLLAMA_COMMAND = "/usr/local/bin/ollama"  # Adjust if your Ollama binary is named differently
 CHROME_DEBUG_PORT = 9123    # Example local Chrome debugger port for your session
 CHROME_USER_DATA_DIR = "{{ ansible_env.HOME}}/.config/google-chrome/snow-typos"
@@ -108,8 +107,8 @@ def get_chrome_driver() -> webdriver.Chrome:
 #OLLAMA_MODEL = "granite3.1-dense:8b"
 #OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"   # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
-OLLAMA_MODEL = "gemma3:12b" 
-#OLLAMA_MODEL = "gemma3:1b"
+#OLLAMA_MODEL = "gemma3:12b" 
+OLLAMA_MODEL = "gemma3:1b"
 
 
 
@@ -436,15 +435,13 @@ def get_section_info(driver, course_url: str) -> str:
         driver.get(course_url)
         time.sleep(5)  # Allow time for the page to load completely
         
-        # If your course page has tabs, you might need to select the "course" tab
         select_lab_environment_tab(driver, "course")
 
-        # It is a guided exercise
+        # Get the section title
         relevant_section_info = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, "//h3/a[not(contains(@id, 'objectives'))]//.. | //*[contains(text(), 'lab start')] | //h2[@class='title'][contains(text(),'Quiz')]"))
-        ).text
+            EC.presence_of_element_located((By.XPATH, "//h2"))).text
 
-        logger.info(f"Found relevant section keyword: {relevant_section_info}")
+        logger.info(f"Found relevant section title: {relevant_section_info}")
         return relevant_section_info
 
     except Exception as e:
@@ -458,44 +455,80 @@ def get_section_info(driver, course_url: str) -> str:
 def fetch_local_guide_text(section_info: str, repo_dir: str = None) -> str:
     """
     Fetches the relevant guide text from the course repository.
-    If repo_dir is not provided, it is constructed from the course_id.
-    Uses lab_script_name to grep for the correct adoc file.
+    Handles different repository structures (content/guides) and file types (adoc/xml).
+    Uses section_info to find the correct file by searching for the title within files.
+    
+    Args:
+        section_info: The section title or identifier to search for
+        repo_dir: The repository directory path
+        
+    Returns:
+        str: The content of the matching file, or empty string if not found
     """
-
-    if repo_dir is not None and section_info != "":
-        # Check for non-breaking space in "Red{nbsp}Hat" and replace with regular space
-        if "Red Hat" in section_info:
-            section_info = section_info.replace("Red Hat", "Red{nbsp}Hat")
-            logger.info(f"Replaced non-breaking space in 'Red Hat': {section_info}")
-        
-        # Remove "Quiz:" from section_info if present
-        if "Quiz:" in section_info:
-            section_info = section_info.replace("Quiz:", "").strip()
-            logger.info(f"Removed 'Quiz:' from section info: {section_info}")
-
-        
-        try:
-            adoc_file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR} | grep -E 'ge.adoc|lecture.adoc|review.adoc|lab.adoc' | head -n1 | cut -d ':' -f1" 
-            adoc_file = subprocess.check_output(adoc_file_dir, shell=True).decode().strip()
-            logger.info(f"Adoc file path: {adoc_file}")
-            with open(adoc_file) as file:
-                content_file = file.read().strip()
-        except Exception as e:
-            logger.error(f"Could open file adoc file {adoc_file}: {e}")
-            try:
-                xml_file_dir = f"grep -ri '{section_info}' {repo_dir}/{GUIDE_SUBDIR_XML} | grep -E 'ge.xml|lecture.xml|review.xml|lab.xml' | head -n1 | cut -d ':' -f1" 
-                xml_file = subprocess.check_output(xml_file_dir, shell=True).decode().strip()
-                logger.info(f"XML file path: {xml_file}")
-                with open(xml_file) as file:
-                    content_file = file.read().strip()
-                    return content_file
-            except Exception as e:
-                logger.error(f"Could open file xml file {xml_file}: {e}")
-                return ""            
-        return content_file
-    else:
+    if repo_dir is None or not section_info:
         logger.info("Not enough information to fetch local guide text.")
         return ""
+
+    # Clean up section_info
+    section_info = section_info.strip()
+    if "Red Hat" in section_info:
+        section_info = section_info.replace("Red Hat", "Red{nbsp}Hat")
+        logger.info(f"Replaced non-breaking space in 'Red Hat': {section_info}")
+    
+    # Define possible directory structures and file patterns
+    dir_structures = [
+        f"{repo_dir}/content",
+        f"{repo_dir}/guides/en-US/sg-chapters/topics",
+        f"{repo_dir}/guides"
+    ]
+    
+    # Determine file patterns based on section type
+    if "Guided Exercise:" in section_info or "Lab: " in section_info:
+        file_patterns = ["*ge*", "*lab*", "*review*"]
+        section_info = section_info.replace("Guided Exercise: ", "").strip()
+        section_info = section_info.replace("Lab: ", "").strip()
+    else:
+        file_patterns = ["*lecture*", "*quiz*", "*summary*", "*multichoice*"]
+        if "Quiz:" in section_info:
+            section_info = section_info.replace("Quiz:", "").strip()
+
+    # Try each directory structure and file pattern combination
+    for dir_path in dir_structures:
+        if not os.path.exists(dir_path):
+            continue
+            
+        logger.info(f"Searching in directory: {dir_path}")
+        
+        # Try both adoc and xml files
+        for ext in ["adoc", "xml"]:
+            for pattern in file_patterns:
+                try:
+                    # First find files matching the pattern
+                    find_cmd = f"find {dir_path} -type f -name '{pattern}.{ext}'"
+                    matching_files = subprocess.check_output(find_cmd, shell=True).decode().strip().split('\n')
+                    
+                    # Then search within those files for the section title
+                    for file_path in matching_files:
+                        if not file_path:
+                            continue
+                            
+                        try:
+                            with open(file_path, 'r') as file:
+                                content = file.read()
+                                # Check if section_info is in the content
+                                if section_info in content:
+                                    logger.info(f"Found matching file: {file_path}")
+                                    return content.strip()
+                        except Exception as e:
+                            logger.error(f"Error reading file {file_path}: {e}")
+                            continue
+                            
+                except Exception as e:
+                    logger.error(f"Error searching for {pattern}.{ext} files: {e}")
+                    continue
+
+    logger.info(f"No matching file found for section: {section_info}")
+    return ""
 
 
 def analyze_content_issue(user_issue: str, guide_text: str) -> str:
@@ -511,7 +544,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
     """
     json_example = '''{
         "student_feedback": "''' + user_issue + '''",
-        "excerpt": "the excerpt from the guide_text that the student's feedback refers to. Substitute double quotes in this field with single quotes.",
+        "excerpt": "extract the text from the guide_text that the student's feedback refers to. Substitute double quotes in this field with single quotes to avoid errors in the JSON object.",
         "analysis": "think step by step, first try to understand student_feedback, then explain what the student is trying to communicate,
                      then comprehend the the guide_text excerpt, then compare to see if the student's claims are correct. 
                      Detail the analysis as much as possible. Substitute double quotes in this field with single quotes.",
@@ -596,9 +629,9 @@ def get_snow_info(driver, snow_id):
 
     # Get issue info
     issue = re.search(r"Description:\s*(.*?)\s*Copyright", description, re.DOTALL).group(1).strip()
-    course = re.findall("Course:.*", description)[0].split(":  ")[1].upper().replace(" ", "")
-    version = re.findall("Version:.*", description)[0].split(":  ")[1]
-    url = re.findall("URL:.*", description)[0].split(":  ")[1]
+    course = re.findall("Course:.*", description)[0].split(":  ")[1].upper().split(" ")[0].strip()
+    version = re.findall("Version:.*", description)[0].split(":  ")[1].strip()
+    url = re.findall("URL:.*", description)[0].split(":  ")[1].strip()
     if "role.rhu.redhat.com/rol-rhu" in url:
         url = url.replace("role.rhu.redhat.com/rol-rhu", "rol.redhat.com/rol")
 
