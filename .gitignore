@@ -11,4 +11,5 @@ geckodriver.log
 example.log
 playbooks/geckodriver.log
 playbooks/rol-lab.log
+playbooks/files/*
 rol-lab.log
