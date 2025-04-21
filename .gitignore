@@ -13,3 +13,8 @@ playbooks/geckodriver.log
 playbooks/rol-lab.log
 playbooks/files/*
 rol-lab.log
+openshift/*credentials*
+openshift/*secret*
+test.py
+*credential*
+*secret*
