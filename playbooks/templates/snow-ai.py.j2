@@ -33,6 +33,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# -------------------------------------------------------------------
+# # You can change the model to one available on your system.
+# -------------------------------------------------------------------
+#OLLAMA_MODEL = "llama3.2:latest"
+#OLLAMA_MODEL = "granite3.1-dense:8b"
+#OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"   # <--- This is the best model for this task so far
+#OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
+OLLAMA_MODEL = "gemma3:12b" 
+#OLLAMA_MODEL = "gemma3:1b"
+
+
+
 # -------------------------------------------------------------------
 # Configurable constants for local paths, etc.
 # -------------------------------------------------------------------
@@ -99,16 +112,6 @@ def get_chrome_driver() -> webdriver.Chrome:
         raise
 
 
-# -------------------------------------------------------------------
-# Example function to call Ollama locally with your query/prompt
-# -------------------------------------------------------------------
-# You can change the model to one available on your system.
-#OLLAMA_MODEL = "llama3.2:latest"
-#OLLAMA_MODEL = "granite3.1-dense:8b"
-#OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"   # <--- This is the best model for this task so far
-#OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
-OLLAMA_MODEL = "gemma3:12b" 
-#OLLAMA_MODEL = "gemma3:1b"
 
 
 
@@ -345,7 +348,7 @@ def classify_ticket_llm(description: str) -> dict:
 
     json_example = '''{
         "student_feedback":"hay un error en el laboratorio  ", 
-        "translated_student_feedback":"there is an error in the lab",
+        "language":"es",
         "summary":"The student is reporting an error in the lab",
         "is_content_issue_ticket":true,
         "is_environment_issue":false, 
@@ -358,7 +361,7 @@ def classify_ticket_llm(description: str) -> dict:
 
         Return JSON with the following fields:
         - student_feedback: the user's feedback in english, as it is, without any changes. Substitute double quotes with single quotes.
-        - translated_student_feedback: translate the user's feedback to english. If the student's feedback is in english don't include this field.
+        - language: the language of the student's feedback. If the student's feedback is in english, the value of this key-value pair is 'en'.
         - summary: in a short sentence, summarize the user's feedback
         - is_content_issue_ticket: (true/false)
         - is_environment_issue: (true/false)
@@ -618,6 +621,25 @@ def analyze_environment_issue(user_issue: str) -> str:
     #analysis_response = ask_gpt4_mini(prompt_text)
     return analysis_response
 
+def translate_text(text):
+    """
+    Translates text to the specified language using a LLM.
+    
+    Args:
+        text: The text to translate
+    Returns:
+        str: The translated text
+    """
+    prompt_text = f"""
+        Translate the following text to english:
+        <text>
+        {text}
+        </text>
+    """
+
+    translated_text = askOllama(prompt_text)
+    return translated_text
+
 def get_snow_info(driver, snow_id):
     driver.get('https://redhat.service-now.com/surl.do?n=' + snow_id + '')
     time.sleep(10)
@@ -672,7 +694,7 @@ def select_dropdown(element, input):
 def switch_to_tab(driver, tabname):
     WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, f'//ul[@role="tablist"]//li[@class="menu-item first" or @class="menu-item "]//strong[text()="{tabname}"]'))).click()
 
-def create_jira(driver, snow_info, analysis_response):
+def create_jira(driver, snow_info, analysis_response, classification_data):
 
     logger.info(f"Creating Jira ticket for {snow_info['snow_id']}")
 
@@ -692,6 +714,7 @@ def create_jira(driver, snow_info, analysis_response):
     # Add Description
     color1 = '{color:#0747a6}'
     color2 = '{color}'
+    translated = classification_data.get("translated_student_feedback", snow_info["Description"])
     description = f"""
     |*URL:*|[ch{snow_info["Chapter"]}s{snow_info["Section"]} |{snow_info["URL"]}]|
     |*Reporter RHNID:*| {snow_info["RHNID"]} |
@@ -700,7 +723,7 @@ def create_jira(driver, snow_info, analysis_response):
 
     *Issue description*
 
-    {analysis_response.get("translated_student_feedback", snow_info["Description"])}
+    {translated}
 
     *Steps to reproduce:*
 
@@ -840,6 +863,10 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
 
     # 1. Classify the ticket
     data = classify_ticket_llm(snow_info["Description"])
+    if data.get("language", "") == "en":
+        data["translated_student_feedback"] = snow_info["Description"]
+    else:
+        data["translated_student_feedback"] = translate_text(snow_info["Description"], data["language"])
 
     # 3. Ensure the repository is available
     repo_dir = ensure_course_repo(snow_info["Course"].lower())
@@ -919,7 +946,7 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         # 9.2 Create a Jira ticket in a new tab
         driver.execute_script("window.open('');")
         driver.switch_to.window(driver.window_handles[-1])
-        create_jira(driver, snow_info, analysis_response_json)
+        create_jira(driver, snow_info, analysis_response_json, data)
     return
 
 
