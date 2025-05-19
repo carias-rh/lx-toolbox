@@ -2,10 +2,10 @@
   hosts: localhost
   vars_files: credentials.yml
   vars:
-    - rh_username: "{{ username | default('') }}"
-    - rh_password: "{{ password | default('') }}"
-    - counter: 0
-    - status: "Away"
+    rh_username: "{{ username | default('') }}"
+    rh_password: "{{ password | default('') }}"
+    counter: 0
+    status: "Away"
         
   tasks:
     - name: Generate selenium script

@@ -10,6 +10,7 @@ import subprocess
 import time
 import json
 import logging
+from urllib.parse import quote
 from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -38,10 +39,10 @@ logger = logging.getLogger(__name__)
 #OLLAMA_MODEL = "granite3.1-dense:8b"
 #OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"  
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
+#OLLAMA_MODEL = "qwen3:latest"
+#OLLAMA_MODEL = "qwen3:1.7b"
 OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
-#OLLAMA_MODEL = "gemma3:1b"
-
-
+#OLLAMA_MODEL = "granite3.3:8b"
 
 # -------------------------------------------------------------------
 # Configurable constants for local paths, etc.
@@ -119,12 +120,24 @@ def askOllama(prompt: str) -> str:
     """
     try:
         # Use 'ollama run <model> "<prompt>"' with context window size set to 128k
-        result = subprocess.run(
-            [OLLAMA_COMMAND, "run", OLLAMA_MODEL, "/set", "parameter", "num_ctx", "128000", "--format", "json", prompt],
-            capture_output=True,
-            text=True
-        )
-        return result.stdout.strip()
+        if OLLAMA_MODEL.startswith("qwen"):
+            result = subprocess.run(
+                [OLLAMA_COMMAND, "run", OLLAMA_MODEL, prompt, "/set", "parameter", "num_ctx", "128000"],
+                capture_output=True,
+                text=True
+            )
+        else:
+            result = subprocess.run(
+                [OLLAMA_COMMAND, "run", OLLAMA_MODEL, prompt, "/set", "parameter", "num_ctx", "128000", "--format", "json"],
+                capture_output=True,
+                text=True
+            )
+        response = result.stdout.strip()
+        # Remove any <think>…</think> blocks from Qwen responses
+        if OLLAMA_MODEL.startswith("qwen"):
+            response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+            response = re.sub(r'</think>', '', response)
+        return response
     except Exception as e:
         logger.error(f"Could not run Ollama: {e}")
         return ""
@@ -312,12 +325,12 @@ def classify_ticket_llm(description: str) -> dict:
     step("Classifying ticket using LLM")
 
     json_example = '''{
-        "student_feedback":"hay un error en el laboratorio  ", 
-        "language":"es",
-        "summary":"The student is reporting an error in the lab",
-        "is_content_issue_ticket":true,
-        "is_environment_issue":false, 
-        }'''
+        "student_feedback": "hay un error en el laboratorio",
+        "language": "es",
+        "summary": "The student is reporting an error in the lab",
+        "is_content_issue_ticket": true,
+        "is_environment_issue": false
+    }'''
     prompt = f"""
         You are an expert classifier of Red Hat Training tickets.
         Classify the user's feedback regarding a Red Hat Training course, there are two types of tickets:
@@ -350,13 +363,13 @@ def classify_ticket_llm(description: str) -> dict:
         return json.loads(classifying_response)
     except:
         logger.error("Could not parse JSON from LLM. Full response:", classifying_response)
-        return {
-            "student_feedback": "",
-            "translated_student_feedback": "",
-            "summary": "",
-            "is_content_issue_ticket": False,
-            "is_environment_issue": False,
-        }
+    return {
+        "student_feedback": description,
+        "language": "en",
+        "summary": "Error parsing LLM response",
+        "is_content_issue_ticket": False,
+        "is_environment_issue": False,
+    }
 
 
 # -------------------------------------------------------------------
@@ -513,8 +526,8 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-        "student_feedback": "''' + user_issue + '''",
-        "excerpt": "extract the text from the guide_text that the student's feedback refers to. Substitute double quotes in this field with single quotes to avoid errors in the JSON object.",
+        "student_feedback": "''' + user_issue.replace("\n", " ").replace("\t", " ").replace("\r", " ").replace("\"", "'").strip() + '''",
+        "excerpt": "extract the text from the guide_text that the student's feedback refers to if it is related to the issue, otherwise return an empty string.",
         "analysis": "think step by step, first try to understand student_feedback, then explain what the student is trying to communicate,
                      then comprehend the the guide_text excerpt, then compare to see if the student's claims are correct. 
                      Detail the analysis as much as possible. Substitute double quotes in this field with single quotes.",
@@ -531,11 +544,10 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         {user_issue}
         </student_feedback>
 
-        Identify in the following guide_text the excerpt (text and commands) to which the student's feedback refers, include previous lines of the guide_text for context:
+        Identify in the following guide_text the excerpt (text and commands) to which the student's feedback refers, include also the previous lines of the guide_text excerpt for expanded context:
         <guide_text>
         {guide_text}
         </guide_text>
-
 
         Compare the student's feedback with the excerpt, and provide a detailed analysis of the issue.
         Remove from the response in the JSON any reference to titles or headings, as I already have that information.
@@ -547,6 +559,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
 
 
         Do not include any explanations, xml or markdown formatting outside the JSON object.
+        Substitute double quote (") for single quote (') in all fields to avoid errors in the JSON object, and remove any special characters such as '\n', '\t', '\r', etc, as well as XML markers.
         """
 
     global analysis_response
@@ -846,16 +859,25 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
     if data.get("language", "") == "en":
         data["translated_student_feedback"] = snow_info["Description"]
     else:
-        data["translated_student_feedback"] = translate_text(snow_info["Description"], data["language"])
+        data["translated_student_feedback"] = translate_text(snow_info["Description"])
 
     # 3. Ensure the repository is available
     repo_dir = ensure_course_repo(snow_info["Course"].lower())
 
     # 4. Retrieve some info from the course page to match with the local guide text
+    section_info = ""
     if snow_info["URL"] != "":
         driver.execute_script("window.open()");
         driver.switch_to.window(driver.window_handles[-1]);
         section_info = get_section_info(driver, snow_info["URL"])
+
+    # Initialize analysis_response_json
+    analysis_response_json = {
+        "is_valid_issue": False,
+        "summary": "",
+        "suggested_correction": "",
+        "jira-title": ""
+    }
 
     # 5. Fetch local guide text using the guide info
     if data.get("is_content_issue_ticket", False):
@@ -866,9 +888,9 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         else:
             logger.info("No course ID or lab script name found in the SNOW ticket.")
             
-        print('############################################################################################')
-        logger.info(f"Guide text:\n {guide_text}")
-        print('############################################################################################')
+        #print('############################################################################################')
+        #logger.info(f"Guide text:\n {guide_text}")
+        #print('############################################################################################')
 
         analysis_content_response = analyze_content_issue(snow_info["Description"], guide_text)
         print(f"[LLM response]:\n{analysis_content_response}")
@@ -878,7 +900,7 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
             analysis_response_json = json.loads(analysis_content_response)
         except json.JSONDecodeError as e:
             logger.error(f"JSON decoding failed: {e}")
-
+       
     elif data.get("is_environment_issue", False):
         logger.info(f"This SNOW ticket {snow_info['snow_id']} is recognized as an 'environment' issue feedback ticket.")
 
@@ -911,14 +933,12 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         # 8. Reply to the student's feedback    
         reply_to_student(driver, snow_info, data)
 
-
         # 9. Create a Jira ticket
         # Switch to new tab
         # Move to the latest tab before opening a new one
         driver.switch_to.window(driver.window_handles[-1])
         driver.execute_script("window.open('');")
         driver.switch_to.window(driver.window_handles[-1])
-        #jira_login(driver)
 
         # 9.1 Search for similar Jira tickets
         search_jira_ticket(driver, snow_info)
@@ -986,6 +1006,11 @@ def main():
 #    # Break execution of main function
 #    logger.info("Exiting main function execution")
 #    return
+
+    #snow_info = {'snow_id': 'RHT2371690', 'full_name': 'Jiri Petnik', 'Description': 'why a user with kubevirt.io:view CAN read guest login credentials in the UI that were created by cloud-init script". I do not understand that since with "view" one cannot get into the content of secrets, so why one could be able to get some other credentials... The SECOND part of this question is: Where are the guest credentials stored in the cluster? in some secret or... WHERE?\n\nhttps://app.intercom.com/a/inbox/jeuow7ss/inbox/admin/4643910/conversation/138283400110592?view=List\nhttps://redhat.service-now.com/surl.do?n=RHT2358206', 'Course': 'DO316', 'Version': '4.16', 'URL': 'https://rol.redhat.com/rol/app/courses/do316-4.16/pages/ch02s03', 'Chapter': '02', 'Section': '03', 'Title': 'Creating and Accessing Virtual Machines by Using the Web Console ', 'RHNID': 'jiri_petnik-cz '}
+    #data = classify_ticket_llm(snow_info["Description"])
+    #print(f"[LLM response]:\n{data}")
+
 
     # Initialize the driver
     global step_counter
