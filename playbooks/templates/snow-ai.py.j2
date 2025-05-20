@@ -40,8 +40,8 @@ logger = logging.getLogger(__name__)
 #OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"  
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
 #OLLAMA_MODEL = "qwen3:latest"
-#OLLAMA_MODEL = "qwen3:1.7b"
-OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
+OLLAMA_MODEL = "qwen3:1.7b"
+#OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "granite3.3:8b"
 
 # -------------------------------------------------------------------
@@ -131,12 +131,12 @@ def askOllama(prompt: str) -> str:
                 [OLLAMA_COMMAND, "run", OLLAMA_MODEL, prompt, "/set", "parameter", "num_ctx", "128000", "--format", "json"],
                 capture_output=True,
                 text=True
-            )
-        response = result.stdout.strip()
+            )        
+        response = result.stdout
         # Remove any <think>…</think> blocks from Qwen responses
         if OLLAMA_MODEL.startswith("qwen"):
             response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
-            response = re.sub(r'</think>', '', response)
+            response = re.sub(r'</think>', '', response).strip()
         return response
     except Exception as e:
         logger.error(f"Could not run Ollama: {e}")
@@ -525,9 +525,21 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
     Returns:
         str: JSON response from LLM analysis
     """
+    if guide_text == "":
+        guide_text_prompt = ""
+        excerpt_json_key_value = '"excerpt": \"\"'
+    else:
+        guide_text_prompt = f"""
+        Identify in the following guide_text the excerpt (text and commands) to which the student's feedback refers, include also the previous lines of the guide_text excerpt for expanded context:
+        <guide_text>
+        {guide_text}
+        </guide_text>"""
+        excerpt_json_key_value= '"excerpt": "extract the text from the guide_text that the student\'s feedback refers to if it is related to the issue, otherwise return an empty string.",'
+
+
     json_example = '''{
         "student_feedback": "''' + user_issue.replace("\n", " ").replace("\t", " ").replace("\r", " ").replace("\"", "'").strip() + '''",
-        "excerpt": "extract the text from the guide_text that the student's feedback refers to if it is related to the issue, otherwise return an empty string.",
+        ''' + excerpt_json_key_value + '''
         "analysis": "think step by step, first try to understand student_feedback, then explain what the student is trying to communicate,
                      then comprehend the the guide_text excerpt, then compare to see if the student's claims are correct. 
                      Detail the analysis as much as possible. Substitute double quotes in this field with single quotes.",
@@ -537,6 +549,8 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         "jira-title": "a short and precise title of the issue, all characters in lowercase separated by spaces, no dashes"
         }'''
 
+
+
     prompt_text = f"""
         You are an useful Red Hat Training expert who is able to understand the flow of the exercises and labs in the course guide.
         We have a student who reported an issue within the guide text. The student's feedback is:
@@ -544,10 +558,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         {user_issue}
         </student_feedback>
 
-        Identify in the following guide_text the excerpt (text and commands) to which the student's feedback refers, include also the previous lines of the guide_text excerpt for expanded context:
-        <guide_text>
-        {guide_text}
-        </guide_text>
+        {guide_text_prompt}
 
         Compare the student's feedback with the excerpt, and provide a detailed analysis of the issue.
         Remove from the response in the JSON any reference to titles or headings, as I already have that information.
@@ -577,7 +588,7 @@ def analyze_environment_issue(user_issue: str) -> str:
         str: JSON response from LLM analysis
     """
     json_example = '''{
-        "analysis": "think in this value step by step, describe what the student is trying to communicate in their feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL VMs",",
+        "analysis": "think in this value step by step, describe what the student is trying to communicate in it's feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL VMs",",
         "is_valid_issue": true/false if a debug of the lab environment is needed,
         "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
         "summary": "a short summary of your analysis",
@@ -594,6 +605,7 @@ def analyze_environment_issue(user_issue: str) -> str:
         {json_example}
 
         Do not include any explanations, xml or markdown formatting outside the JSON object.
+        Substitute double quote (") for single quote (') in all fields to avoid errors in the JSON object, and remove any special characters such as '\n', '\t', '\r', etc, as well as XML markers.
         """
     global analysis_response
     analysis_response = askOllama(prompt_text)
