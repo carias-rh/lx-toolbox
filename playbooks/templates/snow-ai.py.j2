@@ -628,24 +628,34 @@ def analyze_environment_issue(user_issue: str) -> str:
     analysis_response = askOllama(prompt_text)
     return analysis_response
 
-def translate_text(text):
+def translate_text(text, language):
     """
     Translates text to the specified language using a LLM.
     
     Args:
         text: The text to translate
+        language: The language of the text to translate from
     Returns:
         str: The translated text
     """
+    json_example = '''{
+        "translated_text": "the translated text"
+    }'''
     prompt_text = f"""
-        Translate the following text to english:
+        Translate the following text from {language} to english:
         <text>
         {text}
         </text>
+
+        Return your analysis in exactly the following JSON format without any extra text:
+        <json_example>
+        {json_example}
+        </json_example>
+
     """
 
     translated_text = askOllama(prompt_text)
-    return translated_text
+    return json.loads(translated_text)["translated_text"]
 
 # -------------------------------------------------------------------
 # Function to get the service now ticket info
@@ -888,8 +898,8 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
     if data.get("language", "") == "en":
         data["translated_student_feedback"] = snow_info["Description"]
     else:
-        data["translated_student_feedback"] = translate_text(snow_info["Description"])
-
+        data["translated_student_feedback"] = translate_text(snow_info["Description"], data.get("language", "en"))
+        
     # 3. Ensure the repository is available
     repo_dir = ensure_course_repo(snow_info["Course"].lower())
 
