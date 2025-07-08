@@ -18,3 +18,9 @@ openshift/*secret*
 test.py
 *credential*
 *secret*
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+config.ini
+.env
+servicenow_auth.py

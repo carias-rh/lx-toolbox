@@ -1,0 +1,6 @@
+selenium
+python-dotenv
+configparser
+requests
+click
+# Add other specific dependencies for ServiceNow/Jira APIs as needed 

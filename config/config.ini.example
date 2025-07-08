@@ -1,0 +1,22 @@
+[General]
+default_selenium_driver = firefox
+default_lab_environment = rol
+debug_mode = false
+
+[LabEnvironments]
+rol_base_url = https://rol.redhat.com/rol/app/courses/
+rol_stage_base_url = https://rol-factory-prod.ole.redhat.com/rol/app/courses/
+china_base_url = https://rol-cn.ole.redhat.com/rol/app/courses/
+
+[ServiceNow]
+# Add any non-sensitive ServiceNow configurations here
+# Example: default_assignment_group = "T2 Support"
+
+[Jira]
+# Add any non-sensitive Jira configurations here
+# Example: default_project_key = "LXSUPPORT"
+
+[Paths]
+# Paths to drivers or other local resources if needed, though ideally drivers are managed by WebDriver manager
+# geckodriver_path = /usr/local/bin/geckodriver
+# chromedriver_path = /usr/local/bin/chromedriver 
