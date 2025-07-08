@@ -638,24 +638,36 @@ def translate_text(text, language):
     Returns:
         str: The translated text
     """
-    json_example = '''{
-        "translated_text": "the translated text"
-    }'''
     prompt_text = f"""
         Translate the following text from {language} to english:
         <text>
         {text}
         </text>
-
-        Return your analysis in exactly the following JSON format without any extra text:
-        <json_example>
-        {json_example}
-        </json_example>
-
     """
 
     translated_text = askOllama(prompt_text)
-    return json.loads(translated_text)["translated_text"]
+    
+    # Handle JSON response from models using --format json
+    if translated_text.strip().startswith('{') and translated_text.strip().endswith('}'):
+        try:
+            json_response = json.loads(translated_text)
+            # Extract the translated text from various possible JSON structures
+            if 'text' in json_response:
+                return json_response['text']
+            elif 'translation' in json_response:
+                return json_response['translation']
+            elif 'result' in json_response:
+                return json_response['result']
+            else:
+                # If no expected keys found, return the first string value
+                for value in json_response.values():
+                    if isinstance(value, str) and value != '/set parameter num_ctx 128000':
+                        return value
+        except json.JSONDecodeError:
+            # If JSON parsing fails, return the raw text
+            pass
+    
+    return translated_text
 
 # -------------------------------------------------------------------
 # Function to get the service now ticket info
@@ -899,7 +911,7 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         data["translated_student_feedback"] = snow_info["Description"]
     else:
         data["translated_student_feedback"] = translate_text(snow_info["Description"], data.get("language", "en"))
-        
+
     # 3. Ensure the repository is available
     repo_dir = ensure_course_repo(snow_info["Course"].lower())
 
