@@ -11,6 +11,7 @@ from pathlib import Path
 from .utils.config_manager import ConfigManager
 from .utils.helpers import reset_step_counter
 from .core.lab_manager import LabManager
+from .core.servicenow_handler import ServiceNowHandler
 
 # Initialize config manager with paths relative to the package
 def get_config():
@@ -310,8 +311,107 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
 @click.pass_context
 def snow(ctx):
     """ServiceNow operations commands."""
-    click.echo("ServiceNow commands not yet implemented. Coming soon!")
-    # TODO: Implement ServiceNow commands when ServiceNowHandler is ready
+    pass
+
+@snow.command()
+@click.argument('team', type=click.Choice(['t1', 't2']))
+@click.option('--assignee', '-a', default=None, help='Specific assignee (overrides round-robin)')
+@click.option('--continuous', '-c', is_flag=True, help='Run continuously')
+@click.option('--interval', '-i', default=60, help='Interval in seconds for continuous mode')
+@click.pass_context
+def assign(ctx, team, assignee, continuous, interval):
+    """Auto-assign ServiceNow tickets for a team."""
+    config = ctx.obj['config']
+    
+    try:
+        snow_handler = ServiceNowHandler(config)
+        
+        # Test connection first
+        if not snow_handler.test_connection():
+            click.echo("✗ Failed to connect to ServiceNow. Check your credentials.", err=True)
+            sys.exit(1)
+        
+        click.echo(f"✓ Connected to ServiceNow")
+        
+        if continuous:
+            click.echo(f"Starting continuous assignment for team {team} (interval: {interval}s)")
+            click.echo("Press Ctrl+C to stop")
+            snow_handler.run_continuous_assignment(team, interval)
+        else:
+            click.echo(f"Running single assignment cycle for team {team}")
+            stats = snow_handler.run_auto_assignment(team, assignee)
+            click.echo(f"✓ Assignment complete: {stats}")
+            
+    except KeyboardInterrupt:
+        click.echo("\n✓ Assignment stopped by user")
+    except Exception as e:
+        click.echo(f"✗ Error in ServiceNow assignment: {e}", err=True)
+        sys.exit(1)
+
+@snow.command()
+@click.argument('team', type=click.Choice(['t1', 't2']))
+@click.option('--limit', '-l', default=10, help='Maximum number of tickets to show')
+@click.pass_context
+def list_tickets(ctx, team, limit):
+    """List unassigned tickets for a team."""
+    config = ctx.obj['config']
+    
+    try:
+        snow_handler = ServiceNowHandler(config)
+        
+        if not snow_handler.test_connection():
+            click.echo("✗ Failed to connect to ServiceNow", err=True)
+            sys.exit(1)
+            
+        tickets = snow_handler.get_unassigned_tickets(team, limit)
+        
+        if not tickets:
+            click.echo(f"No unassigned tickets found for team {team}")
+            return
+            
+        click.echo(f"\nUnassigned tickets for team {team}:")
+        click.echo("=" * 80)
+        
+        for ticket in tickets:
+            click.echo(f"Number: {ticket.get('number', 'N/A')}")
+            click.echo(f"Description: {ticket.get('short_description', 'N/A')}")
+            click.echo(f"Contact: {ticket.get('contact_source', 'N/A')}")
+            click.echo(f"State: {ticket.get('state', 'N/A')}")
+            click.echo("-" * 40)
+            
+    except Exception as e:
+        click.echo(f"✗ Error listing tickets: {e}", err=True)
+        sys.exit(1)
+
+@snow.command()
+@click.pass_context
+def test(ctx):
+    """Test ServiceNow and LMS connections."""
+    config = ctx.obj['config']
+    
+    try:
+        snow_handler = ServiceNowHandler(config)
+        
+        # Test ServiceNow connection
+        if snow_handler.test_connection():
+            click.echo("✓ ServiceNow connection successful")
+        else:
+            click.echo("✗ ServiceNow connection failed")
+            
+        # Test LMS token
+        token = snow_handler.get_lms_token()
+        if token:
+            click.echo("✓ LMS token obtained successfully")
+            
+            # Test name lookup
+            test_name = snow_handler.lookup_user_name("carias")
+            click.echo(f"✓ LMS name lookup test: 'carias' -> '{test_name}'")
+        else:
+            click.echo("✗ LMS token failed (credentials may not be configured)")
+            
+    except Exception as e:
+        click.echo(f"✗ Error testing connections: {e}", err=True)
+        sys.exit(1)
 
 @cli.group()
 @click.pass_context

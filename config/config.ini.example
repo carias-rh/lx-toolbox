@@ -2,6 +2,7 @@
 default_selenium_driver = firefox
 default_lab_environment = rol
 debug_mode = false
+default_assignee = your_default_assignee
 
 [LabEnvironments]
 rol_base_url = https://rol.redhat.com/rol/app/courses/
@@ -9,8 +10,24 @@ rol_stage_base_url = https://rol-factory-prod.ole.redhat.com/rol/app/courses/
 china_base_url = https://rol-cn.ole.redhat.com/rol/app/courses/
 
 [ServiceNow]
-# Add any non-sensitive ServiceNow configurations here
-# Example: default_assignment_group = "T2 Support"
+# ServiceNow instance configuration
+# SNOW_INSTANCE_URL, SNOW_API_USER, SNOW_API_PASSWORD should be in .env file
+
+[LMS]
+# LMS API configuration
+# LMS_USERNAME, LMS_CLIENT_ID, LMS_CLIENT_SECRET should be in .env file
+
+[T1]
+# T1 team specific configuration
+# T1_FRONTEND_OPENSHIFT_ROUTE should be in .env file for round robin
+
+[T2]
+# T2 team specific configuration
+
+[QA]
+# QA command execution settings
+command_delay_seconds = 3
+install_command_delay_seconds = 30
 
 [Jira]
 # Add any non-sensitive Jira configurations here
