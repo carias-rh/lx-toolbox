@@ -76,9 +76,9 @@ def start(ctx, course_id, env, browser, headless):
             lab_mgr.create_lab(course_id=course_id)
             primary_status, _ = lab_mgr.check_lab_status()
         
-        if primary_status == "START":
+        if secondary_status == "START":
             lab_mgr.start_lab(course_id=course_id)
-        elif primary_status in ["STOP", "STOPPING"]:
+        elif secondary_status in ["STOP", "STOPPING"]:
             click.echo(f"Lab {course_id} is already running or stopping.")
         
         # Increase autostop and lifespan

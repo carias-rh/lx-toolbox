@@ -73,7 +73,7 @@ class LabManager:
                 # RH SSO Login Flow
                 self.driver.find_element(By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input").send_keys(f"{username}@redhat.com")
                 self.driver.find_element(By.XPATH, '//*[@id="login-show-step2"]').click()
-                
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
                 
                 otp_value = ""
@@ -166,35 +166,83 @@ class LabManager:
     def select_lab_environment_tab(self, tab_name: str):
         """Selects a tab like 'index', 'course', or 'lab'."""
         self.logger(f"Selecting tab: {tab_name}")
-        tab_map = {"index": "1", "course": "2", "lab": "8"} # From original script
-        tab_id = tab_map.get(tab_name.lower())
-        if not tab_id:
-            raise ValueError(f"Invalid tab name: {tab_name}. Expected one of {list(tab_map.keys())}")
+        
+        # Map tab names to both old and new interface selectors
+        tab_selectors = {
+            "index": {
+                "old": "1",
+                "new": "Course"  # Based on the HTML you provided
+            },
+            "course": {
+                "old": "2", 
+                "new": "Course"
+            },
+            "lab-environment": {
+                "old": "8",
+                "new": "Lab Environment"
+            }
+        }
+        
+        tab_config = tab_selectors.get(tab_name.lower())
+        if not tab_config:
+            raise ValueError(f"Invalid tab name: {tab_name}. Expected one of {list(tab_selectors.keys())}")
 
+        # Try new PF5 interface first, then fall back to old interface
+        success = False
+        
+        # Method 1: Try new PF5 interface (by text content)
         try:
-            tab_xpath = f'//*[@id="course-tabs-tab-{tab_id}"]'
-            tab_element = self.wait.until(EC.element_to_be_clickable((By.XPATH, tab_xpath)))
+            new_tab_xpath = f'//button[@role="tab" and .//span[contains(text(), "{tab_config["new"]}")]]'
+            tab_element = WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH, new_tab_xpath)))
             tab_element.click()
-            # Verify tab is selected
-            WebDriverWait(self.driver, 30).until(
-                lambda d: d.find_element(By.XPATH, tab_xpath).get_attribute("aria-selected") == "true",
-                message=f"Tab {tab_name} did not become selected."
+            
+            # Verify tab is selected in new interface
+            WebDriverWait(self.driver, 10).until(
+                lambda d: d.find_element(By.XPATH, new_tab_xpath).get_attribute("aria-selected") == "true",
+                message=f"Tab {tab_name} did not become selected in new interface."
             )
-            time.sleep(0.2) # Small pause from original
+            time.sleep(0.2)
+            success = True
+            
         except TimeoutException:
-            self.logger(f"Timeout selecting tab {tab_name}. Retrying...")
-            # self.selenium_driver.driver.save_screenshot(f"tab_select_timeout_{tab_name}.png")
-            self.selenium_driver.accept_trustarc_cookies() # Common recovery step
-            time.sleep(2)
-            # Retry logic (simplified, could be more robust)
-            tab_element = self.wait.until(EC.element_to_be_clickable((By.XPATH, tab_xpath)))
-            tab_element.click()
-            WebDriverWait(self.driver, 30).until(
-                 lambda d: d.find_element(By.XPATH, tab_xpath).get_attribute("aria-selected") == "true"
-            )
-        except Exception as e:
-            self.logger(f"Error selecting tab {tab_name}: {e}")
-            raise
+            self.logger(f"New PF5 interface not found for tab {tab_name}, trying old interface...")
+        
+        # Method 2: Try old interface if new one failed
+        if not success:
+            try:
+                old_tab_xpath = f'//*[@id="course-tabs-tab-{tab_config["old"]}"]'
+                tab_element = self.wait.until(EC.element_to_be_clickable((By.XPATH, old_tab_xpath)))
+                tab_element.click()
+                
+                # Verify tab is selected
+                WebDriverWait(self.driver, 10).until(
+                    lambda d: d.find_element(By.XPATH, old_tab_xpath).get_attribute("aria-selected") == "true",
+                    message=f"Tab {tab_name} did not become selected in old interface."
+                )
+                time.sleep(0.2)
+                success = True
+                
+            except TimeoutException:
+                self.logger(f"Timeout selecting tab {tab_name} in old interface. Retrying...")
+                # Common recovery step
+                self.selenium_driver.accept_trustarc_cookies()
+                time.sleep(1)
+                
+                # Retry old interface
+                try:
+                    tab_element = self.wait.until(EC.element_to_be_clickable((By.XPATH, old_tab_xpath)))
+                    tab_element.click()
+                    WebDriverWait(self.driver, 10).until(
+                        lambda d: d.find_element(By.XPATH, old_tab_xpath).get_attribute("aria-selected") == "true"
+                    )
+                    success = True
+                    self.logger(f"Successfully selected tab '{tab_name}' using old interface after retry")
+                except Exception as e:
+                    self.logger(f"Failed to select tab {tab_name} after retry: {e}")
+                    raise
+        
+        if not success:
+            raise Exception(f"Could not select tab '{tab_name}' in either new or old interface")
             
     def _get_lab_action_button(self, action_texts: list[str], timeout: int = 5):
         """Helper to find a lab action button (Create, Start, Stop, Delete)."""
@@ -203,13 +251,9 @@ class LabManager:
         # This might need refinement if button positions are key (first vs second)
         for text in action_texts:
             try:
-                button_xpath = f'//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(translate(text(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "{text.lower()}")]'
+                button_xpath = f'//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "{text}")]'
                 button = WebDriverWait(self.driver, timeout).until(
                     EC.presence_of_element_located((By.XPATH, button_xpath))
-                )
-                # Check if clickable as well
-                button = WebDriverWait(self.driver, timeout).until(
-                    EC.element_to_be_clickable((By.XPATH, button_xpath))
                 )
                 return button, button.text 
             except TimeoutException:
@@ -225,7 +269,7 @@ class LabManager:
         We now look for specific keywords.
         """
         self.logger("Checking lab status...")
-        self.select_lab_environment_tab("lab")
+        self.select_lab_environment_tab("lab-environment")
 
         # Check for Create/Creating or Delete/Deleting button (usually primary)
         create_delete_button, create_delete_text = self._get_lab_action_button(["Create", "Creating", "Delete", "Deleting"])
@@ -252,7 +296,7 @@ class LabManager:
 
     def create_lab(self, course_id: str):
         self.logger(f"Attempting to create lab for course: {course_id}")
-        self.select_lab_environment_tab("lab")
+        self.select_lab_environment_tab("lab-environment")
         try:
             create_button, _ = self._get_lab_action_button(["Create"])
             if create_button:
@@ -261,7 +305,7 @@ class LabManager:
                 # Add wait for lab creation, e.g., wait for status to change or a specific element.
                 time.sleep(20)
                 WebDriverWait(self.driver, 60).until(
-                    lambda d: self._get_lab_action_button(["Creating", "Delete", "Deleting", "Starting", "Stop"])[0] is not None, # Wait until create is done
+                    lambda d: self._get_lab_action_button(["Creating", "Delete", "Starting", "Stop"])[0] is not None, # Wait until create is done
                     message="Lab did not appear to start creating or finish creating." 
                 )
                 self.logger(f"Lab for {course_id} creation process initiated.")
@@ -274,7 +318,7 @@ class LabManager:
     
     def start_lab(self, course_id: str):
         self.logger(f"Attempting to start lab for course: {course_id}")
-        self.select_lab_environment_tab("lab")
+        self.select_lab_environment_tab("lab-environment")
         try:
             start_button, _ = self._get_lab_action_button(["Start"])
             if start_button:
@@ -296,7 +340,7 @@ class LabManager:
 
     def stop_lab(self, course_id: str):
         self.logger(f"Attempting to stop lab for course: {course_id}")
-        self.select_lab_environment_tab("lab")
+        self.select_lab_environment_tab("lab-environment")
         try:
             stop_button, _ = self._get_lab_action_button(["Stop"])
             if stop_button:
@@ -322,7 +366,7 @@ class LabManager:
             
     def delete_lab(self, course_id: str):
         self.logger(f"Attempting to delete lab for course: {course_id}")
-        self.select_lab_environment_tab("lab")
+        self.select_lab_environment_tab("lab-environment")
         try:
             delete_button, _ = self._get_lab_action_button(["Delete"])
             if delete_button:
@@ -349,7 +393,7 @@ class LabManager:
     def recreate_lab(self, course_id: str, environment: str):
         self.logger(f"Recreating lab for course: {course_id} in {environment}")
         self.go_to_course(course_id, environment) # Ensure on correct page
-        self.select_lab_environment_tab("lab")
+        self.select_lab_environment_tab("lab-environment")
         
         primary_status, secondary_status = self.check_lab_status()
 
@@ -388,12 +432,12 @@ class LabManager:
 
     def _click_lab_adjustment_button(self, course_id: str, button_xpath_part: str, times: int, description: str):
         self.logger(f"{description} for course {course_id} ({times} times)")
-        self.select_lab_environment_tab("lab")
+        self.select_lab_environment_tab("lab-environment")
         try:
             # Wait until lab is in a state where adjustments can be made (e.g., running)
             # The original script checked for "CREATING" or "STARTING" states before clicking.
             # This implies we should wait until those are done.
-            WebDriverWait(self.driver, 90).until(
+            WebDriverWait(self.driver, 300).until(
                 lambda d: self._get_lab_action_button(["Stop"])[0] is not None or \
                             self._get_lab_action_button(["Workstation"])[0] is not None, # Assuming Workstation button means lab is ready
                 message="Lab not in a state to adjust autostop/lifespan (e.g. not running)."
@@ -413,10 +457,10 @@ class LabManager:
             self.logger(f"Error during {description} for {course_id}: {e}")
             # Pass for now
 
-    def increase_autostop(self, course_id: str, times: int = 30):
+    def increase_autostop(self, course_id: str, times: int = 4):
         self._click_lab_adjustment_button(course_id, "1", times, "Increasing auto-stop")
 
-    def increase_lifespan(self, course_id: str, times: int = 30):
+    def increase_lifespan(self, course_id: str, times: int = 5):
         self._click_lab_adjustment_button(course_id, "2", times, "Increasing auto-destroy (lifespan)")
 
     def impersonate_user(self, impersonate_username: str, current_course_id: str, environment: str):
@@ -453,7 +497,7 @@ class LabManager:
             # Re-navigate to the course after impersonation
             if current_course_id:
                 self.go_to_course(current_course_id, environment)
-            self.select_lab_environment_tab("lab") # Go to lab tab by default after impersonation
+            self.select_lab_environment_tab("lab-environment") # Go to lab tab by default after impersonation
 
         except Exception as e:
             self.logger(f"An exception occurred while impersonating {impersonate_username}: {e}")
@@ -465,7 +509,7 @@ class LabManager:
 
     def open_workstation_console(self, course_id: str, setup_environment_style: str = None):
         self.logger(f"Opening workstation console for course: {course_id}")
-        self.select_lab_environment_tab("lab")
+        self.select_lab_environment_tab("lab-environment")
         
         # Wait for workstation button to be clickable
         # Original: //*[text()='workstation']/../td[3]/button
