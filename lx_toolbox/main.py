@@ -60,33 +60,34 @@ def start(ctx, course_id, env, browser, headless):
     environment = env or config.get("General", "default_lab_environment", "rol")
     
     try:
-        with LabManager(config=config, browser_name=browser, is_headless=headless) as lab_mgr:
-            reset_step_counter()
-            
-            # Login
-            lab_mgr.login(environment=environment)
-            
-            # Go to course
-            lab_mgr.go_to_course(course_id=course_id, environment=environment)
-            
-            # Check lab status and start if needed
-            primary_status, secondary_status = lab_mgr.check_lab_status()
-            
-            if primary_status == "CREATE":
-                lab_mgr.create_lab(course_id=course_id)
-                primary_status, _ = lab_mgr.check_lab_status()
-            
-            if primary_status == "START":
-                lab_mgr.start_lab(course_id=course_id)
-            elif primary_status in ["STOP", "STOPPING"]:
-                click.echo(f"Lab {course_id} is already running or stopping.")
-            
-            # Increase autostop and lifespan
-            lab_mgr.increase_autostop(course_id=course_id)
-            lab_mgr.increase_lifespan(course_id=course_id)
-            
-            click.echo(f"✓ Lab {course_id} started successfully in {environment}.")
-            
+        lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
+        reset_step_counter()
+        
+        # Login
+        lab_mgr.login(environment=environment)
+        
+        # Go to course
+        lab_mgr.go_to_course(course_id=course_id, environment=environment)
+        
+        # Check lab status and start if needed
+        primary_status, secondary_status = lab_mgr.check_lab_status()
+        
+        if primary_status == "CREATE":
+            lab_mgr.create_lab(course_id=course_id)
+            primary_status, _ = lab_mgr.check_lab_status()
+        
+        if primary_status == "START":
+            lab_mgr.start_lab(course_id=course_id)
+        elif primary_status in ["STOP", "STOPPING"]:
+            click.echo(f"Lab {course_id} is already running or stopping.")
+        
+        # Increase autostop and lifespan
+        lab_mgr.increase_autostop(course_id=course_id)
+        lab_mgr.increase_lifespan(course_id=course_id)
+        
+        click.echo(f"✓ Lab {course_id} started successfully in {environment}.")
+        click.echo("Browser will remain open for interactive use. Close manually when done.")
+        
     except Exception as e:
         click.echo(f"✗ Error starting lab: {e}", err=True)
         sys.exit(1)
@@ -103,18 +104,19 @@ def stop(ctx, course_id, env, browser, headless):
     environment = env or config.get("General", "default_lab_environment", "rol")
     
     try:
-        with LabManager(config=config, browser_name=browser, is_headless=headless) as lab_mgr:
-            reset_step_counter()
-            
-            # Login
-            lab_mgr.login(environment=environment)
-            
-            # Go to course and stop lab
-            lab_mgr.go_to_course(course_id=course_id, environment=environment)
-            lab_mgr.stop_lab(course_id=course_id)
-            
-            click.echo(f"✓ Lab {course_id} stopped successfully in {environment}.")
-            
+        lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
+        reset_step_counter()
+        
+        # Login
+        lab_mgr.login(environment=environment)
+        
+        # Go to course and stop lab
+        lab_mgr.go_to_course(course_id=course_id, environment=environment)
+        lab_mgr.stop_lab(course_id=course_id)
+        
+        click.echo(f"✓ Lab {course_id} stopped successfully in {environment}.")
+        click.echo("Browser will remain open for interactive use. Close manually when done.")
+        
     except Exception as e:
         click.echo(f"✗ Error stopping lab: {e}", err=True)
         sys.exit(1)
@@ -131,21 +133,22 @@ def create(ctx, course_id, env, browser, headless):
     environment = env or config.get("General", "default_lab_environment", "rol")
     
     try:
-        with LabManager(config=config, browser_name=browser, is_headless=headless) as lab_mgr:
-            reset_step_counter()
-            
-            # Login
-            lab_mgr.login(environment=environment)
-            
-            # Go to course and create lab
-            lab_mgr.go_to_course(course_id=course_id, environment=environment)
-            lab_mgr.create_lab(course_id=course_id)
-            
-            # Increase lifespan for newly created lab
-            lab_mgr.increase_lifespan(course_id=course_id)
-            
-            click.echo(f"✓ Lab {course_id} created successfully in {environment}.")
-            
+        lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
+        reset_step_counter()
+        
+        # Login
+        lab_mgr.login(environment=environment)
+        
+        # Go to course and create lab
+        lab_mgr.go_to_course(course_id=course_id, environment=environment)
+        lab_mgr.create_lab(course_id=course_id)
+        
+        # Increase lifespan for newly created lab
+        lab_mgr.increase_lifespan(course_id=course_id)
+        
+        click.echo(f"✓ Lab {course_id} created successfully in {environment}.")
+        click.echo("Browser will remain open for interactive use. Close manually when done.")
+        
     except Exception as e:
         click.echo(f"✗ Error creating lab: {e}", err=True)
         sys.exit(1)
@@ -162,18 +165,19 @@ def delete(ctx, course_id, env, browser, headless):
     environment = env or config.get("General", "default_lab_environment", "rol")
     
     try:
-        with LabManager(config=config, browser_name=browser, is_headless=headless) as lab_mgr:
-            reset_step_counter()
-            
-            # Login
-            lab_mgr.login(environment=environment)
-            
-            # Go to course and delete lab
-            lab_mgr.go_to_course(course_id=course_id, environment=environment)
-            lab_mgr.delete_lab(course_id=course_id)
-            
-            click.echo(f"✓ Lab {course_id} deleted successfully in {environment}.")
-            
+        lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
+        reset_step_counter()
+        
+        # Login
+        lab_mgr.login(environment=environment)
+        
+        # Go to course and delete lab
+        lab_mgr.go_to_course(course_id=course_id, environment=environment)
+        lab_mgr.delete_lab(course_id=course_id)
+        
+        click.echo(f"✓ Lab {course_id} deleted successfully in {environment}.")
+        click.echo("Browser will remain open for interactive use. Close manually when done.")
+        
     except Exception as e:
         click.echo(f"✗ Error deleting lab: {e}", err=True)
         sys.exit(1)
@@ -190,17 +194,18 @@ def recreate(ctx, course_id, env, browser, headless):
     environment = env or config.get("General", "default_lab_environment", "rol")
     
     try:
-        with LabManager(config=config, browser_name=browser, is_headless=headless) as lab_mgr:
-            reset_step_counter()
-            
-            # Login
-            lab_mgr.login(environment=environment)
-            
-            # Recreate lab
-            lab_mgr.recreate_lab(course_id=course_id, environment=environment)
-            
-            click.echo(f"✓ Lab {course_id} recreated successfully in {environment}.")
-            
+        lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
+        reset_step_counter()
+        
+        # Login
+        lab_mgr.login(environment=environment)
+        
+        # Recreate lab
+        lab_mgr.recreate_lab(course_id=course_id, environment=environment)
+        
+        click.echo(f"✓ Lab {course_id} recreated successfully in {environment}.")
+        click.echo("Browser will remain open for interactive use. Close manually when done.")
+        
     except Exception as e:
         click.echo(f"✗ Error recreating lab: {e}", err=True)
         sys.exit(1)
@@ -218,21 +223,22 @@ def impersonate(ctx, course_id, username, env, browser, headless):
     environment = env or config.get("General", "default_lab_environment", "rol")
     
     try:
-        with LabManager(config=config, browser_name=browser, is_headless=headless) as lab_mgr:
-            reset_step_counter()
-            
-            # Login
-            lab_mgr.login(environment=environment)
-            
-            # Impersonate user
-            lab_mgr.impersonate_user(
-                impersonate_username=username,
-                current_course_id=course_id,
-                environment=environment
-            )
-            
-            click.echo(f"✓ Successfully impersonated {username} for course {course_id} in {environment}.")
-            
+        lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
+        reset_step_counter()
+        
+        # Login
+        lab_mgr.login(environment=environment)
+        
+        # Impersonate user
+        lab_mgr.impersonate_user(
+            impersonate_username=username,
+            current_course_id=course_id,
+            environment=environment
+        )
+        
+        click.echo(f"✓ Successfully impersonated {username} for course {course_id} in {environment}.")
+        click.echo("Browser will remain open for interactive use. Close manually when done.")
+        
     except Exception as e:
         click.echo(f"✗ Error impersonating user: {e}", err=True)
         sys.exit(1)
@@ -252,49 +258,50 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
     environment = env or config.get("General", "default_lab_environment", "rol")
     
     try:
-        with LabManager(config=config, browser_name=browser, is_headless=headless) as lab_mgr:
-            reset_step_counter()
-            
-            # Login
-            lab_mgr.login(environment=environment)
-            
-            # Go to course
-            lab_mgr.go_to_course(course_id=course_id, environment=environment)
-            
-            # Check and ensure lab is running
+        lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
+        reset_step_counter()
+        
+        # Login
+        lab_mgr.login(environment=environment)
+        
+        # Go to course
+        lab_mgr.go_to_course(course_id=course_id, environment=environment)
+        
+        # Check and ensure lab is running
+        primary_status, _ = lab_mgr.check_lab_status()
+        
+        if primary_status == "CREATE":
+            lab_mgr.create_lab(course_id=course_id)
             primary_status, _ = lab_mgr.check_lab_status()
-            
-            if primary_status == "CREATE":
-                lab_mgr.create_lab(course_id=course_id)
-                primary_status, _ = lab_mgr.check_lab_status()
-            
-            if primary_status == "START":
-                lab_mgr.start_lab(course_id=course_id)
-            
-            # Increase autostop and lifespan
-            lab_mgr.increase_autostop(course_id=course_id)
-            lab_mgr.increase_lifespan(course_id=course_id)
-            
-            # Open workstation console
-            lab_mgr.open_workstation_console(course_id=course_id, setup_environment_style=setup_style)
-            
-            # Get commands (from file or from course materials)
-            if commands_file:
-                with open(commands_file, 'r') as f:
-                    commands = f.read().splitlines()
-                click.echo(f"Loaded {len(commands)} commands from {commands_file}")
-            else:
-                # This would need the get_exercise_commands to be implemented
-                commands = lab_mgr.get_exercise_commands(course_id=course_id, chapter_section=chapter_section)
-                if not commands:
-                    click.echo("Warning: No commands found for this exercise. Please provide a commands file with -f option.", err=True)
-                    return
-            
-            # Run QA
-            lab_mgr.run_qa_on_exercise(course_id=course_id, chapter_section=chapter_section, commands=commands)
-            
-            click.echo(f"✓ QA completed for {course_id} - {chapter_section} in {environment}.")
-            
+        
+        if primary_status == "START":
+            lab_mgr.start_lab(course_id=course_id)
+        
+        # Increase autostop and lifespan
+        lab_mgr.increase_autostop(course_id=course_id)
+        lab_mgr.increase_lifespan(course_id=course_id)
+        
+        # Open workstation console
+        lab_mgr.open_workstation_console(course_id=course_id, setup_environment_style=setup_style)
+        
+        # Get commands (from file or from course materials)
+        if commands_file:
+            with open(commands_file, 'r') as f:
+                commands = f.read().splitlines()
+            click.echo(f"Loaded {len(commands)} commands from {commands_file}")
+        else:
+            # This would need the get_exercise_commands to be implemented
+            commands = lab_mgr.get_exercise_commands(course_id=course_id, chapter_section=chapter_section)
+            if not commands:
+                click.echo("Warning: No commands found for this exercise. Please provide a commands file with -f option.", err=True)
+                return
+        
+        # Run QA
+        lab_mgr.run_qa_on_exercise(course_id=course_id, chapter_section=chapter_section, commands=commands)
+        
+        click.echo(f"✓ QA completed for {course_id} - {chapter_section} in {environment}.")
+        click.echo("Browser will remain open for interactive use. Close manually when done.")
+        
     except Exception as e:
         click.echo(f"✗ Error running QA: {e}", err=True)
         sys.exit(1)

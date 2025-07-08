@@ -73,7 +73,6 @@ class LabManager:
                 # RH SSO Login Flow
                 self.driver.find_element(By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input").send_keys(f"{username}@redhat.com")
                 self.driver.find_element(By.XPATH, '//*[@id="login-show-step2"]').click()
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
                 
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
                 
@@ -89,15 +88,15 @@ class LabManager:
                         # Potentially raise or ask user for OTP
                 
                 full_password = str(password_pin) + otp_value
-                self.driver.find_element(By.XPATH, '//*[@id="password"]').send_keys(full_password)
-                self.driver.find_element(By.XPATH, '//*[@id="submit"]').click()
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(full_password)
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
 
             elif environment == "rol-stage":
                 # GitHub Login Flow
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click() # Assuming this is "Login with GitHub"
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_field"]'))).send_keys(username)
-                self.driver.find_element(By.XPATH, '//*[@id="password"]').send_keys(password_pin)
-                self.driver.find_element(By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/form/div/input[13]').click() # Login button
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password_pin)
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/form/div/input[13]'))).click() # Login button
 
                 if otp_command: # If 2FA is expected
                     otp_input_field = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]')))
@@ -116,8 +115,8 @@ class LabManager:
                 # The old script navigated directly to a login page for China if needed.
                 # self.selenium_driver.go_to_url(self.config.get_lab_base_url("china").replace("courses/", "login/local"))
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
-                self.driver.find_element(By.XPATH, '//*[@id="password"]').send_keys(password_pin)
-                self.driver.find_element(By.XPATH, '//*[@id="login_button"]').click()
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password_pin)
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_button"]'))).click()
             
             self.wait_for_site_to_be_ready(environment)
             self.logger("Login successful.")
@@ -130,7 +129,7 @@ class LabManager:
             # self.selenium_driver.driver.save_screenshot(f"{environment}_login_error.png")
             raise
 
-    def wait_for_site_to_be_ready(self, environment: str, timeout: int = 10):
+    def wait_for_site_to_be_ready(self, environment: str, timeout: int = 5):
         self.logger("Waiting for site to be ready...")
         try:
             self.selenium_driver.accept_trustarc_cookies() # Try again in case it reappeared
@@ -260,9 +259,9 @@ class LabManager:
                 create_button.click()
                 self.logger(f"'Create lab' button clicked for {course_id}.")
                 # Add wait for lab creation, e.g., wait for status to change or a specific element.
-                # Original script had time.sleep(20)
+                time.sleep(20)
                 WebDriverWait(self.driver, 60).until(
-                    lambda d: self._get_lab_action_button(["Deleting", "Starting", "Stop"])[0] is not None, # Wait until create is done
+                    lambda d: self._get_lab_action_button(["Creating", "Delete", "Deleting", "Starting", "Stop"])[0] is not None, # Wait until create is done
                     message="Lab did not appear to start creating or finish creating." 
                 )
                 self.logger(f"Lab for {course_id} creation process initiated.")
@@ -282,9 +281,9 @@ class LabManager:
                 start_button.click()
                 self.logger(f"'Start lab' button clicked for {course_id}.")
                 # Add wait for lab start
-                # Original script had time.sleep(5) then checked status
-                WebDriverWait(self.driver, 120).until(
-                    lambda d: self._get_lab_action_button(["Stop", "Stopping"])[0] is not None,
+                time.sleep(5)
+                WebDriverWait(self.driver, 60).until(
+                    lambda d: self._get_lab_action_button(["Stop", "Starting"])[0] is not None,
                     message="Lab did not appear to start."
                 )
                 self.logger(f"Lab for {course_id} starting process initiated.")
@@ -308,9 +307,9 @@ class LabManager:
                 confirm_stop.click()
                 self.logger(f"'Stop lab' confirmed for {course_id}.")
                 # Add wait for lab stop
-                # Original: time.sleep(5)
-                WebDriverWait(self.driver, 120).until(
-                    lambda d: self._get_lab_action_button(["Start", "Starting"])[0] is not None,
+                time.sleep(5)
+                WebDriverWait(self.driver, 30).until(
+                    lambda d: self._get_lab_action_button(["Start", "Stopping"])[0] is not None,
                     message="Lab did not appear to stop."
                 )
                 self.logger(f"Lab for {course_id} stopping process initiated.")
@@ -335,7 +334,7 @@ class LabManager:
                 self.logger(f"'Delete lab' confirmed for {course_id}.")
                 # Add wait for lab deletion
                 # Original: time.sleep(20)
-                WebDriverWait(self.driver, 120).until(
+                WebDriverWait(self.driver, 60).until(
                     lambda d: self._get_lab_action_button(["Create"])[0] is not None, # Wait until delete is done (Create becomes available)
                     message="Lab did not appear to be deleted."
                 )
@@ -394,7 +393,7 @@ class LabManager:
             # Wait until lab is in a state where adjustments can be made (e.g., running)
             # The original script checked for "CREATING" or "STARTING" states before clicking.
             # This implies we should wait until those are done.
-            WebDriverWait(self.driver, 180).until(
+            WebDriverWait(self.driver, 90).until(
                 lambda d: self._get_lab_action_button(["Stop"])[0] is not None or \
                             self._get_lab_action_button(["Workstation"])[0] is not None, # Assuming Workstation button means lab is ready
                 message="Lab not in a state to adjust autostop/lifespan (e.g. not running)."

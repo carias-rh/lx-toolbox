@@ -35,7 +35,7 @@ class BaseSeleniumDriver:
         else:
             raise ValueError(f"Unsupported browser: {self.browser_name}. Choose 'firefox' or 'chrome'.")
         
-        self.wait = WebDriverWait(self.driver, 10) # Default explicit wait time
+        self.wait = WebDriverWait(self.driver, 5) # Default explicit wait time
 
     def get_driver(self):
         return self.driver
@@ -46,9 +46,9 @@ class BaseSeleniumDriver:
 
     def go_to_url(self, url: str):
         self.driver.get(url)
-        time.sleep(2) # Consider making this configurable or using explicit waits
+        time.sleep(2)
 
-    def accept_trustarc_cookies(self, timeout: int = 10):
+    def accept_trustarc_cookies(self, timeout: int = 5):
         """Handles TrustArc Cookie Consent Manager if present."""
         try:
             self.wait.until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')), message="TrustArc iframe not found")
@@ -62,10 +62,10 @@ class BaseSeleniumDriver:
             self.driver.switch_to.default_content() # Ensure we are not stuck in an iframe
             pass # It's okay if it's not there
 
-    def wait_for_element_clickable(self, by: By, value: str, timeout: int = 10):
+    def wait_for_element_clickable(self, by: By, value: str, timeout: int = 5):
         return WebDriverWait(self.driver, timeout).until(EC.element_to_be_clickable((by, value)))
     
-    def wait_for_element_visible(self, by: By, value: str, timeout: int = 10):
+    def wait_for_element_visible(self, by: By, value: str, timeout: int = 5):
         return WebDriverWait(self.driver, timeout).until(EC.presence_of_element_located((by, value)))
 
     # Add other common Selenium interaction methods here if needed
