@@ -203,89 +203,135 @@ Best Regards,
             logger.error(f"Error looking up user {username}: {e}")
             return username
 
-    def lookup_user_sys_id(self, display_name: str) -> Optional[str]:
-        """Look up a user's sys_id by their display name using exact name matching"""
+    def lookup_user_sys_id(self, display_name: str, team_key: str = None) -> Optional[str]:
+        """Look up a user's sys_id by their display name, optionally filtering by team assignment group"""
         try:
             if display_name != "None":
-
+                
+                # If team filtering is requested, first get the list of team members
+                team_member_sys_ids = []
+                if team_key and team_key in self.teams:
+                    team_config = self.teams[team_key]
+                    assignment_group_id = team_config.assignment_group_id
+                    
+                    # Get all members of this assignment group
+                    try:
+                        group_url = f"{self.instance_url}/api/now/table/sys_user_grmember"
+                        group_params = {
+                            "sysparm_query": f"group={assignment_group_id}",
+                            "sysparm_fields": "user",
+                            "sysparm_limit": "200"
+                        }
+                        
+                        group_response = self.session.get(group_url, params=group_params)
+                        group_response.raise_for_status()
+                        group_members = group_response.json().get("result", [])
+                        team_member_sys_ids = [member.get('user', {}).get('value') if isinstance(member.get('user'), dict) else member.get('user') for member in group_members if member.get('user')]
+                        logger.debug(f"Found {len(team_member_sys_ids)} members in team {team_key}")
+                        logger.debug(f"Team members: {team_member_sys_ids}")
+                        
+                        if not team_member_sys_ids:
+                            logger.warning(f"No members found in team {team_key} assignment group")
+                            return None
+                            
+                    except Exception as e:
+                        logger.error(f"Error getting team members for {team_key}: {e}")
+                        # Fall back to no team filtering
+                        team_member_sys_ids = []
+                
                 # First try exact name match
                 params = {
                     "sysparm_query": f"name={display_name}",
                     "sysparm_fields": "sys_id,name,user_name",
-                    "sysparm_limit": "1"
+                    "sysparm_limit": "10"  # Get more results to filter by team
                 }
                 
-            url = f"{self.instance_url}/api/now/table/sys_user"
-            response = self.session.get(url, params=params)
-            response.raise_for_status()
+                url = f"{self.instance_url}/api/now/table/sys_user"
+                response = self.session.get(url, params=params)
+                response.raise_for_status()
                 
-            users = response.json().get("result", [])
-            if users:
-                user = users[0]
-                logger.debug(f"Found exact name match: '{display_name}' -> sys_id: {user.get('sys_id')} (username: {user.get('user_name')})")
-                return user.get('sys_id')
+                users = response.json().get("result", [])
+                logger.debug(f"Users found for exact match: {len(users)}")
+                logger.debug(f"Users: {users}")
+                
+                # Filter by team membership if applicable
+                if team_member_sys_ids:
+                    users = [user for user in users if user.get('sys_id') in team_member_sys_ids]
+                    logger.debug(f"Users after team filtering: {len(users)}")
+                    logger.debug(f"Users: {users}")
+                
+                if users:
+                    user = users[0]
+                    logger.debug(f"Found exact name match: '{display_name}' -> sys_id: {user.get('sys_id')} (username: {user.get('user_name')})")
+                    return user.get('sys_id')
                 
                 # If no exact match, try broader search
-            if ' ' in display_name:
-                # For full names like "Carlos Arias", search by first and last name
-                name_parts = display_name.split()
-                first_name = name_parts[0]
-                last_name = name_parts[-1]
-                
-                params = {
-                    "sysparm_query": f"first_name={first_name}^last_name={last_name}",
-                    "sysparm_fields": "sys_id,name,first_name,last_name,user_name",
-                    "sysparm_limit": "5"
-                }
-            else:
-                # For single names, try username or partial name match
-                params = {
-                    "sysparm_query": f"user_name={display_name}^ORnameSTARTSWITH{display_name}^ORfirst_nameLIKE{display_name}^ORlast_nameLIKE{display_name}",
-                    "sysparm_fields": "sys_id,name,first_name,last_name,user_name",
-                    "sysparm_limit": "10"
-                }
-                
-            response = self.session.get(url, params=params)
-            response.raise_for_status()
-            users = response.json().get("result", [])
-                
-            # Look for best matches
-            for user in users:
-                user_full_name = user.get('name', '')
-                user_first = user.get('first_name', '').lower()
-                user_last = user.get('last_name', '').lower()
-                user_username = user.get('user_name', '').lower()
-                
-                # For full names, check if first+last matches
                 if ' ' in display_name:
-                    name_parts = display_name.lower().split()
-                    if len(name_parts) >= 2:
-                        search_first = name_parts[0]
-                        search_last = name_parts[-1]
-                        
-                        if user_first == search_first and user_last == search_last:
-                            logger.debug(f"Found first+last name match: '{display_name}' -> '{user_full_name}' (sys_id: {user.get('sys_id')})")
-                            return user.get('sys_id')
+                    # For full names like "Carlos Arias", search by first and last name
+                    name_parts = display_name.split()
+                    first_name = name_parts[0]
+                    last_name = name_parts[-1]
+                    
+                    params = {
+                        "sysparm_query": f"first_name={first_name}^last_name={last_name}",
+                        "sysparm_fields": "sys_id,name,first_name,last_name,user_name",
+                        "sysparm_limit": "20"  # Get more results to filter by team
+                    }
+                else:
+                    # For single names, try username or partial name match
+                    params = {
+                        "sysparm_query": f"user_name={display_name}^ORnameSTARTSWITH{display_name}^ORfirst_nameLIKE{display_name}^ORlast_nameLIKE{display_name}",
+                        "sysparm_fields": "sys_id,name,first_name,last_name,user_name",
+                        "sysparm_limit": "30"  # Get more results to filter by team
+                    }
                 
-                # Check for username match
-                if display_name.lower() == user_username:
-                    logger.debug(f"Found username match: '{display_name}' -> '{user_full_name}' (sys_id: {user.get('sys_id')})")
-                    return user.get('sys_id')
+                response = self.session.get(url, params=params)
+                response.raise_for_status()
+                users = response.json().get("result", [])
+                logger.debug(f"Users found for broader search: {len(users)}")
                 
-                # Check for partial name matches
-                display_lower = display_name.lower()
-                if (display_lower in user_full_name.lower() or 
-                    user_full_name.lower() in display_lower):
-                    logger.debug(f"Found partial name match: '{display_name}' -> '{user_full_name}' (sys_id: {user.get('sys_id')})")
-                    return user.get('sys_id')
+                # Filter by team membership if applicable
+                if team_member_sys_ids:
+                    users = [user for user in users if user.get('sys_id') in team_member_sys_ids]
+                    logger.debug(f"Users after team filtering: {len(users)}")
                 
-            # If no match found, suggest similar users
-            logger.warning(f"No user found for display name: '{display_name}'")
-            if users:
-                logger.debug("Similar users found:")
-                for user in users[:3]:  # Show top 3 matches
-                    logger.debug(f"  - '{user.get('name')}' (username: {user.get('user_name')})")
-            return None
+                # Look for best matches
+                for user in users:
+                    user_full_name = user.get('name', '')
+                    user_first = user.get('first_name', '').lower()
+                    user_last = user.get('last_name', '').lower()
+                    user_username = user.get('user_name', '').lower()
+                    
+                    # For full names, check if first+last matches
+                    if ' ' in display_name:
+                        name_parts = display_name.lower().split()
+                        if len(name_parts) >= 2:
+                            search_first = name_parts[0]
+                            search_last = name_parts[-1]
+                            
+                            if user_first == search_first and user_last == search_last:
+                                logger.debug(f"Found first+last name match: '{display_name}' -> '{user_full_name}' (sys_id: {user.get('sys_id')})")
+                                return user.get('sys_id')
+                    
+                    # Check for username match
+                    if display_name.lower() == user_username:
+                        logger.debug(f"Found username match: '{display_name}' -> '{user_full_name}' (sys_id: {user.get('sys_id')})")
+                        return user.get('sys_id')
+                    
+                    # Check for partial name matches
+                    display_lower = display_name.lower()
+                    if (display_lower in user_full_name.lower() or 
+                        user_full_name.lower() in display_lower):
+                        logger.debug(f"Found partial name match: '{display_name}' -> '{user_full_name}' (sys_id: {user.get('sys_id')})")
+                        return user.get('sys_id')
+                
+                # If no match found with team filtering, suggest similar users
+                logger.warning(f"No user found for display name: '{display_name}'{' in team ' + team_key if team_key else ''}")
+                if users:
+                    logger.debug("Similar users found:")
+                    for user in users[:3]:  # Show top 3 matches
+                        logger.debug(f"  - '{user.get('name')}' (username: {user.get('user_name')})")
+                return None
                 
         except Exception as e:
             logger.error(f"Error looking up user sys_id for '{display_name}': {e}")
@@ -342,7 +388,7 @@ Best Regards,
         """Process a T1 team ticket in two steps: ACK/categorization, then assignment."""
         try:
             # Look up assignee sys_id
-            assignee_sys_id = self.lookup_user_sys_id(assignee_name)
+            assignee_sys_id = self.lookup_user_sys_id(assignee_name, "t1")
             if not assignee_sys_id:
                 logger.error(f"Could not find sys_id for assignee: {assignee_name}")
                 return False
@@ -404,7 +450,7 @@ Best Regards,
     def process_t2_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str) -> bool:
         """Process a T2 team ticket in two steps: ACK/categorization, then assignment."""
         try:
-            assignee_sys_id = self.lookup_user_sys_id(assignee_name)
+            assignee_sys_id = self.lookup_user_sys_id(assignee_name, "t2")
             if not assignee_sys_id:
                 logger.error(f"Could not find sys_id for assignee: {assignee_name}")
                 return False
@@ -583,7 +629,7 @@ Best Regards,
             
         # Get unassigned tickets
         tickets = self.get_unassigned_tickets(team_key)
-        logger.info(f"Found {len(tickets)} unassigned tickets for team {team_key}")
+        logger.debug(f"Found {len(tickets)} unassigned tickets for team {team_key}")
         
         # Process each ticket
         for ticket in tickets:
@@ -602,7 +648,7 @@ Best Regards,
 
                 else:
                     # Generic processing for other teams
-                    assignee_sys_id = self.lookup_user_sys_id(assignee_name)
+                    assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_key)
                     if not assignee_sys_id:
                         logger.error(f"Could not find sys_id for assignee: {assignee_name}")
                         success = False
