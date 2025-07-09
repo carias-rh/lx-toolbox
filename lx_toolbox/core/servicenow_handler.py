@@ -206,24 +206,26 @@ Best Regards,
     def lookup_user_sys_id(self, display_name: str) -> Optional[str]:
         """Look up a user's sys_id by their display name using exact name matching"""
         try:
-            # First try exact name match
-            params = {
-                "sysparm_query": f"name={display_name}",
-                "sysparm_fields": "sys_id,name,user_name",
-                "sysparm_limit": "1"
-            }
-            
+            if display_name != "None":
+
+                # First try exact name match
+                params = {
+                    "sysparm_query": f"name={display_name}",
+                    "sysparm_fields": "sys_id,name,user_name",
+                    "sysparm_limit": "1"
+                }
+                
             url = f"{self.instance_url}/api/now/table/sys_user"
             response = self.session.get(url, params=params)
             response.raise_for_status()
-            
+                
             users = response.json().get("result", [])
             if users:
                 user = users[0]
                 logger.debug(f"Found exact name match: '{display_name}' -> sys_id: {user.get('sys_id')} (username: {user.get('user_name')})")
                 return user.get('sys_id')
-            
-            # If no exact match, try broader search
+                
+                # If no exact match, try broader search
             if ' ' in display_name:
                 # For full names like "Carlos Arias", search by first and last name
                 name_parts = display_name.split()
@@ -242,11 +244,11 @@ Best Regards,
                     "sysparm_fields": "sys_id,name,first_name,last_name,user_name",
                     "sysparm_limit": "10"
                 }
-            
+                
             response = self.session.get(url, params=params)
             response.raise_for_status()
             users = response.json().get("result", [])
-            
+                
             # Look for best matches
             for user in users:
                 user_full_name = user.get('name', '')
@@ -276,7 +278,7 @@ Best Regards,
                     user_full_name.lower() in display_lower):
                     logger.debug(f"Found partial name match: '{display_name}' -> '{user_full_name}' (sys_id: {user.get('sys_id')})")
                     return user.get('sys_id')
-            
+                
             # If no match found, suggest similar users
             logger.warning(f"No user found for display name: '{display_name}'")
             if users:
@@ -284,7 +286,7 @@ Best Regards,
                 for user in users[:3]:  # Show top 3 matches
                     logger.debug(f"  - '{user.get('name')}' (username: {user.get('user_name')})")
             return None
-            
+                
         except Exception as e:
             logger.error(f"Error looking up user sys_id for '{display_name}': {e}")
             return None
@@ -334,19 +336,7 @@ Best Regards,
                 logger.error(f"Response text: {e.response.text}")
             return False
 
-    def get_round_robin_assignee(self, team_config: TeamConfig) -> Optional[str]:
-        """Get the next assignee from round robin API"""
-        if not team_config.enable_round_robin or not team_config.round_robin_api_url:
-            return None
-            
-        try:
-            response = requests.get(f"{team_config.round_robin_api_url}/api/round_robin")
-            response.raise_for_status()
-            data = response.json()
-            return data.get("name")
-        except Exception as e:
-            logger.error(f"Error getting round robin assignee: {e}")
-            return None
+
 
     def process_t1_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str) -> bool:
         """Process a T1 team ticket in two steps: ACK/categorization, then assignment."""
@@ -538,6 +528,40 @@ Best Regards,
             logger.error(f"Error auto-resolving tickets: {e}")
             return 0
 
+
+    def t1_who_is_on_shift(self, team_config: TeamConfig) -> Optional[str]:
+        try:
+            # Check if round-robin is enabled
+            round_robin_status_response = requests.get(f"{team_config.round_robin_api_url}/api/round_robin_status")
+            round_robin_status_response.raise_for_status()
+            round_robin_status = round_robin_status_response.json()
+            is_round_robin_enabled = round_robin_status.get("round_robin_enabled", False)
+            
+            if is_round_robin_enabled:
+                # Get next assignee from round-robin
+                round_robin_response = requests.get(f"{team_config.round_robin_api_url}/api/round_robin")
+                round_robin_response.raise_for_status()
+                round_robin_data = round_robin_response.json()
+                assignee_name = round_robin_data.get("name")
+                logger.debug(f"Round-robin enabled, got assignee: {assignee_name}")
+                return assignee_name
+            else:
+                # Get assignee from shift endpoint
+                shift_response = requests.get(f"{team_config.round_robin_api_url}/api/shift")
+                shift_response.raise_for_status()
+                shift_data = shift_response.json()
+                shift_name = shift_data.get("name")
+                
+                if shift_name and shift_name != "None":
+                    assignee_name = shift_name
+                    logger.debug(f"Shift-based assignment, got assignee: {assignee_name}")
+                    return assignee_name
+                else:
+                    return "None"
+        except Exception as e:
+            pass
+
+
     def run_auto_assignment(self, team_key: str, assignee_name: str = None) -> Dict[str, int]:
         """Run auto-assignment for a specific team"""
         team_config = self.teams.get(team_key)
@@ -550,13 +574,9 @@ Best Regards,
         if team_config.auto_resolve_reporters:
             stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
             
-        # Get assignee name
-        if not assignee_name:
-            if team_config.enable_round_robin:
-                assignee_name = self.get_round_robin_assignee(team_config)
-            if not assignee_name:
-                assignee_name = self.config.get("General", "default_assignee")
-                
+        # Get assignee name for T1 team using frontend APIs
+        if team_key == "t1":
+            assignee_name = self.t1_who_is_on_shift(team_config)                
         if not assignee_name:
             logger.error(f"No assignee available for team {team_key}")
             return stats
@@ -569,10 +589,17 @@ Best Regards,
         for ticket in tickets:
             try:
                 success = False
+
                 if team_key == "t1":
+                    assignee_name = self.t1_who_is_on_shift(team_config)
+                    if assignee_name == "None":
+                        logger.info("No one is on shift, stopping ticket processing")
+                        break                
                     success = self.process_t1_ticket(ticket, team_config, assignee_name)
+
                 elif team_key == "t2":
                     success = self.process_t2_ticket(ticket, team_config, assignee_name)
+
                 else:
                     # Generic processing for other teams
                     assignee_sys_id = self.lookup_user_sys_id(assignee_name)
@@ -592,12 +619,6 @@ Best Regards,
                 if success:
                     stats["assigned"] += 1
                     logger.info(f"Assigned ticket {ticket['number']} to {assignee_name}")
-                    
-                    # Get next assignee if round robin is enabled
-                    if team_config.enable_round_robin:
-                        next_assignee = self.get_round_robin_assignee(team_config)
-                        if next_assignee:
-                            assignee_name = next_assignee
                 else:
                     stats["errors"] += 1
                     
