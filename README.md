@@ -32,7 +32,7 @@ Put your name in the teammate_name variable into the snow-ai.yml playbook.
 
 ![Image](https://github.com/user-attachments/assets/e277e95f-89a1-427e-a537-74cc3c513caa)
 
-Then, run the wrapper script `snow-ai` and use the first seconds to log into ServiceNow, ROL, and Jira, as the tabs start to open.
+Then, run the wrapper script `snow-ai` from the terminal and use the first seconds to log into ServiceNow, ROL, and Jira, as the tabs start to open. That way the script will start working on each ticket with the sessions open.
 
 Go, grab a coffee☕ and have everything ready to work when you come back.
 
