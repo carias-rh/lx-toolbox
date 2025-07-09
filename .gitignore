@@ -24,3 +24,4 @@ __pycache__/
 config.ini
 .env
 servicenow_auth.py
+debug/

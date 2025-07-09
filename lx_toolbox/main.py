@@ -336,7 +336,7 @@ def assign(ctx, team, assignee, continuous, interval):
         if continuous:
             click.echo(f"Starting continuous assignment for team {team} (interval: {interval}s)")
             click.echo("Press Ctrl+C to stop")
-            snow_handler.run_continuous_assignment(team, interval)
+            snow_handler.run_continuous_assignment(team, assignee, interval)
         else:
             click.echo(f"Running single assignment cycle for team {team}")
             stats = snow_handler.run_auto_assignment(team, assignee)

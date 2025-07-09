@@ -397,11 +397,11 @@ Best Regards,
                 phase1_updates['comments'] = ack_message
             
             # Execute Phase 1
-            logger.info(f"Phase 1: Updating ticket {ticket['number']} with categorization and ACK")
             if not self.update_ticket(ticket['sys_id'], phase1_updates):
                 logger.error(f"Failed to update ticket {ticket['number']} with categorization and ACK")
                 return False
             time.sleep(1)
+            # PHASE 2: Assign to the specific user
             phase2_updates = {'assigned_to': assignee_sys_id}
             if not self.update_ticket(ticket['sys_id'], phase2_updates):
                 logger.error(f"Failed to assign ticket {ticket['number']} to {assignee_name}")
@@ -419,7 +419,7 @@ Best Regards,
                 logger.error(f"Could not find sys_id for assignee: {assignee_name}")
                 return False
             description = ticket.get('description', '')
-            # Step 1: Categorization and ACK
+            # PHASE 1: Categorization and ACK
             phase1_updates = {
                 'state': TicketState.IN_PROGRESS.value,
                 'category': team_config.category,
@@ -475,7 +475,7 @@ Best Regards,
                 logger.error(f"Failed to update ticket {ticket['number']} with categorization and ACK")
                 return False
             time.sleep(1)
-            # Step 2: Assignment
+            # PHASE 2: Assignment
             phase2_updates = {'assigned_to': assignee_sys_id}
             if not self.update_ticket(ticket['sys_id'], phase2_updates):
                 logger.error(f"Failed to assign ticket {ticket['number']} to {assignee_name}")
@@ -491,7 +491,7 @@ Best Regards,
         if not team_config or not team_config.auto_resolve_reporters:
             return 0
             
-        # Query for tickets with specific reporters
+        # Query for tickets with notifications from Jira
         query_parts = [
             f"stateIN1,2,-2,14,13,15,16,17,18",
             "active=true",
@@ -607,13 +607,13 @@ Best Regards,
                 
         return stats
 
-    def run_continuous_assignment(self, team_key: str, interval_seconds: int = 60):
+    def run_continuous_assignment(self, team_key: str, assignee_name: str = None, interval_seconds: int = 60):
         """Run continuous auto-assignment for a team"""
         logger.info(f"Starting continuous auto-assignment for team {team_key}")
         
         while True:
             try:
-                stats = self.run_auto_assignment(team_key)
+                stats = self.run_auto_assignment(team_key, assignee_name)
                 if stats["assigned"] > 0 or stats["resolved"] > 0:
                     logger.info(f"Assignment cycle complete: {stats}")
             except Exception as e:
