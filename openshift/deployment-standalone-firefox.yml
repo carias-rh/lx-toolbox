@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    deployment.kubernetes.io/revision: "6"
+  labels:
+    app: standalone-firefox
+    app.kubernetes.io/component: standalone-firefox
+    app.kubernetes.io/instance: standalone-firefox
+    app.kubernetes.io/name: standalone-firefox
+    app.kubernetes.io/part-of: intercom
+    app.openshift.io/runtime: python
+    app.openshift.io/runtime-namespace: lx-snow
+  name: standalone-firefox
+  namespace: lx-snow
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: standalone-firefox
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        openshift.io/generated-by: OpenShiftWebConsole
+      creationTimestamp: null
+      labels:
+        app: standalone-firefox
+        deploymentconfig: standalone-firefox
+    spec:
+      containers:
+        - image: docker.io/selenium/standalone-firefox:latest
+          imagePullPolicy: Always
+          name: standalone-firefox
+          ports:
+            - containerPort: 4444
+              protocol: TCP
+            - containerPort: 5902
+              protocol: TCP
+            - containerPort: 7900
+              protocol: TCP
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30

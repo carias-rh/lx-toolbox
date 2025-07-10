@@ -1,0 +1,81 @@
+{{- range .Values.t2_schedules }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  annotations:
+    alpha.image.policy.openshift.io/resolve-names: '*'
+    app.openshift.io/route-disabled: "false"
+    app.openshift.io/vcs-ref: redesign/snow-auto-assign
+    app.openshift.io/vcs-uri: git@github.com:carias-rh/lx-toolbox.git
+    openshift.io/generated-by: Helm
+  labels:
+    app: snow-autoassign-t2-{{ .name }}
+    app.kubernetes.io/component: snow-autoassign-t2
+    app.kubernetes.io/instance: snow-autoassign-t2-{{ .name }}
+    app.kubernetes.io/name: snow-autoassign-t2-{{ .name }}
+    app.kubernetes.io/part-of: snow-autoassign-t2
+    app.openshift.io/runtime: python
+    app.openshift.io/runtime-version: 3.12-ubi9
+    assignee: {{ .name }}
+  name: snow-autoassign-t2-{{ .name }}
+  namespace: {{ $.Values.common.namespace }}
+spec:
+  concurrencyPolicy: {{ $.Values.common.concurrencyPolicy }}
+  failedJobsHistoryLimit: {{ $.Values.common.failedJobsHistoryLimit }}
+  successfulJobsHistoryLimit: {{ $.Values.common.successfulJobsHistoryLimit }}
+  schedule: "{{ .schedule }}"
+  suspend: {{ .suspend }}
+  startingDeadlineSeconds: 200
+  jobTemplate:
+    metadata:
+      creationTimestamp: null
+    spec:
+      activeDeadlineSeconds: {{ $.Values.common.activeDeadlineSeconds }}
+      template:
+        metadata:
+          creationTimestamp: null
+          labels:
+            app: snow-autoassign-t2-{{ .name }}
+            job: snow-autoassign-t2-{{ .name }}
+        spec:
+          containers:
+            - args:
+                - /bin/sh
+                - -c
+                - cp ./config/config.ini.example ./config/config.ini ; ./scripts/lx-tool snow assign t2 --continuous --assignee "{{ .assignee }} --interval 60"
+              image: {{ $.Values.common.image }}
+              imagePullPolicy: {{ $.Values.common.imagePullPolicy }}
+              name: snow-autoassign-t2-{{ .name }}
+              env:
+              {{- range $.Values.common.env }}
+                - name: {{ .name }}
+                  value: "{{ .value }}"
+              {{- end }}
+              resources: {}
+              terminationMessagePath: /dev/termination-log
+              terminationMessagePolicy: File
+              volumeMounts:
+              {{- range $.Values.common.volumeMounts }}
+                - mountPath: {{ .mountPath }}
+                  name: {{ .name }}
+                  subPath: {{ .subPath }}
+              {{- end }}
+          dnsPolicy: ClusterFirst
+          restartPolicy: {{ $.Values.common.restartPolicy }}
+          schedulerName: default-scheduler
+          securityContext: {}
+          terminationGracePeriodSeconds: 30
+          volumes:
+          {{- range $.Values.common.volumes }}
+            - name: {{ .name }}
+              configMap:
+                defaultMode: {{ .configMap.defaultMode }}
+                items:
+                {{- range .configMap.items }}
+                  - key: {{ .key }}
+                    path: {{ .path }}
+                {{- end }}
+                name: {{ .configMap.name }}
+          {{- end }}
+{{- end }} 

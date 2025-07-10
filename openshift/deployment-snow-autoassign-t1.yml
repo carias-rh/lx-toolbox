@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    alpha.image.policy.openshift.io/resolve-names: '*'
+    app.openshift.io/route-disabled: "false"
+    app.openshift.io/vcs-ref: redesign/snow-auto-assign
+    app.openshift.io/vcs-uri: git@github.com:carias-rh/lx-toolbox.git
+    deployment.kubernetes.io/revision: "29"
+    image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"snow-autoassign-t1:latest","namespace":"lx-snow"},"fieldPath":"spec.template.spec.containers[?(@.name==\"snow-autoassign-t1\")].image","pause":"false"}]'
+    openshift.io/generated-by: OpenShiftWebConsole
+  labels:
+    app: snow-autoassign-t1
+    app.kubernetes.io/component: snow-autoassign-t1
+    app.kubernetes.io/instance: snow-autoassign-t1
+    app.kubernetes.io/name: snow-autoassign-t1
+    app.kubernetes.io/part-of: snow-t1
+    app.openshift.io/runtime: python
+    app.openshift.io/runtime-version: 3.12-ubi9
+  name: snow-autoassign-t1
+  namespace: lx-snow
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: snow-autoassign-t1
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: snow-autoassign-t1
+        deployment: snow-autoassign-t1
+    spec:
+      containers:
+        - args:
+            - /bin/sh
+            - -c
+            - cp ./config/config.ini.example ./config/config.ini ; ./scripts/lx-tool snow assign t1  --continuous --interval 60
+          image: image-registry.openshift-image-registry.svc:5000/lx-snow/snow-autoassign-t1@sha256:fc6d2c9922d8ecb56d6e8c6bd953950759dd7b764e3005bc08dc2fc81612c592
+          imagePullPolicy: Always
+          name: snow-autoassign-t1
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /opt/app-root/src/.env
+              name: env-file
+              subPath: .env
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - configMap:
+            defaultMode: 420
+            items:
+              - key: .env
+                path: .env
+            name: snow-autoassign-env-file
+          name: env-file

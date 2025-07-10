@@ -1,0 +1,25 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  annotations:
+    openshift.io/host.generated: "true"
+  labels:
+    app: t1-shifts-frontend
+    app.kubernetes.io/component: t1-shifts-frontend
+    app.kubernetes.io/instance: t1-shifts-frontend
+    app.kubernetes.io/name: t1-shifts-frontend
+    app.kubernetes.io/part-of: snow-t1
+  name: t1-shifts-frontend
+  namespace: lx-snow
+spec:
+  host: t1-shifts-frontend-lx-snow.apps.tools-na100.dev.ole.redhat.com
+  port:
+    targetPort: 5000-tcp
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
+  to:
+    kind: Service
+    name: t1-shifts-frontend
+    weight: 100
+  wildcardPolicy: None
