@@ -80,6 +80,9 @@ class ServiceNowHandler:
         # Load team configurations
         self.teams = self._load_team_configurations()
         
+        # Cache for team members to avoid repeated API calls
+        self._team_members_cache = {}
+        
     def _load_team_configurations(self) -> Dict[str, TeamConfig]:
         """Load team configurations from config or define them programmatically"""
         teams = {}
@@ -131,6 +134,67 @@ Best Regards,
         )
         
         return teams
+
+    def _get_team_members(self, team_key: str) -> List[str]:
+        """Get team member sys_ids, using cache to avoid repeated API calls"""
+        if team_key in self._team_members_cache:
+            return self._team_members_cache[team_key]
+            
+        if team_key not in self.teams:
+            logger.warning(f"Unknown team: {team_key}")
+            return []
+            
+        team_config = self.teams[team_key]
+        assignment_group_id = team_config.assignment_group_id
+        
+        try:
+            group_url = f"{self.instance_url}/api/now/table/sys_user_grmember"
+            group_params = {
+                "sysparm_query": f"group={assignment_group_id}",
+                "sysparm_fields": "user",
+                "sysparm_limit": "200"
+            }
+            
+            group_response = self.session.get(group_url, params=group_params)
+            group_response.raise_for_status()
+            group_members = group_response.json().get("result", [])
+            team_member_sys_ids = [
+                member.get('user', {}).get('value') if isinstance(member.get('user'), dict) else member.get('user') 
+                for member in group_members if member.get('user')
+            ]
+            
+            # Cache the result
+            self._team_members_cache[team_key] = team_member_sys_ids
+            logger.debug(f"Cached {len(team_member_sys_ids)} members for team {team_key}")
+            
+            return team_member_sys_ids
+            
+        except Exception as e:
+            logger.error(f"Error getting team members for {team_key}: {e}")
+            # Cache empty list to avoid repeated failed calls
+            self._team_members_cache[team_key] = []
+            return []
+
+    def preload_team_data(self, team_keys: List[str] = None) -> None:
+        """Preload team member data for specified teams or all teams"""
+        if team_keys is None:
+            team_keys = list(self.teams.keys())
+            
+        logger.info(f"Preloading team data for: {team_keys}")
+        for team_key in team_keys:
+            if team_key in self.teams:
+                self._get_team_members(team_key)
+        logger.info("Team data preloading complete")
+
+    def clear_team_cache(self, team_key: str = None) -> None:
+        """Clear cached team data for a specific team or all teams"""
+        if team_key:
+            if team_key in self._team_members_cache:
+                del self._team_members_cache[team_key]
+                logger.debug(f"Cleared cache for team {team_key}")
+        else:
+            self._team_members_cache.clear()
+            logger.debug("Cleared all team cache")
 
     def test_connection(self) -> bool:
         """Test the connection to ServiceNow"""
@@ -231,25 +295,10 @@ Best Regards,
                 if len(users) > 1 and team_key and team_key in self.teams:
                     logger.debug(f"Multiple matches found for '{display_name}', filtering by team {team_key}")
                     
-                    # Get team members
-                    team_config = self.teams[team_key]
-                    assignment_group_id = team_config.assignment_group_id
+                    # Get cached team members
+                    team_member_sys_ids = self._get_team_members(team_key)
                     
-                    try:
-                        group_url = f"{self.instance_url}/api/now/table/sys_user_grmember"
-                        group_params = {
-                            "sysparm_query": f"group={assignment_group_id}",
-                            "sysparm_fields": "user",
-                            "sysparm_limit": "200"
-                        }
-                        
-                        group_response = self.session.get(group_url, params=group_params)
-                        group_response.raise_for_status()
-                        group_members = group_response.json().get("result", [])
-                        team_member_sys_ids = [member.get('user', {}).get('value') if isinstance(member.get('user'), dict) else member.get('user') for member in group_members if member.get('user')]
-                        logger.debug(f"Found {len(team_member_sys_ids)} members in team {team_key}")
-                        logger.debug(f"Team members: {team_member_sys_ids}")
-                        
+                    if team_member_sys_ids:
                         # Filter users by team membership
                         team_users = [user for user in users if user.get('sys_id') in team_member_sys_ids]
                         
@@ -264,13 +313,12 @@ Best Regards,
                             return user.get('sys_id')
                         else:
                             logger.warning(f"No team matches found for '{display_name}' in team {team_key}")
-                            
-                    except Exception as e:
-                        logger.error(f"Error filtering by team: {e}")
-                        # Fall back to first match if team filtering fails
+                    else:
+                        logger.warning(f"No team members found for team {team_key}")
+                        # Fall back to first match if no team members
                         if users:
                             user = users[0]
-                            logger.debug(f"Team filtering failed, using first match: '{display_name}' -> sys_id: {user.get('sys_id')} (username: {user.get('user_name')})")
+                            logger.debug(f"No team data available, using first match: '{display_name}' -> sys_id: {user.get('sys_id')} (username: {user.get('user_name')})")
                             return user.get('sys_id')
                 
                 # If exact match found but no team filtering needed/available
@@ -627,7 +675,7 @@ Best Regards,
         if team_key == "t1":
             assignee_name = self.t1_who_is_on_shift(team_config)                
         if not assignee_name:
-            logger.error(f"No assignee available for team {team_key}")
+            logger.debug(f"No assignee available for team {team_key}")
             return stats
             
         # Get unassigned tickets
@@ -680,6 +728,9 @@ Best Regards,
     def run_continuous_assignment(self, team_key: str, assignee_name: str = None, interval_seconds: int = 60):
         """Run continuous auto-assignment for a team"""
         logger.info(f"Starting continuous auto-assignment for team {team_key}")
+        
+        # Preload team data once at the start for efficient lookups
+        self.preload_team_data([team_key])
         
         while True:
             try:
