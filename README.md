@@ -1,224 +1,234 @@
-This project contains a series of web automation scripts for the daily tasks of the Learner Experience Team at Red Hat. 
-- Automated lab environment creation
-- Semi-automated QA for RHxxx courses
-- SNOW auto-assign tickets
-- Intercom status change
+# LX Toolbox
 
+Automation tools for various work tasks including lab operations, ServiceNow, and Jira.
 
-## Setup
+## Features
 
-### Requisites
-- Root access to your laptop
-- ansible core
-- python3
-- selenium libraries
-`pip3 install selenium`
-- [geckodriver](https://github.com/mozilla/geckodriver/releases) and/or [Chromedriver](https://chromedriver.chromium.org/downloads) under `/usr/bin/`
+- **Lab Operations**: Create, start, stop, delete, and manage labs
+- **QA Automation**: Run automated QA tests on lab exercises
+- **User Impersonation**: Switch to different users for testing
+- **Multi-Environment Support**: Works with ROL, ROL-Stage, and China environments
+- **ServiceNow Auto-Assignment**: Automated ticket assignment with team-specific configurations
+- **LMS Integration**: User name lookups via LMS API
+- **Jira Integration** (Coming Soon)
 
+## Prerequisites
 
-Run the `setup.yml` playbook that will install the requirements and wrapper scripts to create the labs:
-``` 
-$ ansible-playbook playbooks/setup.yml -K
-```
+- Python 3.8+
+- Firefox or Chrome browser
+- Geckodriver (for Firefox) or Chromedriver (for Chrome)
 
-### SSO for Associates
-As you may have seen, the `setup.yml` playbook generated a `secret` that we will use to create our SSO token. 
-```
+## Installation
 
-TASK [Use this secret string to create your token.redhat.com] *************************************************************************************************************************************************************************************************************************************************************
-ok: [localhost] => {
-    "generated_secret.stdout": "4439be1a......................bc2d3ec263"
-}
-...output omitted...
-```
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd lx-toolbox
+   ```
 
-Fill in the `playbooks/vars/credentials.yml` file with your `rol.redhat.com` username. Vault-encrypting this file is recommended:
-```
-# SSO Red Hat credentials
-username: "rh-username"	                            # without @redhat.com
-secret: "4439be1a......................bc2d3ec263"          # OTP Key to generate the SSO token
-pin: "yourpin" 		                                    # Create a PIN for the OTP Key
+2. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-# Github credentials
-github_username: ""
-github_password: ""
-```
+3. Set up your credentials:
+   ```bash
+   # Copy the template
+   cp env.template .env
+   
+   # Edit with your credentials
+   vim .env  # or use your preferred editor
+   ```
 
+4. (Optional) Configure settings:
+   ```bash
+   cp config/config.ini.example config/config.ini
+   # Edit config/config.ini if needed
+   ```
 
-Go to `token.redhat.com` with the VPN activated to create the new token with the given secret. Uncheck the ☑️ `Generate OTP Key on the Server` box, paste your secret, and choose a PIN.
+## Usage
 
-![image](https://user-images.githubusercontent.com/80515069/177427661-7a1d9c81-ad96-485c-a31a-376e7dc3c1e5.png)
+### Lab Commands
 
-Make sure that the `./counter` file always matches the `Count` value of the token, **initially set to 1**. It will increase the value each time you login.
-
-![hotp](https://user-images.githubusercontent.com/80515069/212667043-69dd2e9e-c81e-4b75-a5ac-41e1b52b8f27.png)
-
-### Other learners
-
-Fill in the credentials.yml file with your rol.redhat.com credentials:
-```
-username: "youruser@mail.com"
-password: "yourpassword"
-``` 
-
-
-# Automated lab environment creation
-This script uses ansible and selenium to create, delete, and extend life of most used labs in rol.redhat.com:
-  - rh124-9.0
-  - rh134-9.0
-  - rh199-9.0
-  - rh294-9.0
-  - do180-4.10
-  - do280-4.10
-  - do288-4.10
-  - do447-2.8
-
-It uses ansible-playbook to generate python scripts from templates that will launch a browser by using selenium.
-
-## Running the thing
-
-The `setup.yml` playbook has placed in your `/usr/local/bin/` dir some wrapper scripts that use the `rol-prod` environment by default. So if you want to use stage, append `rol-stage` as the second parameter.
-- start
-- delete
-- recreate
-- impersonate (only rol-prod)
-
-The wrapper script will look into the list of courses and match the latest version of the course if you write only the number of the course.
-
-[rol-start-render.webm](https://user-images.githubusercontent.com/80515069/214608957-41e14cd4-1084-45fc-bd4a-3e08cc34cf84.webm)
-
-```
-$ start 180 rol-stage
-
-Course starting: do180-4.10
-Environment: rol-stage
-
-Using /etc/ansible/ansible.cfg as config file
-[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
-
-PLAY [ROL labs launcher] *****************************************************************************************************************************************************************************************************************************************************************
-...
-``` 
-Another wrapper example that allows you to impersonate a user:
-```
-$ impersonate 280 carias
-
-Course starting: do280-4.10
-Environment: rol-production
-Impersonate: carias
-
-Using /etc/ansible/ansible.cfg as config file
-[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
-
-PLAY [ROL labs launcher] *****************************************************************************************************************************************************************************************************************************************************************
-...
-```
-
-You can also directly run the playbooks to start the labs:
-``` 
-$ ansible-playbook playbooks/create.yml
-
-``` 
-
-An example to override the variables without editing the yaml files by using the extra-vars parameter.
-```
-$ ansible-playbook delete.yml \
-        -e 'lab_environment=rol-stage' \
-        -e '{"course_id": ["rh124-8.2", "rh134-8.2"]}'
-```
-
-## Custom courses and environment
-You can customize the default `lab_environment` and `courses_id` variables in the vars section, so that you can create, start, delete multiple labs with a single run:
-```
-$ cat playbooks/create.yaml
-- name: ROL labs launcher
-  hosts: localhost
-  vars_files: credentials.yml
-  vars:
-    - lab_environment: rol 	# Valid options are: rol / rol-stage
-    - course_id:  		# Get the course_id from the URL, such https://rol.redhat.com/rol/app/courses/rh124-8.2
-        - rh124-9.0
-        - rh134-9.0
-        - rh294-9.0
-        ...
-```
-# Semi-automated QA for RHxxx courses
-This script will assist you in the introduction of the commands during any QA of the RH series, which are mostly done using the command line interface. It has some limitations, such those exercise where it's asked the user to open a new terminal tab, or that commands may need to be introduced directly into a different host without sshing it first, or with commands that require some custom user input. 
-
-Despite these limitations, the script has proven to serve of great help during E2E QAs, reducing the human work to merely check that the output of the commands correspond to the steps in the guide.
-
-You will need the SSH key access to [github](https://www.freecodecamp.org/news/git-ssh-how-to/) configured to checkout the version of the course from repo to get the commands.
-
-It's possible to start the QA from any chapter and the script will continue from that point until the end.  
-
-`$ qa -c 180 -s ch02s02 -e china`
-
-![image](https://user-images.githubusercontent.com/80515069/233403992-3e15964b-32c9-4f6a-95a3-ec0efa5bac42.png)
-
-`[...]`
-
-The script will get the commands from the indicated section, or from the first guided exercise if not indicated 
-
-![image](https://user-images.githubusercontent.com/80515069/233404289-9ca4540e-4b00-4081-a8be-08f2bf5d7cf2.png)
-
-
-`[...]`
-
-![image](https://user-images.githubusercontent.com/80515069/233405072-26d7810c-0148-4841-9fb9-bbcaed416895.png)
-
-
-At this point of the script, the lab is up and running, but needs 2 manual steps before hitting Enter to start the introduction of the commands: 
- - opening a terminal
- - disabling key repetition on `Settings > Universal Access > Typing > Repeat Keys = Off`
-
-Note that this script is run in headless mode to avoid any manual interruption of the user in the automation tool, so you will need to open a new session with (i.e.)  `start 180` to have your monitoring workstation terminal.
-
-You will notice that after introducing some kind of commands, a prompt to continue with the script execution will appear. This is to avoid the script running without control and introducing commands incorrectly. Have a look at some special commands that require these stopper prompts in the `operate-lab.py.j2` template. 
-
-![image](https://user-images.githubusercontent.com/80515069/233406747-cc578ae1-d1c1-4b25-be4c-4b7084896c22.png)
-
-How to steer the script in other exceptional situations:
-
-- If for any reasons, the script introduced an incorrect command, because it needed a customized input, or is missing some configuration file, you can stop the terminal process with `CTRL + s`. Then, resolve any inconsistencies in the exercise and resume the script execution with `CTRL + q`. 
-- This is a work in progress project, mostly tested on RHxxx courses, so if you find any other exceptional kind of command that needs a stopper prompt, please tell or submit a PR. Thanks!
-
-# SNOW auto-assign tickets
-The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. The need for this script emerged from the time-consuming task of filling all the field of each ticket, which came without the name, email, and summary filled.
-I could have make this script simpler, but I finally decided to automate the whole thing to auto-assign the tickets to my queue as they come and automatically reply to the users.
-
-To achieve this, I created in my favourites a customized query for `RHT Learner Experience - T2` group. This will correspond to a unique url that needs to be substituted in the `playbooks/templates/snow-auto-assign.yml` selenium template.       
-
-![image](https://user-images.githubusercontent.com/80515069/212669278-29f9a09e-9fe0-427e-9ed3-3f25d92bde45.png)
-
-Substitute your filter URL in the `driver.get` function parameter.
-
-![image](https://user-images.githubusercontent.com/80515069/212669964-817f766d-ba67-463b-bf62-7a7124a86158.png)
-
-Customize the email that will be sent to the customer as an ACK in the `auto_assign_tickets()` function.
-
-![image](https://user-images.githubusercontent.com/80515069/212670415-862f3829-9bcb-42f6-8da9-79044584708b.png)
-
-I created a crontab to periodically run the script every hour during my shift.
 ```bash
-#######################
-# Auto-assign tickets #
-#######################
+# Make the script executable (first time only)
+chmod +x scripts/lx-tool
 
-59 8-13 * * 1-5   export DISPLAY=:1 && SHELL=/usr/bin/bash && source ${HOME}/.bashrc && /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/playbooks/snow.yml
+# Start a lab
+./scripts/lx-tool lab start rh124-9.3
+
+# Stop a lab
+./scripts/lx-tool lab stop rh124-9.3
+
+# Create a new lab
+./scripts/lx-tool lab create rh124-9.3
+
+# Delete a lab
+./scripts/lx-tool lab delete rh124-9.3
+
+# Recreate a lab (delete + create)
+./scripts/lx-tool lab recreate rh124-9.3
+
+# Impersonate a user
+./scripts/lx-tool lab impersonate rh124-9.3 student01
+
+# Run QA automation
+./scripts/lx-tool lab qa rh124-9.3 ch01s02 -f commands.txt
 ```
 
-# Jira ticket from SNOW Feedback
-This script create a new jira from a SNOW feedback ticket. Review that everything is fine according to priority, categorization and a proper summary and description.
+### ServiceNow Commands
 
-`$ jira RHT1915340`
+```bash
+# Test ServiceNow and LMS connections
+./scripts/lx-tool snow test
 
-# Intercom status change
-This script will switch your status on intercom to Away/Active.
+# List unassigned tickets for a team
+./scripts/lx-tool snow list-tickets t1
+./scripts/lx-tool snow list-tickets t2 --limit 20
 
-`$ ansible-playbook playbooks/intercom.yml -e status="Away"`
+# Run single auto-assignment cycle
+./scripts/lx-tool snow assign t1
+./scripts/lx-tool snow assign t2 --assignee "John Doe"
 
-![image](https://user-images.githubusercontent.com/80515069/223106095-6628576d-ba36-4c86-b258-856eca079b73.png)
+# Run continuous auto-assignment
+./scripts/lx-tool snow assign t1 --continuous
+./scripts/lx-tool snow assign t2 --continuous --interval 120
+```
 
+### Command Options
 
+- `--env, -e` : Specify environment (rol, rol-stage, china)
+- `--browser, -b` : Choose browser (firefox, chrome)
+- `--headless` : Run in headless mode
+- `--no-headless` : Run with browser visible
 
+### Examples
 
+```bash
+# Start lab in ROL-stage with Chrome
+./scripts/lx-tool lab start rh124-9.3 --env rol-stage --browser chrome
+
+# Delete lab in headless mode
+./scripts/lx-tool lab delete rh124-9.3 --headless
+
+# Run QA with custom commands file
+./scripts/lx-tool lab qa rh124-9.3 ch01s02 -f my-commands.txt
+
+# Check your configuration
+./scripts/lx-tool config
+
+# Auto-assign T1 tickets continuously with 2-minute intervals
+./scripts/lx-tool snow assign t1 --continuous --interval 120
+```
+
+## Configuration
+
+See [CREDENTIALS.md](CREDENTIALS.md) for detailed information on setting up credentials.
+
+### Quick Setup
+
+1. Create a `.env` file with your credentials:
+   ```
+   RH_USERNAME=your_username
+   RH_PIN=your_pin
+   SNOW_INSTANCE_URL=https://redhat.service-now.com
+   SNOW_API_USER=your_snow_user
+   SNOW_API_PASSWORD=your_snow_password
+   ```
+
+2. Test your configuration:
+   ```bash
+   ./scripts/lx-tool config
+   ./scripts/lx-tool snow test
+   ```
+
+## ServiceNow Auto-Assignment
+
+The ServiceNow auto-assignment feature supports multiple teams with different configurations:
+
+### Team Configurations
+
+- **T1 Team (`t1`)**: RHT Learner Experience
+  - Handles standard support requests
+  - Supports round-robin assignment
+  - Automatic acknowledgment messages
+  - Handles special cases (iqlaserpress.net emails)
+
+- **T2 Team (`t2`)**: RHT Learner Experience - T2  
+  - Handles feedback tickets
+  - Automatic user name lookup via LMS API
+  - Auto-resolution for specific reporters
+  - Course information extraction
+
+### Adding New Teams
+
+To add a new team, modify the `_load_team_configurations()` method in `lx_toolbox/core/servicenow_handler.py`:
+
+```python
+teams["new_team"] = TeamConfig(
+    team_name="Your Team Name",
+    assignment_group_id="your_group_sys_id", 
+    category="Your Category",
+    acknowledgment_template="Your template with {customer_name} and {assignee_name}",
+    # ... other configuration options
+)
+```
+
+## Project Structure
+
+```
+lx-toolbox/
+├── lx_toolbox/          # Main Python package
+│   ├── core/            # Core business logic
+│   │   ├── lab_manager.py
+│   │   ├── servicenow_handler.py
+│   │   └── jira_handler.py (TODO)
+│   ├── utils/           # Utility modules
+│   │   ├── config_manager.py
+│   │   └── helpers.py
+│   └── main.py          # CLI entry point
+├── config/              # Configuration files
+│   ├── config.ini
+│   └── config.ini.example
+├── scripts/             # Wrapper scripts
+│   └── lx-tool
+├── tests/               # Test files (TODO)
+├── playbooks/           # Legacy Ansible files (to be removed)
+├── legacy/              # Legacy files
+├── openshift/           # OpenShift deployment files
+├── .env                 # Environment variables (credentials)
+├── env.template         # Template for .env file
+├── requirements.txt     # Python dependencies
+└── README.md           # This file
+```
+
+## Security Notes
+
+- Never commit credentials to version control
+- Use `.env` files for local development
+- Add `.env` to your `.gitignore`
+- Consider using a secret manager for production use
+
+## Troubleshooting
+
+If you encounter "Username or password/pin not configured":
+1. Ensure `.env` file exists in the project root
+2. Check variable names are correct (case-sensitive)
+3. Verify no spaces around `=` in `.env` file
+4. Run `./scripts/lx-tool config` to check configuration
+
+For ServiceNow issues:
+1. Test connections with `./scripts/lx-tool snow test`
+2. Verify ServiceNow credentials and permissions
+3. Check that assignment group IDs are correct
+
+## Contributing
+
+1. Create a feature branch
+2. Make your changes
+3. Add tests if applicable
+4. Submit a pull request
+
+## License
+
+[Your License Here] 
