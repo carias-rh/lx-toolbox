@@ -43,7 +43,7 @@ spec:
             - args:
                 - /bin/sh
                 - -c
-                - cp ./config/config.ini.example ./config/config.ini ; ./scripts/lx-tool snow assign t2 --continuous --assignee "{{ .assignee }} --interval 60"
+                - cp ./config/config.ini.example ./config/config.ini ; ./scripts/lx-tool snow assign t2 --continuous --assignee "{{ .assignee }}" --interval 60
               image: {{ $.Values.common.image }}
               imagePullPolicy: {{ $.Values.common.imagePullPolicy }}
               name: snow-autoassign-t2-{{ .name }}

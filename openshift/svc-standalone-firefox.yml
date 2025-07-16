@@ -11,9 +11,6 @@ metadata:
   name: standalone-firefox
   namespace: lx-snow
 spec:
-  clusterIP: 172.30.212.55
-  clusterIPs:
-    - 172.30.212.55
   internalTrafficPolicy: Cluster
   ipFamilies:
     - IPv4

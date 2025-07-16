@@ -6,14 +6,6 @@ metadata:
     app.openshift.io/vcs-uri: git@github.com:carias-rh/intercom-oncall.git
     openshift.io/generated-by: OpenShiftWebConsole
   labels:
-    app: intercom-oncall
-    app.kubernetes.io/component: intercom-oncall
-    app.kubernetes.io/instance: intercom-oncall
-    app.kubernetes.io/name: intercom-oncall
-    app.kubernetes.io/part-of: intercom
-    app.openshift.io/runtime: python
-    app.openshift.io/runtime-version: 3.9-ubi8
-  name: intercom-oncall
   namespace: lx-snow
 spec:
   failedBuildsHistoryLimit: 5

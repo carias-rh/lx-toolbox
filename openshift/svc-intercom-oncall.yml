@@ -17,9 +17,7 @@ metadata:
   name: intercom-oncall
   namespace: lx-snow
 spec:
-  clusterIP: 172.30.9.4
-  clusterIPs:
-    - 172.30.9.4
+
   internalTrafficPolicy: Cluster
   ipFamilies:
     - IPv4
