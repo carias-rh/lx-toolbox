@@ -40,10 +40,11 @@ logger = logging.getLogger(__name__)
 #OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"  
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
 #OLLAMA_MODEL = "qwen3:latest"
-#OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
+OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "qwen3:1.7b"
-OLLAMA_MODEL = "qwen3:8b"
+#OLLAMA_MODEL = "qwen3:8b"
 #OLLAMA_MODEL = "granite3.3:8b"
+#OLLAMA_MODEL = "deepseek-r1:8b"
 
 # -------------------------------------------------------------------
 # Configurable constants for local paths, etc.
@@ -121,7 +122,7 @@ def askOllama(prompt: str) -> str:
     """
     try:
         # Use 'ollama run <model> "<prompt>"' with context window size set to 128k
-        if OLLAMA_MODEL.startswith("qwen"):
+        if OLLAMA_MODEL.startswith(("qwen", "deepseek")):
             result = subprocess.run(
                 [OLLAMA_COMMAND, "run", OLLAMA_MODEL, prompt, "/set", "parameter", "num_ctx", "128000"],
                 capture_output=True,
@@ -134,10 +135,24 @@ def askOllama(prompt: str) -> str:
                 text=True
             )        
         response = result.stdout
+        
         # Remove any <think>…</think> blocks from Qwen responses
         if OLLAMA_MODEL.startswith("qwen"):
             response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
             response = re.sub(r'</think>', '', response).strip()
+        elif OLLAMA_MODEL.startswith("deepseek"):
+            # Remove thinking blocks
+            response = re.sub(r'Thinking.*?done thinking\.', '', response, flags=re.DOTALL).strip()
+            
+            # Remove any remaining thinking markers
+            response = re.sub(r'Thinking\.\.\.', '', response).strip()
+            response = re.sub(r'\.\.\.done thinking\.', '', response).strip()
+        
+        # Remove markdown code block markers and clean up whitespace
+        response = re.sub(r'```json\s*', '', response)
+        response = re.sub(r'```\s*$', '', response)
+        response = response.strip()
+        
         return response
     except Exception as e:
         logger.error(f"Could not run Ollama: {e}")
@@ -537,6 +552,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         </guide_text>"""
         excerpt_json_key_value= '"excerpt": "extract the text from the guide_text that the student\'s feedback refers to if it is related to the issue, otherwise return an empty string.",'
 
+        print(f"guide_text_prompt: {guide_text_prompt}")
 
     json_example = '''{
         "student_feedback": "''' + user_issue.replace("\n", " ").replace("\t", " ").replace("\r", " ").replace("\"", "'").strip() + '''",
@@ -612,23 +628,45 @@ def analyze_environment_issue(user_issue: str) -> str:
     analysis_response = askOllama(prompt_text)
     return analysis_response
 
-def translate_text(text):
+def translate_text(text, language):
     """
     Translates text to the specified language using a LLM.
     
     Args:
         text: The text to translate
+        language: The language of the text to translate from
     Returns:
         str: The translated text
     """
     prompt_text = f"""
-        Translate the following text to english:
+        Translate the following text from {language} to english:
         <text>
         {text}
         </text>
     """
 
     translated_text = askOllama(prompt_text)
+    
+    # Handle JSON response from models using --format json
+    if translated_text.strip().startswith('{') and translated_text.strip().endswith('}'):
+        try:
+            json_response = json.loads(translated_text)
+            # Extract the translated text from various possible JSON structures
+            if 'text' in json_response:
+                return json_response['text']
+            elif 'translation' in json_response:
+                return json_response['translation']
+            elif 'result' in json_response:
+                return json_response['result']
+            else:
+                # If no expected keys found, return the first string value
+                for value in json_response.values():
+                    if isinstance(value, str) and value != '/set parameter num_ctx 128000':
+                        return value
+        except json.JSONDecodeError:
+            # If JSON parsing fails, return the raw text
+            pass
+    
     return translated_text
 
 # -------------------------------------------------------------------
@@ -872,7 +910,7 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
     if data.get("language", "") == "en":
         data["translated_student_feedback"] = snow_info["Description"]
     else:
-        data["translated_student_feedback"] = translate_text(snow_info["Description"])
+        data["translated_student_feedback"] = translate_text(snow_info["Description"], data.get("language", "en"))
 
     # 3. Ensure the repository is available
     repo_dir = ensure_course_repo(snow_info["Course"].lower())
@@ -1034,6 +1072,7 @@ def main():
     # Login into ServiceNow
     driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253D5267c5b81bf9c0104862b8cc1d4bcba5%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253Dfb15730a1bcaf7443407ece03d4bcb6d%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     login_snow(driver)
 
     # Login into rol.redhat.com
