@@ -235,7 +235,7 @@ Best Regards,
             return None
 
     def lookup_user_name(self, username: str) -> str:
-        """Look up full name from LMS API"""
+        """Look up full name from LMS API, auto-refreshing token if expired"""
         username = username.strip()
         token = self.get_lms_token()
         
@@ -247,8 +247,22 @@ Best Regards,
         
         try:
             response = requests.get(url, headers=headers)
-            if response.status_code == 400:
-                # Try with internal_ prefix
+            
+            # If token expired (401), refresh and retry once
+            if response.status_code == 401:
+                logger.debug(f"Token expired for {username}, refreshing...")
+                self._lms_token = None  # Clear cached token
+                token = self.get_lms_token()
+                if token:
+                    headers = {'Authorization': f'Bearer {token}', 'Accept': '*/*'}
+                    response = requests.get(url, headers=headers)
+                else:
+                    logger.warning(f"Could not refresh token for {username}")
+                    return username
+            
+            # If still not 200, try with internal_ prefix for redhat users
+            if response.status_code != 200:
+                # Try with internal_ prefix for redhat users
                 response = requests.get(f"https://training-lms.redhat.com/ws/user?username=internal_{username}", headers=headers)
             
             response.raise_for_status()
