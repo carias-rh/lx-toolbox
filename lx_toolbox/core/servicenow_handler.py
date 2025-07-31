@@ -556,7 +556,9 @@ Best Regards,
                 desc_match = re.search(r"Description:\s*(.+)", description)
                 
                 if course_match and version_match and desc_match:
-                    course = course_match.group(1).strip()
+                    course_full = course_match.group(1).strip()
+                    # Take only the first word (course code), ignore lesson info after space
+                    course = course_full.split()[0] if course_full else course_full
                     version = version_match.group(1).strip()
                     summary = desc_match.group(1).strip()
                     
