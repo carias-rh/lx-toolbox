@@ -41,9 +41,9 @@ logger = logging.getLogger(__name__)
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
 #OLLAMA_MODEL = "qwen3:latest"
 #OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
-OLLAMA_MODEL = "gemma3n:e4b" # <--- This is the best model for this task so far
+#OLLAMA_MODEL = "gemma3n:e4b" # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "qwen3:1.7b"
-#OLLAMA_MODEL = "qwen3:8b"
+OLLAMA_MODEL = "qwen3:8b"
 #OLLAMA_MODEL = "granite3.3:8b"
 #OLLAMA_MODEL = "deepseek-r1:8b"
 
@@ -139,8 +139,14 @@ def askOllama(prompt: str) -> str:
         
         # Remove any <think>…</think> blocks from Qwen responses
         if OLLAMA_MODEL.startswith("qwen"):
+            # Remove <think>...</think> blocks
+            response = re.sub(r'Thinking.*?done thinking\.', '', response, flags=re.DOTALL).strip()
+
             response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
             response = re.sub(r'</think>', '', response).strip()
+            # Remove Qwen "Thinking..." and "...done thinking." lines
+            response = re.sub(r'Thinking\.\.\.\s*', '', response)
+            response = re.sub(r'\.\.\.done thinking\.\s*', '', response)
         elif OLLAMA_MODEL.startswith("deepseek"):
             # Remove thinking blocks
             response = re.sub(r'Thinking.*?done thinking\.', '', response, flags=re.DOTALL).strip()
@@ -332,6 +338,34 @@ def select_lab_environment_tab(driver, tab_name):
         select_lab_environment_tab(driver, tab_name)
 
 
+content_issues_examples = """
+Examples of content issues:
+- There is a typo
+- A paragraph or phrase is incorrect.
+- Missing information to complete the exercise
+- The exercise in the guide doesn't match with the video from the instructor
+- Outdated content of the guide
+""" 
+
+environment_issues_examples = """
+Examples of environment issues:
+- lab start script is failing
+- lab script is not available
+- user can't access visual block mode in vim, due to platform limitations. Solution is use the virtual keyboard and press ctrl + V
+- User can't complete boot troubleshooting because is not selecting the "recovery" entry in the boot menu
+"""
+
+manually_managed_issues_examples = """
+Examples of types of issues to be manually managed:
+- Need to open the LAB in a new WINDOW... Tabs aren't cool, Need to see video side-by-side with lab
+- Content of the course not appearing
+- Labs are stuck in starting/stopping state
+- UI suggestions of improvement
+- Complaints / Praises on the learning platform or the courses.
+"""
+
+
+
 # -------------------------------------------------------------------
 # Function to classify a SNOW ticket using an LLM
 # -------------------------------------------------------------------
@@ -353,6 +387,15 @@ def classify_ticket_llm(description: str) -> dict:
         Classify the user's feedback regarding a Red Hat Training course, there are two types of tickets:
         - content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, etc.
         - environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', it's an environment issue.
+
+        Examples of content issues:
+        {content_issues_examples}
+
+        Examples of environment issues:
+        {environment_issues_examples}
+
+        Examples of types of issues to be manually managed:
+        {manually_managed_issues_examples}
 
         Return JSON with the following fields:
         - student_feedback: the user's feedback in english, as it is, without any changes. Substitute double quotes with single quotes.
