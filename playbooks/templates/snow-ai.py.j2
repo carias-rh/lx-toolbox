@@ -40,7 +40,8 @@ logger = logging.getLogger(__name__)
 #OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"  
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
 #OLLAMA_MODEL = "qwen3:latest"
-OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
+#OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
+OLLAMA_MODEL = "gemma3n:e4b" # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "qwen3:1.7b"
 #OLLAMA_MODEL = "qwen3:8b"
 #OLLAMA_MODEL = "granite3.3:8b"
@@ -284,9 +285,9 @@ def login_snow(driver):
     try:
 
         # RH SSO
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL http://sso-rh-login-lx-toolbox.apps.microshift.robots4life.es/get_otp").read().replace('\n', '')))
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
     except:
         logger.error("Login failed")
 
@@ -577,7 +578,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
 
         {guide_text_prompt}
 
-        Compare the student's feedback with the excerpt, and provide a detailed analysis of the issue.
+        Compare the student's feedback with the excerpt (if any), and provide a detailed analysis of the issue.
         Remove from the response in the JSON any reference to titles or headings, as I already have that information.
 
         Return your analysis in exactly the following JSON example format without any extra text. Note that the description of what to put in each field is in every value of the JSON example:
