@@ -40,10 +40,10 @@ logger = logging.getLogger(__name__)
 #OLLAMA_MODEL = "gabegoodhart/granite3.2-preview:8b"  
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
 #OLLAMA_MODEL = "qwen3:latest"
-#OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
-#OLLAMA_MODEL = "gemma3n:e4b" # <--- This is the best model for this task so far
+OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
+#OLLAMA_MODEL = "gpt-oss:20b" # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "qwen3:1.7b"
-OLLAMA_MODEL = "qwen3:8b"
+#OLLAMA_MODEL = "qwen3:8b"
 #OLLAMA_MODEL = "granite3.3:8b"
 #OLLAMA_MODEL = "deepseek-r1:8b"
 
@@ -125,13 +125,13 @@ def askOllama(prompt: str) -> str:
         # Use 'ollama run <model> "<prompt>"' with context window size set to 128k
         if OLLAMA_MODEL.startswith(("qwen", "deepseek")):
             result = subprocess.run(
-                [OLLAMA_COMMAND, "run", OLLAMA_MODEL, prompt, "/set", "parameter", "num_ctx", "128000"],
+                [OLLAMA_COMMAND, "run", OLLAMA_MODEL, prompt],
                 capture_output=True,
                 text=True
             )
         else:
             result = subprocess.run(
-                [OLLAMA_COMMAND, "run", OLLAMA_MODEL, prompt, "/set", "parameter", "num_ctx", "128000", "--format", "json"],
+                [OLLAMA_COMMAND, "run", OLLAMA_MODEL, prompt, "--format", "json"],
                 capture_output=True,
                 text=True
             )        
@@ -1114,9 +1114,9 @@ def main():
     driver.maximize_window()
 
     # Login into ServiceNow
-    driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253D5267c5b81bf9c0104862b8cc1d4bcba5%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
-    #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253Dfb15730a1bcaf7443407ece03d4bcb6d%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253Dfb15730a1bcaf7443407ece03d4bcb6d%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     login_snow(driver)
 
     # Login into rol.redhat.com
