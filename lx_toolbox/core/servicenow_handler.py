@@ -464,7 +464,7 @@ Best Regards,
                 name_parts = contact_source.split()
                 customer_name = f"{name_parts[0]} {name_parts[1] if len(name_parts) > 1 else ''}".strip()
             else:
-                customer_name = "Customer"
+                customer_name = ""
             
             # PHASE 1: Update ticket with categorization and ACK (but no assignment yet)
             phase1_updates = {
@@ -532,7 +532,7 @@ Best Regards,
             }
             
             # Extract and process user information from description
-            customer_name = "Customer"
+            customer_name = ""
             try:
                 # Extract username
                 username_match = re.search(r"User Name:\s*(.+)", description)

@@ -157,7 +157,7 @@ def process_t3_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, ass
             updates['priority'] = '1'  # Set high priority
             
         # Add acknowledgment
-        customer_name = ticket.get('contact_source', 'Customer')
+        customer_name = ticket.get('contact_source', '')
         ack_message = team_config.acknowledgment_template.format(
             customer_name=customer_name,
             assignee_name=assignee_name,
