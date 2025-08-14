@@ -29,7 +29,7 @@ t2_schedules:
 
 # Common configuration based on T1 deployment
 common:
-  image: "image-registry.openshift-image-registry.svc:5000/lx-snow/snow-autoassign-t1@sha256:f6e59f609883a44e9ecfa92aa395cda6a5563890491eda28e558316c0e6ff07c"
+  image: "image-registry.openshift-image-registry.svc:5000/lx-snow/snow-autoassign-t1@sha256:d8ec01b3929e6f55144cecae8ac7761d0c84a5ea785b7beb6c411c4554b158f2"
   namespace: "lx-snow"
   imagePullPolicy: "Always"
   activeDeadlineSeconds: 17280
