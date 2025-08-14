@@ -137,29 +137,22 @@ def askOllama(prompt: str) -> str:
             )        
         response = result.stdout
         
-        # Remove any <think>…</think> blocks from Qwen responses
-        if OLLAMA_MODEL.startswith("qwen"):
-            # Remove <think>...</think> blocks
+        # Remove "thinking" blocks and markers for Qwen and DeepSeek models
+        if OLLAMA_MODEL.startswith(("qwen", "deepseek", "gpt-oss")):
+            # Remove "Thinking...done thinking." blocks
             response = re.sub(r'Thinking.*?done thinking\.', '', response, flags=re.DOTALL).strip()
-
+            # Remove <think>...</think> blocks (Qwen-specific, but harmless for DeepSeek)
             response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
             response = re.sub(r'</think>', '', response).strip()
-            # Remove Qwen "Thinking..." and "...done thinking." lines
+            # Remove "Thinking..." and "...done thinking." lines
             response = re.sub(r'Thinking\.\.\.\s*', '', response)
             response = re.sub(r'\.\.\.done thinking\.\s*', '', response)
-        elif OLLAMA_MODEL.startswith("deepseek"):
-            # Remove thinking blocks
-            response = re.sub(r'Thinking.*?done thinking\.', '', response, flags=re.DOTALL).strip()
-            
-            # Remove any remaining thinking markers
-            response = re.sub(r'Thinking\.\.\.', '', response).strip()
             response = re.sub(r'\.\.\.done thinking\.', '', response).strip()
         
         # Remove markdown code block markers and clean up whitespace
         response = re.sub(r'```json\s*', '', response)
         response = re.sub(r'```\s*$', '', response)
         response = response.strip()
-        
         return response
     except Exception as e:
         logger.error(f"Could not run Ollama: {e}")
@@ -1114,9 +1107,9 @@ def main():
     driver.maximize_window()
 
     # Login into ServiceNow
-    #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253D5267c5b81bf9c0104862b8cc1d4bcba5%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
-    driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253Dfb15730a1bcaf7443407ece03d4bcb6d%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+    #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253Dfb15730a1bcaf7443407ece03d4bcb6d%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     login_snow(driver)
 
     # Login into rol.redhat.com

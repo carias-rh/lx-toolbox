@@ -94,11 +94,12 @@ def login():
             (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input"))).send_keys("{{ rh_username }}@redhat.com")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
 
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
+        #WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
 
         # RH SSO
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys("{{ username }}")
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(os.popen("curl -sL https://sso-rh-login-lx-snow.apps.tools-na100.dev.ole.redhat.com/get_otp").read().replace('\n', '')))
+        OTP_CODE = os.popen("curl -sL http://sso-rh-login-lx-toolbox.apps.microshift.robots4life.es/get_otp").read().replace('\n', '')
+        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(str("{{ pin }}").replace('\n', '') + str(OTP_CODE))
         WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
 
 {% elif lab_environment == "rol-stage" %}
@@ -107,10 +108,10 @@ def login():
 
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_field"]'))).send_keys("{{ github_username }}")
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys("{{ github_password }}")
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/form/div/input[13]'))).click()
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//input[@type="submit"]'))).click()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]'))).click()
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]'))).send_keys(os.popen("2fa github").read())
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/div[2]/form/button'))).click()
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//button[@type="submit"]'))).click()
 
 {% elif lab_environment == "china" %}
 
@@ -122,9 +123,11 @@ def login():
 
 {% endif %}
         wait_for_site_to_be_ready()
-    except:
+    except Exception as e:
         check_cookies()
-        print("Login failed")
+        print(f"Login failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 def wait_for_site_to_be_ready():
     try:
