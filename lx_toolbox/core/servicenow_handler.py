@@ -43,7 +43,7 @@ class TeamConfig:
     auto_resolve_reporters: List[str] = None
     acknowledgment_template: str = ""
     enable_round_robin: bool = False
-    round_robin_api_url: Optional[str] = None
+    frontend_shift_manager_url: Optional[str] = None
     
     def __post_init__(self):
         if self.target_states is None:
@@ -102,7 +102,7 @@ Best Regards,
 {assignee_name} 
 Red Hat Training Technical Support""",
             enable_round_robin=True,
-            round_robin_api_url=self.config.get("T1", "T1_FRONTEND_OPENSHIFT_ROUTE")
+            frontend_shift_manager_url=self.config.get("T1", "T1_FRONTEND_OPENSHIFT_ROUTE")
         )
         
         # T2 Team Configuration
@@ -645,14 +645,14 @@ Best Regards,
     def t1_who_is_on_shift(self, team_config: TeamConfig) -> Optional[str]:
         try:
             # Check if round-robin is enabled
-            round_robin_status_response = requests.get(f"{team_config.round_robin_api_url}/api/round_robin_status")
+            round_robin_status_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin_status")
             round_robin_status_response.raise_for_status()
             round_robin_status = round_robin_status_response.json()
             is_round_robin_enabled = round_robin_status.get("round_robin_enabled", False)
             
             if is_round_robin_enabled:
                 # Get next assignee from round-robin
-                round_robin_response = requests.get(f"{team_config.round_robin_api_url}/api/round_robin")
+                round_robin_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin")
                 round_robin_response.raise_for_status()
                 round_robin_data = round_robin_response.json()
                 assignee_name = round_robin_data.get("name")
@@ -660,7 +660,7 @@ Best Regards,
                 return assignee_name
             else:
                 # Get assignee from shift endpoint
-                shift_response = requests.get(f"{team_config.round_robin_api_url}/api/shift")
+                shift_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/shift")
                 shift_response.raise_for_status()
                 shift_data = shift_response.json()
                 shift_name = shift_data.get("name")
