@@ -41,7 +41,6 @@ logger = logging.getLogger(__name__)
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
 #OLLAMA_MODEL = "qwen3:latest"
 OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
-#OLLAMA_MODEL = "gpt-oss:20b" # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "qwen3:1.7b"
 #OLLAMA_MODEL = "qwen3:8b"
 #OLLAMA_MODEL = "granite3.3:8b"
@@ -480,6 +479,21 @@ def get_section_info(driver, course_url: str) -> str:
     except Exception as e:
         logger.error(f"Could not retrieve lab start script name from {course_url}: {e}")
         return ""
+
+def fetch_guide_text_from_website(driver: webdriver.Chrome, course_url: str) -> str:
+    """
+    Fetches the relevant guide text from the course website.
+    """
+    step("Fetching guide text from website")
+    driver.get(course_url)
+    time.sleep(5)  # Allow time for the page to load completely
+        
+    select_lab_environment_tab(driver, "course")
+
+    # Get the section title
+    relevant_section_info = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//*[@class='course__content-wrapper']"))).text
+    return relevant_section_info
 
 
 # -------------------------------------------------------------------
@@ -973,6 +987,9 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         guide_text = ""
         if section_info != "":
             guide_text = fetch_local_guide_text(section_info, repo_dir)
+            if guide_text == "":
+                logger.info("No guide text found in the local repository, fetching text from website instead.")
+                guide_text = fetch_guide_text_from_website(driver, snow_info["URL"])
         else:
             logger.info("No course ID or lab script name found in the SNOW ticket.")
             
