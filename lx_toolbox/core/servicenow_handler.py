@@ -42,7 +42,6 @@ class TeamConfig:
     target_states: List[str] = None
     auto_resolve_reporters: List[str] = None
     acknowledgment_template: str = ""
-    enable_round_robin: bool = False
     frontend_shift_manager_url: Optional[str] = None
     
     def __post_init__(self):
@@ -101,7 +100,6 @@ We have received your request and working on it, will update you at the earliest
 Best Regards,
 {assignee_name} 
 Red Hat Training Technical Support""",
-            enable_round_robin=True,
             frontend_shift_manager_url=self.config.get("T1", "T1_FRONTEND_OPENSHIFT_ROUTE")
         )
         
