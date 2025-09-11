@@ -307,22 +307,22 @@ def get_commands(course, chapter_and_section):
     go_to_course(course + "/pages/" + chapter_and_section)
     select_lab_environment_tab("course")
     time.sleep(4)
-    # Get the lab name and grep it in the project git directory to find the xml file
-    lab_script_name = WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="course-tabs-pane-2"]//div[@class="taskprerequisites"]//strong[@class="userinput"]//code'))).text
-    course_no_version = course.split("-")[0]
-    course_version = course.split("-")[1]
+    # Get commands directly from the online platform (XML no longer available locally)
     try:
-        if re.findall("ea", course):
-            course_no_version = course_no_version.split("ea")[0]
-            course_version = 'earlyaccess'
-    except:
-        pass
-
-    # checkout the current course version branch
-    #os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git checkout $(git branch -a |grep " + course_version +" |head -n1) &>/dev/null").read()
-    os.popen("cd {{ playbook_dir }}/files/"  + course_no_version + "; git pull").read()
-    # get the commands from source
-    commands = os.popen("cat $(grep -ri '" + lab_script_name + "' {{ playbook_dir }}/files/" + course_no_version + "/guides/en-US/* |grep xml |head -n1 |cut -d ':' -f'1') | xq -x //userinput").read()
+        userinput_elements = WebDriverWait(driver, 60).until(
+            EC.presence_of_all_elements_located(
+                (By.XPATH, '//*[@id="course-tabs-pane-2"]//strong[@class="userinput"]')
+            )
+        )
+        commands_list = []
+        for element in userinput_elements:
+            text = element.text.strip()
+            if text:
+                commands_list.append(text)
+        commands = "\n".join(commands_list)
+    except Exception as e:
+        print(f"An exception occurred while fetching commands from the online platform: {e}")
+        commands = ""
 
     print("\n")
     print(commands)
@@ -336,6 +336,7 @@ def multiline_command(command):
 
 
 def set_environment_in_rgdacosta_style():
+    time.sleep(60)
     step('Setup the lab environment')
     time.sleep(10)
     # Click enter to select student user
