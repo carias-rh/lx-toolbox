@@ -10,6 +10,7 @@ import subprocess
 import time
 import json
 import logging
+import requests
 from urllib.parse import quote
 from selenium import webdriver
 from selenium.webdriver.support import expected_conditions as EC
@@ -45,6 +46,20 @@ OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "qwen3:8b"
 #OLLAMA_MODEL = "granite3.3:8b"
 #OLLAMA_MODEL = "deepseek-r1:8b"
+
+# -------------------------------------------------------------------
+# OpenRouter configuration (text-only usage)
+# -------------------------------------------------------------------
+# Provider selector: "ollama" (default) or "openrouter"
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
+
+# OpenRouter API settings
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemma-3-27b-it:free")
+OPENROUTER_URL = os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
+# Optional ranking headers
+OPENROUTER_HTTP_REFERER = os.environ.get("OPENROUTER_HTTP_REFERER", "")
+OPENROUTER_X_TITLE = os.environ.get("OPENROUTER_X_TITLE", "")
 
 # -------------------------------------------------------------------
 # Configurable constants for local paths, etc.
@@ -157,6 +172,87 @@ def askOllama(prompt: str) -> str:
         logger.error(f"Could not run Ollama: {e}")
         return ""
 
+
+# -------------------------------------------------------------------
+# Function to ask OpenRouter for a response
+# -------------------------------------------------------------------
+def askOpenRouter(prompt: str) -> str:
+    """
+    Calls OpenRouter Chat Completions API with the given prompt and
+    returns the assistant text. Expects OPENROUTER_API_KEY in env.
+    """
+    if not OPENROUTER_API_KEY:
+        logger.error("OPENROUTER_API_KEY is not set; cannot use OpenRouter.")
+        return ""
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    if OPENROUTER_HTTP_REFERER:
+        headers["HTTP-Referer"] = OPENROUTER_HTTP_REFERER
+    if OPENROUTER_X_TITLE:
+        headers["X-Title"] = OPENROUTER_X_TITLE
+
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": str(prompt)},
+                ],
+            }
+        ],
+    }
+
+    try:
+        resp = requests.post(OPENROUTER_URL, headers=headers, data=json.dumps(payload), timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Extract content from OpenRouter response
+        # Expected: choices[0].message.content which can be a string or list of blocks
+        choices = data.get("choices", [])
+        if not choices:
+            return ""
+        message = choices[0].get("message", {})
+        content = message.get("content", "")
+        if isinstance(content, list):
+            # Concatenate text blocks
+            text_parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            content_text = "\n".join([p for p in text_parts if p])
+        elif isinstance(content, str):
+            content_text = content
+        else:
+            content_text = ""
+
+        # Clean up common formatting artefacts
+        content_text = re.sub(r"```json\s*", "", content_text)
+        content_text = re.sub(r"```\s*$", "", content_text)
+        content_text = content_text.strip()
+        return content_text
+    except Exception as e:
+        logger.error(f"OpenRouter request failed: {e}")
+        return ""
+
+
+# -------------------------------------------------------------------
+# Wrapper to select LLM provider
+# -------------------------------------------------------------------
+def askLLM(prompt: str) -> str:
+    """
+    Dispatches to the configured LLM provider. Defaults to Ollama.
+    Set env LLM_PROVIDER to "openrouter" to use OpenRouter.
+    """
+    provider = LLM_PROVIDER
+    if provider == "openrouter":
+        return askOpenRouter(prompt)
+    # default
+    return askOllama(prompt)
 
 # -------------------------------------------------------------------
 # Function to switch to the iframe in service now
@@ -407,7 +503,7 @@ def classify_ticket_llm(description: str) -> dict:
         """
     
     global classifying_response
-    classifying_response = askOllama(prompt)
+    classifying_response = askLLM(prompt)
 
     print("[LLM response]:\n", classifying_response)
     # Then parse JSON via Python. Temporary fallback if there's an error:
@@ -642,7 +738,7 @@ def analyze_content_issue(user_issue: str, guide_text: str) -> str:
         """
 
     global analysis_response
-    analysis_response = askOllama(prompt_text)
+    analysis_response = askLLM(prompt_text)
     return analysis_response
 
 def analyze_environment_issue(user_issue: str) -> str:
@@ -676,7 +772,7 @@ def analyze_environment_issue(user_issue: str) -> str:
         Substitute double quote (") for single quote (') in all fields to avoid errors in the JSON object, and remove any special characters such as '\n', '\t', '\r', etc, as well as XML markers.
         """
     global analysis_response
-    analysis_response = askOllama(prompt_text)
+    analysis_response = askLLM(prompt_text)
     return analysis_response
 
 def translate_text(text, language):
@@ -696,7 +792,7 @@ def translate_text(text, language):
         </text>
     """
 
-    translated_text = askOllama(prompt_text)
+    translated_text = askLLM(prompt_text)
     
     # Handle JSON response from models using --format json
     if translated_text.strip().startswith('{') and translated_text.strip().endswith('}'):
@@ -868,7 +964,7 @@ def search_jira_ticket(driver, snow_info):
         f"<feedback> {snow_info['Description']} </feedback>"
 
     )
-    llm_response = askOllama(prompt)
+    llm_response = askLLM(prompt)
     extracted_keyword = json.loads(llm_response).get("keyword", "")
     logger.info(f"LLM extracted keyword: {extracted_keyword}")
     
