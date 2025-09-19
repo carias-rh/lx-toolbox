@@ -460,7 +460,7 @@ def manage_special_commands(command):
         command = "date; time " + command
         introduce_command(command, auto_enter=True)
         print("##############  Exercise completed ##############")
-    elif "ssh" in command:
+    elif "ssh" in command and "sshd" not in command and "keygen" not in command and "copy-id" not in command:
         introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("after the ssh.")
     elif "ansible" in command:
