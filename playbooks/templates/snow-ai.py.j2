@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
 #OLLAMA_MODEL = "qwen3:1.7b"
 #OLLAMA_MODEL = "qwen3:8b"
+#OLLAMA_MODEL = "qwen3:30b"
 #OLLAMA_MODEL = "granite3.3:8b"
 #OLLAMA_MODEL = "deepseek-r1:8b"
 
@@ -51,7 +52,7 @@ OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
 # OpenRouter configuration (text-only usage)
 # -------------------------------------------------------------------
 # Provider selector: "ollama" (default) or "openrouter"
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
 
 # OpenRouter API settings
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
@@ -766,17 +767,13 @@ def analyze_environment_issue(user_issue: str) -> str:
     """
     json_example = '''{
         "analysis": "think in this value step by step, describe what the student is trying to communicate in it's feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.",
-        "is_valid_issue": "true/false if a debug of the lab environment is needed",
+        "is_valid_issue": true/false if a debug of the lab environment is needed,
         "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string",
         "summary": "a short summary of your analysis",
         "jira-title": "a short title for the Jira ticket, all characters in lowercase separated by spaces, no dashes"
         }'''
 
     prompt_text = '''
-        You are an useful Red Hat Training expert who is able to understand the flow of the exercises and labs in the course guide.
-        Openshift labs usually take 20-30 minutes the first time they are booted up.
-        Other issues might be related to unaccesible registries, gitlab repos stuck, fails on "lab start/finish" scripts, etc.
-
         We have a student who reported an issue within the lab environment. The student's feedback is:
         <student_feedback>
         {user_issue}
@@ -1227,7 +1224,7 @@ def handle_snow_ticket(driver: webdriver.Chrome, snow_info: dict):
         logger.info(f"This SNOW ticket {snow_info['snow_id']} is recognized as an 'environment' issue feedback ticket.")
 
         analysis_environment_response = analyze_environment_issue(snow_info["Description"])
-        print(f"[LLM response]:\n{analysis_environment_response}")
+        print(f"[LLM response environment issue]:\n{analysis_environment_response}")
         # Parse the JSON
         try:
             analysis_response_json = json.loads(analysis_environment_response)
