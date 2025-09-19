@@ -100,7 +100,7 @@ class ServiceNowHandler:
             team_name="RHT Learner Experience",
             assignment_group_id="5afc8ba24f8cf6004db6022f0310c70a",
             category="RHLS Standard Support",
-            frontend_shift_manager_url=self.config.get("T1", "T1_FRONTEND_OPENSHIFT_ROUTE"),            
+            frontend_shift_manager_url=self.config.get("T1", "FRONTEND_OPENSHIFT_ROUTE"),            
             acknowledgment_template="""Hi {customer_name},
 
 Thanks for contacting Red Hat Online Learning support team.
@@ -116,10 +116,10 @@ Red Hat Training Technical Support"""
         teams["t2"] = TeamConfig(
             team_name="RHT Learner Experience - T2", 
             assignment_group_id="974cb3e01bc31c50c57c3224cc4bcbfe",
-            category="RHLS Basic Internal Support",
+            category="RHLS Basic External Support",
             subcategory="Course Content",
             issue_type="Other",
-            frontend_shift_manager_url=self.config.get("T2", "T2_FRONTEND_OPENSHIFT_ROUTE"),
+            frontend_shift_manager_url=self.config.get("T2", "FRONTEND_OPENSHIFT_ROUTE"),
             acknowledgment_template="""Hi {customer_name},
 
 Thanks for submitting your feedback to the Learner Experience Team.
@@ -145,18 +145,48 @@ Best Regards,
         teams["gls-rhls-engagement-apac"] = TeamConfig(
             team_name="GLS RHLS Engagement - APAC",
             assignment_group_id="253D9fddf7032b24ea50ec2ef42f4e91bf84",
+            frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_APAC", "FRONTEND_OPENSHIFT_ROUTE"),
+            acknowledgment_template="""Hi {customer_name},
+
+Thanks for contacting RHLS Engagement team.
+
+We have received your request and working on it, will update you at the earliest.
+
+Best Regards,
+{assignee_name} 
+{team_name}"""
         )
 
         # GLS RHLS Engagement - EMEA
         teams["gls-rhls-engagement-emea"] = TeamConfig(
             team_name="GLS RHLS Engagement - EMEA",
             assignment_group_id="253Df53b635147b46a90b45f42fc416d4387",
+            frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_EMEA", "FRONTEND_OPENSHIFT_ROUTE"),
+            acknowledgment_template="""Hi {customer_name},
+
+Thanks for contacting RHLS Engagement team.
+
+We have received your request and working on it, will update you at the earliest.
+
+Best Regards,
+{assignee_name} 
+{team_name}"""
         )
 
         # GLS RHLS Engagement - NA
         teams["gls-rhls-engagement-na"] = TeamConfig(
             team_name="GLS RHLS Engagement - NA",
             assignment_group_id=["253D79323f5d47b86a90b45f42fc416d43f4", "253Dc8a0b31d47786a90b45f42fc416d43dc", "253D43aa77114770aa90b45f42fc416d43cf"],
+            frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_NA", "FRONTEND_OPENSHIFT_ROUTE"),
+            acknowledgment_template="""Hi {customer_name},
+
+Thanks for contacting RHLS Engagement team.
+
+We have received your request and working on it, will update you at the earliest.
+
+Best Regards,
+{assignee_name} 
+{team_name}"""
         )
 
 
@@ -512,7 +542,6 @@ Best Regards,
             phase1_updates = {
                 'state': TicketState.IN_PROGRESS.value,
                 'category': team_config.category,
-                'work_start': 'javascript:gs.nowNoTZ()',
                 'time_worked': '60'
             }
             primary_group_id = team_config.get_primary_assignment_group_id()
@@ -570,7 +599,6 @@ Best Regards,
                 'category': team_config.category,
                 'subcategory': team_config.subcategory,
                 'issue': team_config.issue_type,
-                'work_start': 'javascript:gs.nowNoTZ()',
                 'time_worked': '60'
             }
             primary_group_id = team_config.get_primary_assignment_group_id()
@@ -633,6 +661,45 @@ Best Regards,
         except Exception as e:
             logger.error(f"Error processing T2 ticket {ticket.get('number', 'unknown')}: {e}")
             return False
+
+
+    def process_gls_rhls_engagement_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str) -> bool:
+        """Process a GLS RHLS Engagement ticket in two steps: ACK/categorization, then assignment."""
+        try:
+            assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_config.team_name)
+            if not assignee_sys_id:
+                logger.error(f"Could not find sys_id for assignee: {assignee_name}")
+                return False
+            description = ticket.get('description', '')
+            # PHASE 1: Categorization and ACK
+            phase1_updates = {
+                'state': TicketState.IN_PROGRESS.value,
+                'time_worked': '60'
+            }
+            primary_group_id = team_config.get_primary_assignment_group_id()
+            if primary_group_id:
+                phase1_updates['assignment_group'] = primary_group_id
+            ack_message = team_config.acknowledgment_template.format(
+                customer_name=customer_name,
+                assignee_name=assignee_name,
+                team_name=team_config.team_name
+            )
+            phase1_updates['comments'] = ack_message
+            if not self.update_ticket(ticket['sys_id'], phase1_updates):
+                logger.error(f"Failed to update ticket {ticket['number']} with categorization and ACK")
+                return False
+            time.sleep(1)
+            # PHASE 2: Assignment
+            phase2_updates = {'assigned_to': assignee_sys_id}
+            if not self.update_ticket(ticket['sys_id'], phase2_updates):
+                logger.error(f"Failed to assign ticket {ticket['number']} to {assignee_name}")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Error processing GLS RHLS Engagement ticket {ticket.get('number', 'unknown')}: {e}")
+            return False
+
+
 
     def auto_resolve_tickets_by_reporter(self, team_key: str) -> int:
         """Auto-resolve tickets for specific reporters (mainly for T2 team)"""
@@ -754,16 +821,19 @@ Best Regards,
             try:
                 success = False
 
-                if team_key == "t1":
+                if team_config.frontend_shift_manager_url != None:
                     assignee_name = self.who_is_on_shift(team_config)
-                    if assignee_name == "None":
-                        logger.debug("No one is on shift, stopping ticket processing")
-                        break                
-                    success = self.process_t1_ticket(ticket, team_config, assignee_name)
 
-                elif team_key == "t2":
-                    success = self.process_t2_ticket(ticket, team_config, assignee_name)
+                    if "t1" in team_key:
+                        if assignee_name == "None":
+                            logger.debug("No one is on shift, stopping ticket processing")
+                            break                
+                        success = self.process_t1_ticket(ticket, team_config, assignee_name)
 
+                    elif "t2" in team_key:
+                        success = self.process_t2_ticket(ticket, team_config, assignee_name)
+                    elif  "gls-rhls-engagement" in team_key:
+                        success = self.process_gls_rhls_engagement_ticket(ticket, team_config, assignee_name)
                 else:
                     # Generic processing for other teams
                     assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_key)
