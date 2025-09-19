@@ -11,8 +11,11 @@ from enum import Enum
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+# Configure logging with environment fallback only if no handlers exist yet
+if not logging.getLogger().hasHandlers():
+    _env_log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+    _numeric_level = getattr(logging, _env_log_level, logging.INFO)
+    logging.basicConfig(level=_numeric_level, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
 
 class TicketState(Enum):

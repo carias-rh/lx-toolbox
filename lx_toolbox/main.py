@@ -6,6 +6,7 @@ LX Toolbox CLI - Main entry point for lab automation tools.
 import click
 import sys
 import os
+import logging
 from pathlib import Path
 
 from .utils.config_manager import ConfigManager
@@ -35,10 +36,29 @@ def get_config():
         env_file_path=str(env_path)
     )
 
+def _setup_logging(log_level: str | None = None):
+    """Initialize logging using CLI option or environment variable.
+
+    Priority: CLI --log-level > LOG_LEVEL env var > INFO
+    """
+    if log_level is None:
+        log_level = os.getenv('LOG_LEVEL', 'INFO')
+    numeric_level = getattr(logging, str(log_level).upper(), logging.INFO)
+    logging.basicConfig(
+        level=numeric_level,
+        format='%(asctime)s | %(levelname)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        force=True,
+    )
+
+
 @click.group()
+@click.option('--log-level', type=click.Choice(['DEBUG','INFO','WARNING','ERROR','CRITICAL']), default=None, help='Set logging level (overrides LOG_LEVEL env var)')
 @click.pass_context
-def cli(ctx):
+def cli(ctx, log_level):
     """LX Toolbox - Automation tools for lab operations, ServiceNow, and Jira."""
+    # Setup logging early
+    _setup_logging(log_level)
     # Store config in context for subcommands
     ctx.ensure_object(dict)
     ctx.obj['config'] = get_config()
