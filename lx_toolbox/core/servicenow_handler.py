@@ -91,6 +91,7 @@ class ServiceNowHandler:
             team_name="RHT Learner Experience",
             assignment_group_id="5afc8ba24f8cf6004db6022f0310c70a",
             category="RHLS Standard Support",
+            frontend_shift_manager_url=self.config.get("T1", "T1_FRONTEND_OPENSHIFT_ROUTE"),            
             acknowledgment_template="""Hi {customer_name},
 
 Thanks for contacting Red Hat Online Learning support team.
@@ -99,8 +100,7 @@ We have received your request and working on it, will update you at the earliest
 
 Best Regards,
 {assignee_name} 
-Red Hat Training Technical Support""",
-            frontend_shift_manager_url=self.config.get("T1", "T1_FRONTEND_OPENSHIFT_ROUTE")
+Red Hat Training Technical Support"""
         )
         
         # T2 Team Configuration
@@ -110,6 +110,7 @@ Red Hat Training Technical Support""",
             category="RHLS Basic Internal Support",
             subcategory="Course Content",
             issue_type="Other",
+            frontend_shift_manager_url=self.config.get("T2", "T2_FRONTEND_OPENSHIFT_ROUTE"),
             acknowledgment_template="""Hi {customer_name},
 
 Thanks for submitting your feedback to the Learner Experience Team.
@@ -131,6 +132,7 @@ Best Regards,
             ]
         )
         
+        logger.debug(f"Loaded teams: {teams}")
         return teams
 
     def _get_team_members(self, team_key: str) -> List[str]:
@@ -640,13 +642,18 @@ Best Regards,
             return 0
 
 
-    def t1_who_is_on_shift(self, team_config: TeamConfig) -> Optional[str]:
+    def who_is_on_shift(self, team_config: TeamConfig) -> Optional[str]:
+        is_round_robin_enabled = False
         try:
-            # Check if round-robin is enabled
-            round_robin_status_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin_status")
-            round_robin_status_response.raise_for_status()
-            round_robin_status = round_robin_status_response.json()
-            is_round_robin_enabled = round_robin_status.get("round_robin_enabled", False)
+            if team_config.frontend_shift_manager_url != None:
+                # Check if round-robin is enabled
+                try:
+                    round_robin_status_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin_status")
+                    round_robin_status_response.raise_for_status()
+                    round_robin_status = round_robin_status_response.json()
+                    is_round_robin_enabled = round_robin_status.get("round_robin_enabled", False)
+                except Exception as e:
+                    pass
             
             if is_round_robin_enabled:
                 # Get next assignee from round-robin
@@ -665,7 +672,7 @@ Best Regards,
                 
                 if shift_name and shift_name != "None":
                     assignee_name = shift_name
-                    logger.debug(f"Shift-based assignment, got assignee: {assignee_name}")
+                    logger.debug(f"Frontend shift assignment, got assignee: {assignee_name}")
                     return assignee_name
                 else:
                     return "None"
@@ -685,9 +692,9 @@ Best Regards,
         if team_config.auto_resolve_reporters:
             stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
             
-        # Get assignee name for T1 team using frontend APIs
-        if team_key == "t1":
-            assignee_name = self.t1_who_is_on_shift(team_config)                
+        # Get assignee name using frontend APIs
+        if team_config.frontend_shift_manager_url != None:
+            assignee_name = self.who_is_on_shift(team_config)                
         if not assignee_name:
             logger.debug(f"No assignee available for team {team_key}")
             return stats
@@ -702,9 +709,9 @@ Best Regards,
                 success = False
 
                 if team_key == "t1":
-                    assignee_name = self.t1_who_is_on_shift(team_config)
+                    assignee_name = self.who_is_on_shift(team_config)
                     if assignee_name == "None":
-                        logger.info("No one is on shift, stopping ticket processing")
+                        logger.debug("No one is on shift, stopping ticket processing")
                         break                
                     success = self.process_t1_ticket(ticket, team_config, assignee_name)
 
@@ -750,7 +757,7 @@ Best Regards,
             try:
                 stats = self.run_auto_assignment(team_key, assignee_name)
                 if stats["assigned"] > 0 or stats["resolved"] > 0:
-                    logger.info(f"Assignment cycle complete: {stats}")
+                    logger.debug(f"Assignment cycle complete: {stats}")
             except Exception as e:
                 logger.error(f"Error in assignment cycle: {e}")
                 
