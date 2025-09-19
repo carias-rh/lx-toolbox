@@ -334,7 +334,7 @@ def snow(ctx):
     pass
 
 @snow.command()
-@click.argument('team', type=click.Choice(['t1', 't2']))
+@click.argument('team')
 @click.option('--assignee', '-a', default=None, help='Specific assignee (overrides round-robin)')
 @click.option('--continuous', '-c', is_flag=True, help='Run continuously')
 @click.option('--interval', '-i', default=60, help='Interval in seconds for continuous mode')
@@ -369,7 +369,7 @@ def assign(ctx, team, assignee, continuous, interval):
         sys.exit(1)
 
 @snow.command()
-@click.argument('team', type=click.Choice(['t1', 't2']))
+@click.argument('team')
 @click.option('--limit', '-l', default=10, help='Maximum number of tickets to show')
 @click.pass_context
 def list_tickets(ctx, team, limit):
