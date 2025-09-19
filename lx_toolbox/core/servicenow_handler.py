@@ -36,7 +36,7 @@ class TeamConfig:
     """Configuration for a specific team's auto-assignment behavior"""
     team_name: str
     assignment_group_id: List[str]
-    category: str
+    category: Optional[str] = None
     subcategory: Optional[str] = None
     issue_type: Optional[str] = None
     target_states: List[str] = None
