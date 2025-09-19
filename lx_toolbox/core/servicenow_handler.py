@@ -12,7 +12,7 @@ from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
 
 class TicketState(Enum):
@@ -35,7 +35,7 @@ class TicketState(Enum):
 class TeamConfig:
     """Configuration for a specific team's auto-assignment behavior"""
     team_name: str
-    assignment_group_id: str
+    assignment_group_id: List[str]
     category: str
     subcategory: Optional[str] = None
     issue_type: Optional[str] = None
@@ -45,10 +45,19 @@ class TeamConfig:
     frontend_shift_manager_url: Optional[str] = None
     
     def __post_init__(self):
+        # Normalize assignment_group_id to a list of strings
+        if isinstance(self.assignment_group_id, str):
+            self.assignment_group_id = [self.assignment_group_id]
+        elif self.assignment_group_id is None:
+            self.assignment_group_id = []
         if self.target_states is None:
             self.target_states = ["1", "2", "-2", "14", "13", "15", "16", "17", "18"]
         if self.auto_resolve_reporters is None:
             self.auto_resolve_reporters = []
+
+    def get_primary_assignment_group_id(self) -> Optional[str]:
+        """Return the first assignment group id as the primary one for updates."""
+        return self.assignment_group_id[0] if self.assignment_group_id else None
 
 class ServiceNowHandler:
     def __init__(self, config: ConfigManager):
@@ -132,6 +141,25 @@ Best Regards,
             ]
         )
         
+        # GLS RHLS Engagement - APAC
+        teams["gls-rhls-engagement-apac"] = TeamConfig(
+            team_name="GLS RHLS Engagement - APAC",
+            assignment_group_id="253D9fddf7032b24ea50ec2ef42f4e91bf84",
+        )
+
+        # GLS RHLS Engagement - EMEA
+        teams["gls-rhls-engagement-emea"] = TeamConfig(
+            team_name="GLS RHLS Engagement - EMEA",
+            assignment_group_id="253Df53b635147b46a90b45f42fc416d4387",
+        )
+
+        # GLS RHLS Engagement - NA
+        teams["gls-rhls-engagement-na"] = TeamConfig(
+            team_name="GLS RHLS Engagement - NA",
+            assignment_group_id=["253D79323f5d47b86a90b45f42fc416d43f4", "253Dc8a0b31d47786a90b45f42fc416d43dc", "253D43aa77114770aa90b45f42fc416d43cf"],
+        )
+
+
         logger.debug(f"Loaded teams: {teams}")
         return teams
 
@@ -145,12 +173,18 @@ Best Regards,
             return []
             
         team_config = self.teams[team_key]
-        assignment_group_id = team_config.assignment_group_id
+        assignment_group_ids = team_config.assignment_group_id
         
         try:
             group_url = f"{self.instance_url}/api/now/table/sys_user_grmember"
+            if not assignment_group_ids:
+                return []
+            if len(assignment_group_ids) == 1:
+                group_query = f"group={assignment_group_ids[0]}"
+            else:
+                group_query = f"groupIN{','.join(assignment_group_ids)}"
             group_params = {
-                "sysparm_query": f"group={assignment_group_id}",
+                "sysparm_query": group_query,
                 "sysparm_fields": "user",
                 "sysparm_limit": "200"
             }
@@ -408,9 +442,17 @@ Best Regards,
         if not team_config:
             raise ValueError(f"Unknown team: {team_key}")
             
+        # Build assignment group filter (supports multiple groups)
+        if not team_config.assignment_group_id:
+            assignment_group_filter = ""
+        elif len(team_config.assignment_group_id) == 1:
+            assignment_group_filter = f"assignment_group={team_config.assignment_group_id[0]}"
+        else:
+            assignment_group_filter = f"assignment_groupIN{','.join(team_config.assignment_group_id)}"
+
         query_parts = [
             "assigned_toISEMPTY",
-            f"assignment_group={team_config.assignment_group_id}",
+            assignment_group_filter,
             f"stateIN{','.join(team_config.target_states)}",
             "active=true"
         ]
@@ -470,10 +512,12 @@ Best Regards,
             phase1_updates = {
                 'state': TicketState.IN_PROGRESS.value,
                 'category': team_config.category,
-                'assignment_group': team_config.assignment_group_id,
                 'work_start': 'javascript:gs.nowNoTZ()',
                 'time_worked': '60'
             }
+            primary_group_id = team_config.get_primary_assignment_group_id()
+            if primary_group_id:
+                phase1_updates['assignment_group'] = primary_group_id
             
             # Handle empty fields
             if not ticket.get('short_description'):
@@ -526,10 +570,12 @@ Best Regards,
                 'category': team_config.category,
                 'subcategory': team_config.subcategory,
                 'issue': team_config.issue_type,
-                'assignment_group': team_config.assignment_group_id,
                 'work_start': 'javascript:gs.nowNoTZ()',
                 'time_worked': '60'
             }
+            primary_group_id = team_config.get_primary_assignment_group_id()
+            if primary_group_id:
+                phase1_updates['assignment_group'] = primary_group_id
             
             # Extract and process user information from description
             customer_name = ""
@@ -688,7 +734,7 @@ Best Regards,
             
         stats = {"assigned": 0, "resolved": 0, "errors": 0}
         
-        # Auto-resolve tickets first (for T2)
+        # Auto-resolve Jira tickets raised by known Redhat employees (T2 team triage)
         if team_config.auto_resolve_reporters:
             stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
             
@@ -728,10 +774,12 @@ Best Regards,
                         updates = {
                             'state': TicketState.IN_PROGRESS.value,
                             'category': team_config.category,
-                            'assignment_group': team_config.assignment_group_id,
                             'assigned_to': assignee_sys_id,  # Use sys_id instead of display name
                             'time_worked': '60'
                         }
+                        primary_group_id = team_config.get_primary_assignment_group_id()
+                        if primary_group_id:
+                            updates['assignment_group'] = primary_group_id
                         success = self.update_ticket(ticket['sys_id'], updates)
                 
                 if success:
