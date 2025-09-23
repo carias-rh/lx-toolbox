@@ -52,11 +52,12 @@ OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
 # OpenRouter configuration (text-only usage)
 # -------------------------------------------------------------------
 # Provider selector: "ollama" (default) or "openrouter"
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
 
 # OpenRouter API settings
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemma-3-27b-it:free")
+#OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemma-3-27b-it:free")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "x-ai/grok-4-fast:free")
 OPENROUTER_URL = os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 # Optional ranking headers
 OPENROUTER_HTTP_REFERER = os.environ.get("OPENROUTER_HTTP_REFERER", "")
@@ -773,7 +774,7 @@ def analyze_environment_issue(user_issue: str) -> str:
         "jira-title": "a short title for the Jira ticket, all characters in lowercase separated by spaces, no dashes"
         }'''
 
-    prompt_text = '''
+    prompt_text = f'''
         We have a student who reported an issue within the lab environment. The student's feedback is:
         <student_feedback>
         {user_issue}
@@ -800,7 +801,7 @@ def translate_text(text, language):
     Returns:
         str: The translated text
     """
-    prompt_text = '''
+    prompt_text = f'''
         Translate the following text from {language} to english:
         <text>
         {text}
@@ -1065,8 +1066,9 @@ def craft_llm_response(snow_info, analysis_response_json):
     2. Acknowledges their feedback
     3. If the feedback is vague, ask for more information.
     4. Provides helpful guidance based on the analysis
-    5. Maintains a supportive and educational tone
-    6. Ends with the signature: {signature}
+    5. If there is a possible misconfiguration of the lab environment, as a last resource, suggest to the student to delete the lab environment and create a new one.
+    6. Maintains a supportive and educational tone
+    7. Ends with the signature: {signature}
 
     Keep the response concise but informative. If the issue is valid, explain that we will create a Jira ticket to fix it in the next release.
     If it's not a valid issue, provide clarification or guidance to help the student.
@@ -1128,7 +1130,8 @@ Best Regards,
 Red Hat Learner Experience Team
 """
         WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text)
-        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text2)
+        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\n Default Jira response:")
+        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(reply_text2)
 
     # Standard reply for environment issue in openshift labs
     elif data.get("is_environment_issue", False) and is_openshift_lab_first_boot(snow_info, analysis_response_json):
