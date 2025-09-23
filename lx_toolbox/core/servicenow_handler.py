@@ -147,7 +147,7 @@ Best Regards,
         # GLS RHLS Engagement - APAC
         teams["gls-rhls-engagement-apac"] = TeamConfig(
             team_name="GLS RHLS Engagement - APAC",
-            assignment_group_id="253D9fddf7032b24ea50ec2ef42f4e91bf84",
+            assignment_group_id="9fddf7032b24ea50ec2ef42f4e91bf84",
             frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_APAC", "FRONTEND_OPENSHIFT_ROUTE"),
             acknowledgment_template="""Hi {customer_name},
 
@@ -163,7 +163,7 @@ Best Regards,
         # GLS RHLS Engagement - EMEA
         teams["gls-rhls-engagement-emea"] = TeamConfig(
             team_name="GLS RHLS Engagement - EMEA",
-            assignment_group_id="253Df53b635147b46a90b45f42fc416d4387",
+            assignment_group_id="f53b635147b46a90b45f42fc416d4387",
             frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_EMEA", "FRONTEND_OPENSHIFT_ROUTE"),
             acknowledgment_template="""Hi {customer_name},
 
@@ -179,7 +179,7 @@ Best Regards,
         # GLS RHLS Engagement - NA
         teams["gls-rhls-engagement-na"] = TeamConfig(
             team_name="GLS RHLS Engagement - NA",
-            assignment_group_id=["253D79323f5d47b86a90b45f42fc416d43f4", "253Dc8a0b31d47786a90b45f42fc416d43dc", "253D43aa77114770aa90b45f42fc416d43cf"],
+            assignment_group_id=["43aa77114770aa90b45f42fc416d43cf", "c8a0b31d47786a90b45f42fc416d43dc", "79323f5d47b86a90b45f42fc416d43f4"],
             frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_NA", "FRONTEND_OPENSHIFT_ROUTE"),
             acknowledgment_template="""Hi {customer_name},
 
