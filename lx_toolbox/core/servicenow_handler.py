@@ -669,10 +669,20 @@ Best Regards,
     def process_gls_rhls_engagement_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str) -> bool:
         """Process a GLS RHLS Engagement ticket in two steps: ACK/categorization, then assignment."""
         try:
+            # Look up assignee sys_id
             assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_config.team_name)
             if not assignee_sys_id:
                 logger.error(f"Could not find sys_id for assignee: {assignee_name}")
                 return False
+
+            # Extract customer info
+            contact_source = ticket.get('contact_source', '')
+            if contact_source:
+                name_parts = contact_source.split()
+                customer_name = f"{name_parts[0]} {name_parts[1] if len(name_parts) > 1 else ''}".strip()
+            else:
+                customer_name = ""
+
             description = ticket.get('description', '')
             # PHASE 1: Categorization and ACK
             phase1_updates = {
