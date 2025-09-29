@@ -844,8 +844,14 @@ Best Regards,
                         success = self.process_t1_ticket(ticket, team_config, assignee_name)
 
                     elif "t2" in team_key:
+                        if assignee_name == "None":
+                            logger.debug("No one is on shift, stopping ticket processing")
+                            break
                         success = self.process_t2_ticket(ticket, team_config, assignee_name)
                     elif  "gls-rhls-engagement" in team_key:
+                        if assignee_name == "None":
+                            logger.debug("No one is on shift, stopping ticket processing")
+                            break
                         success = self.process_gls_rhls_engagement_ticket(ticket, team_config, assignee_name)
                 else:
                     # Generic processing for other teams
