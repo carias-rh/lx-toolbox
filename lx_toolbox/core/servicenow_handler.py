@@ -148,39 +148,43 @@ Best Regards,
         teams["gls-rhls-engagement-apac"] = TeamConfig(
             team_name="GLS RHLS Engagement - APAC",
             assignment_group_id="9fddf7032b24ea50ec2ef42f4e91bf84",
-            frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_APAC", "FRONTEND_OPENSHIFT_ROUTE"),
+            #frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_APAC", "FRONTEND_OPENSHIFT_ROUTE"),
             acknowledgment_template="""Hi {customer_name},
 
-Thanks for contacting RHLS Engagement team.
+Thank you for contacting the RHLS Support Team.
 
-We have received your request and working on it, will update you at the earliest.
+We've received your request and shall get back to you at the earliest.
 
 Best Regards,
-{assignee_name} 
-{team_name}"""
+Red Hat Training Support 
+
+Please note: If your request was submitted over the weekend, we will review it on the next working day.
+"""
         )
 
         # GLS RHLS Engagement - EMEA
         teams["gls-rhls-engagement-emea"] = TeamConfig(
             team_name="GLS RHLS Engagement - EMEA",
             assignment_group_id="f53b635147b46a90b45f42fc416d4387",
-            frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_EMEA", "FRONTEND_OPENSHIFT_ROUTE"),
+            #frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_EMEA", "FRONTEND_OPENSHIFT_ROUTE"),
             acknowledgment_template="""Hi {customer_name},
 
-Thanks for contacting RHLS Engagement team.
+Thank you for contacting the RHLS Support Team.
 
-We have received your request and working on it, will update you at the earliest.
+We've received your request and shall get back to you at the earliest.
 
 Best Regards,
-{assignee_name} 
-{team_name}"""
+Red Hat Training Support 
+
+Please note: If your request was submitted over the weekend, we will review it on the next working day.
+"""
         )
 
         # GLS RHLS Engagement - NA
         teams["gls-rhls-engagement-na"] = TeamConfig(
             team_name="GLS RHLS Engagement - NA",
             assignment_group_id=["43aa77114770aa90b45f42fc416d43cf", "c8a0b31d47786a90b45f42fc416d43dc", "79323f5d47b86a90b45f42fc416d43f4"],
-            frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_NA", "FRONTEND_OPENSHIFT_ROUTE"),
+            #frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_NA", "FRONTEND_OPENSHIFT_ROUTE"),
             acknowledgment_template="""Hi {customer_name},
 
 Thank you for contacting the RHLS Support Team.
@@ -815,10 +819,14 @@ Please note: If your request was submitted over the weekend, we will review it o
         # Get assignee name using frontend APIs
         if team_config.frontend_shift_manager_url != None:
             assignee_name = self.who_is_on_shift(team_config)                
-        if not assignee_name:
+
+        if not assignee_name and team_config.frontend_shift_manager_url:
             logger.debug(f"No assignee available for team {team_key}")
             return stats
-            
+        elif not assignee_name and not team_config.frontend_shift_manager_url:
+            assignee_name = "only-ack"            
+            logger.debug(f"No assignee available for team {team_key}, using Carlos Arias")
+
         # Get unassigned tickets
         tickets = self.get_unassigned_tickets(team_key)
         logger.debug(f"Found {len(tickets)} unassigned tickets for team {team_key}")
@@ -827,27 +835,23 @@ Please note: If your request was submitted over the weekend, we will review it o
         for ticket in tickets:
             try:
                 success = False
+                if "t1" in team_key:
+                    if assignee_name == "None":
+                        logger.debug("No one is on shift, stopping ticket processing")
+                        break                
+                    success = self.process_t1_ticket(ticket, team_config, assignee_name)
 
-                if team_config.frontend_shift_manager_url != None:
-                    assignee_name = self.who_is_on_shift(team_config)
-
-                    if "t1" in team_key:
-                        if assignee_name == "None":
-                            logger.debug("No one is on shift, stopping ticket processing")
-                            break                
-                        success = self.process_t1_ticket(ticket, team_config, assignee_name)
-
-                    elif "t2" in team_key:
-                        if assignee_name == "None":
-                            logger.debug("No one is on shift, stopping ticket processing")
-                            break
-                        success = self.process_t2_ticket(ticket, team_config, assignee_name)
-                    elif  "gls-rhls-engagement" in team_key:
+                elif "t2" in team_key:
+                    if assignee_name == "None":
+                        logger.debug("No one is on shift, stopping ticket processing")
+                        break
+                    success = self.process_t2_ticket(ticket, team_config, assignee_name)
+                elif  "gls-rhls-engagement" in team_key:
 #                       commented out for now to allow for manual assignment
 #                        if assignee_name == "None":
 #                            logger.debug("No one is on shift, stopping ticket processing")
 #                            break
-                        success = self.process_gls_rhls_engagement_ticket(ticket, team_config, assignee_name)
+                    success = self.process_gls_rhls_engagement_ticket(ticket, team_config, assignee_name)
                 else:
                     # Generic processing for other teams
                     assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_key)
