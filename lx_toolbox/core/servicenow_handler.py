@@ -183,13 +183,15 @@ Best Regards,
             frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_NA", "FRONTEND_OPENSHIFT_ROUTE"),
             acknowledgment_template="""Hi {customer_name},
 
-Thanks for contacting RHLS Engagement team.
+Thank you for contacting the RHLS Support Team.
 
-We have received your request and working on it, will update you at the earliest.
+We've received your request and shall get back to you at the earliest.
 
 Best Regards,
-{assignee_name} 
-{team_name}"""
+Red Hat Training Support 
+
+Please note: If your request was submitted over the weekend, we will review it on the next working day.
+"""
         )
 
 
@@ -667,13 +669,13 @@ Best Regards,
 
 
     def process_gls_rhls_engagement_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str) -> bool:
-        """Process a GLS RHLS Engagement ticket in two steps: ACK/categorization, then assignment."""
+        """Process a GLS RHLS Engagement ticket with ACK only."""
         try:
-            # Look up assignee sys_id
-            assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_config.team_name)
-            if not assignee_sys_id:
-                logger.error(f"Could not find sys_id for assignee: {assignee_name}")
-                return False
+#            # Look up assignee sys_id
+#            assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_config.team_name)
+#            if not assignee_sys_id:
+#                logger.error(f"Could not find sys_id for assignee: {assignee_name}")
+#                return False
 
             # Extract customer info
             contact_source = ticket.get('contact_source', '')
@@ -684,28 +686,20 @@ Best Regards,
                 customer_name = ""
 
             description = ticket.get('description', '')
-            # PHASE 1: Categorization and ACK
-            phase1_updates = {
+            # ACK
+            updates = {
                 'state': TicketState.IN_PROGRESS.value,
                 'time_worked': '60'
             }
             primary_group_id = team_config.get_primary_assignment_group_id()
             if primary_group_id:
-                phase1_updates['assignment_group'] = primary_group_id
+                updates['assignment_group'] = primary_group_id
             ack_message = team_config.acknowledgment_template.format(
                 customer_name=customer_name,
-                assignee_name=assignee_name,
-                team_name=team_config.team_name
             )
-            phase1_updates['comments'] = ack_message
-            if not self.update_ticket(ticket['sys_id'], phase1_updates):
+            updates['comments'] = ack_message
+            if not self.update_ticket(ticket['sys_id'], updates):
                 logger.error(f"Failed to update ticket {ticket['number']} with categorization and ACK")
-                return False
-            time.sleep(1)
-            # PHASE 2: Assignment
-            phase2_updates = {'assigned_to': assignee_sys_id}
-            if not self.update_ticket(ticket['sys_id'], phase2_updates):
-                logger.error(f"Failed to assign ticket {ticket['number']} to {assignee_name}")
                 return False
             return True
         except Exception as e:
@@ -849,9 +843,10 @@ Best Regards,
                             break
                         success = self.process_t2_ticket(ticket, team_config, assignee_name)
                     elif  "gls-rhls-engagement" in team_key:
-                        if assignee_name == "None":
-                            logger.debug("No one is on shift, stopping ticket processing")
-                            break
+#                       commented out for now to allow for manual assignment
+#                        if assignee_name == "None":
+#                            logger.debug("No one is on shift, stopping ticket processing")
+#                            break
                         success = self.process_gls_rhls_engagement_ticket(ticket, team_config, assignee_name)
                 else:
                     # Generic processing for other teams
