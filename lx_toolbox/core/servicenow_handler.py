@@ -198,6 +198,22 @@ Please note: If your request was submitted over the weekend, we will review it o
 """
         )
 
+        # Remote Exam - Readiness Support 962d0c0d1b740a504cec766dcc4bcb7a
+        teams["remote-exam-readiness-support"] = TeamConfig(
+            team_name="Remote Exam - Readiness Support",
+            assignment_group_id="962d0c0d1b740a504cec766dcc4bcb7a",
+            frontend_shift_manager_url=self.config.get("REMOTE_EXAM_READINESS_SUPPORT", "FRONTEND_OPENSHIFT_ROUTE"),
+            acknowledgment_template="""Hi {customer_name},
+
+Thank you for contacting the Remote Exam - Readiness Support Team.
+
+We've received your request and shall get back to you at the earliest.
+
+Best Regards,
+{assignee_name} 
+{team_name}
+"""
+)
 
         logger.debug(f"Loaded teams: {teams}")
         return teams
@@ -584,6 +600,7 @@ Please note: If your request was submitted over the weekend, we will review it o
                 logger.error(f"Failed to update ticket {ticket['number']} with categorization and ACK")
                 return False
             time.sleep(1)
+
             # PHASE 2: Assign to the specific user
             phase2_updates = {'assigned_to': assignee_sys_id}
             if not self.update_ticket(ticket['sys_id'], phase2_updates):
@@ -689,15 +706,14 @@ Please note: If your request was submitted over the weekend, we will review it o
             else:
                 customer_name = ""
 
-            description = ticket.get('description', '')
             # ACK
             updates = {
                 'state': TicketState.IN_PROGRESS.value,
-                'time_worked': '60'
             }
             primary_group_id = team_config.get_primary_assignment_group_id()
             if primary_group_id:
                 updates['assignment_group'] = primary_group_id
+
             ack_message = team_config.acknowledgment_template.format(
                 customer_name=customer_name,
             )
@@ -710,6 +726,54 @@ Please note: If your request was submitted over the weekend, we will review it o
             logger.error(f"Error processing GLS RHLS Engagement ticket {ticket.get('number', 'unknown')}: {e}")
             return False
 
+
+    def process_exam_readiness_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str) -> bool:
+        """Process a Remote Exam - Readiness Support ticket with ACK only."""
+        try:
+            # Look up assignee sys_id
+            assignee_sys_id = self.lookup_user_sys_id(assignee_name, "exam-readiness")
+            if not assignee_sys_id:
+                logger.error(f"Could not find sys_id for assignee: {assignee_name}")
+                return False
+
+            # Extract customer info
+            contact_source = ticket.get('contact_source', '')
+            if contact_source:
+                name_parts = contact_source.split()
+                customer_name = f"{name_parts[0]} {name_parts[1] if len(name_parts) > 1 else ''}".strip()
+            else:
+                customer_name = ""
+
+            # PHASE 1: ACK
+            updates = {
+                'state': TicketState.IN_PROGRESS.value,
+            }
+            primary_group_id = team_config.get_primary_assignment_group_id()
+            if primary_group_id:
+                updates['assignment_group'] = primary_group_id
+                
+            ack_message = team_config.acknowledgment_template.format(
+                customer_name=customer_name,
+                assignee_name=assignee_name,
+                team_name=team_config.team_name
+            )
+            updates['comments'] = ack_message
+            # Execute Phase 1
+            if not self.update_ticket(ticket['sys_id'], updates):
+                logger.error(f"Failed to update ticket {ticket['number']} with ACK")
+                return False
+            time.sleep(1)
+
+            # PHASE 2: Assign to the specific user
+            phase2_updates = {'assigned_to': assignee_sys_id}
+            if not self.update_ticket(ticket['sys_id'], phase2_updates):
+                logger.error(f"Failed to assign ticket {ticket['number']} to {assignee_name}")
+                return False
+            return True
+
+        except Exception as e:
+            logger.error(f"Error processing Exam Readiness ticket {ticket.get('number', 'unknown')}: {e}")
+            return False
 
 
     def auto_resolve_tickets_by_reporter(self, team_key: str) -> int:
@@ -852,6 +916,11 @@ Please note: If your request was submitted over the weekend, we will review it o
 #                            logger.debug("No one is on shift, stopping ticket processing")
 #                            break
                     success = self.process_gls_rhls_engagement_ticket(ticket, team_config, assignee_name)
+                elif "exam" in team_key:
+                    if assignee_name == "None":
+                        logger.debug("No one is on shift, stopping ticket processing")
+                        break
+                    success = self.process_exam_readiness_ticket(ticket, team_config, assignee_name)
                 else:
                     # Generic processing for other teams
                     assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_key)
