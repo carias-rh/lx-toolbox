@@ -236,7 +236,7 @@ def increase_autostop(course_id):
         increase_autostop = WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[1]/td[2]/button')))
 
-        for i in range(30):
+        for i in range(4):
             increase_autostop.click()
     except:
         pass
@@ -249,7 +249,7 @@ def increase_lifespan(course_id):
         increase_lifespan = WebDriverWait(driver, 1).until(EC.element_to_be_clickable(
             (By.XPATH, '//*[@id="tab-course-lab-environment"]/div/table/tr[2]/td[2]/button')))
 
-        for i in range(30):
+        for i in range(4):
             increase_lifespan.click()
     except:
         pass
@@ -348,8 +348,13 @@ def get_commands(course, chapter_and_section):
     return str(commands)
 
 def multiline_command(command):
-    if re.search(r'\\', command): return True
-    else: return False
+    stripped_command = command.rstrip()
+    if not stripped_command:
+        return False
+    trailing_backslashes = re.search(r'\\+$', stripped_command)
+    if not trailing_backslashes:
+        return False
+    return len(trailing_backslashes.group(0)) % 2 == 1
 
 
 def set_environment_in_rgdacosta_style():
@@ -400,24 +405,24 @@ def set_environment_in_rgdacosta_style():
 
 def filter_commands_list(commands):
     commands_array = commands.split("\n")
-    composed_command= ''
-    previous_command=False
-    filtered_commands_array=[]
+    composed_command = ''
+    filtered_commands_array = []
 
-    for i in range(len(commands_array)):
-        command = commands_array[i]
-        # If the current command string has an ending '\' add it to the composed_command variable
-        if multiline_command(commands_array[i]):
-            composed_command = composed_command + str(commands_array[i].replace('\\',''))
-            previous_command = True
-        # If not, and the previous command did, finish the composed_command and restore variables values
-        elif previous_command:
-            command = composed_command + str(commands_array[i])
-            composed_command = ''
-            previous_command = False
-        # If the current command doesn't have an ending '\' add it to the filtered commands list
-        if not multiline_command(commands_array[i]) and commands_array[i] != '':
-            filtered_commands_array = filtered_commands_array + [command]
+    for command in commands_array:
+        if command == '':
+            continue
+        if multiline_command(command):
+            line_without_backslash = re.sub(r'\\+$', '', command.rstrip())
+            composed_command = f"{composed_command}{line_without_backslash.rstrip()} "
+        else:
+            if composed_command:
+                filtered_commands_array.append(f"{composed_command}{command}".strip())
+                composed_command = ''
+            else:
+                filtered_commands_array.append(command)
+
+    if composed_command:
+        filtered_commands_array.append(composed_command.strip())
 
     return filtered_commands_array
 
@@ -521,9 +526,12 @@ def manage_special_commands(command):
     elif "oc edit" in command:
         introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("when the object edit has been saved.")
-    elif "oc create -f" in command or "oc apply -f" in command:
+    elif ("oc create" in command or "oc apply" in command) and "-f" in command:
         prompt_user_enter_to_continue("when the yaml file has been saved.")
         introduce_command(command, auto_enter=True)
+    elif "oc patch" in command:
+        prompt_user_enter_to_continue("when the yaml file has been saved.")
+        introduce_command(command, auto_enter=True)        
     elif "oc logs" in command or "podman logs" in command:
         try:
             suffix = re.findall(r"-\w+-\w+$",command)[0]
@@ -578,7 +586,7 @@ def qa(commands_array):
         if commands_array[i] != '':
             print("Introducing: " + commands_array[i])
             if i + 1 < len(commands_array):
-                print("Next command: " + commands_array[i + 1])
+                #print("Next command: " + commands_array[i + 1])
                 print('-------------------------------------------------')
             # Manage if the command has an exception, if there is not, just introduce_command normaly
             if not manage_special_commands(commands_array[i]):
