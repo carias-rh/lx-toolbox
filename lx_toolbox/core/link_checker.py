@@ -352,7 +352,7 @@ class LinkChecker(LabManager):
             # Click on "Course" checkbox
             # The checkbox is inside a listitem with text "Course"
             course_checkbox = self.wait.until(EC.element_to_be_clickable(
-                (By.XPATH, '//div[text()="Course"]/preceding-sibling::input[@type="checkbox"] | //div[text()="Course"]/..//input[@type="checkbox"]')
+                (By.XPATH, '//input[@id="course_checkbox"]')
             ))
             
             # Check if already checked
