@@ -62,7 +62,6 @@ class LabManager:
         # Navigate to a generic course page to trigger login if not already on the domain
         # The old script went to rh124-9.3, adjust if a more generic entry point is better
         self.selenium_driver.go_to_url(base_url + "rh124-9.3") # Placeholder course
-        self.selenium_driver.accept_trustarc_cookies()
 
         username, password_pin, otp_command = self._get_credentials(environment)
 
@@ -71,10 +70,19 @@ class LabManager:
 
         try:
             if environment == "rol":
-                # RH SSO Login Flow
-                self.driver.find_element(By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input").send_keys(f"{username}@redhat.com")
-                self.driver.find_element(By.XPATH, '//*[@id="login-show-step2"]').click()
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
+                # RH SSO Login Flow - matching old script behavior
+                # Check cookies first (like old script)
+                self.selenium_driver.accept_trustarc_cookies(timeout=5)
+                
+                self.wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
+                )).send_keys(f"{username}@redhat.com")
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
+                
+                # NOTE: rh-sso-flow button click is commented out in old script, so we skip it
+                # self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
+                
+                # RH SSO - wait for username field (should appear automatically after clicking login-show-step2)
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
                 
                 otp_value = ""
@@ -83,38 +91,41 @@ class LabManager:
                         # This is a security risk and highly dependent on the local setup.
                         # Consider abstracting this to a function passed in, or user input.
                         print(f"Executing OTP command: {otp_command}")
-                        otp_value = os.popen(otp_command).read().strip()
+                        otp_value = os.popen(otp_command).read().replace('\n', '')
                     except Exception as e:
                         print(f"Could not execute OTP command '{otp_command}': {e}")
                         # Potentially raise or ask user for OTP
                 
-                full_password = str(password_pin) + otp_value
+                # Match old script: use replace('\n', '') instead of strip()
+                full_password = str(password_pin).replace('\n', '') + str(otp_value)
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(full_password)
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
 
             elif environment == "rol-stage":
                 # GitHub Login Flow
+                self.selenium_driver.accept_trustarc_cookies(timeout=1)
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click() # Assuming this is "Login with GitHub"
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_field"]'))).send_keys(username)
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password_pin)
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/form/div/input[13]'))).click() # Login button
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//input[@type="submit"]'))).click() # Match old script XPath
 
                 if otp_command: # If 2FA is expected
                     otp_input_field = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]')))
                     otp_input_field.click()
                     try:
                         print(f"Executing OTP command: {otp_command}")
-                        otp_value = os.popen(otp_command).read().strip()
+                        otp_value = os.popen(otp_command).read().replace('\n', '')
                         otp_input_field.send_keys(otp_value)
-                        self.driver.find_element(By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/div[2]/form/button').click() # Verify button
+                        #self.driver.find_element(By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/div[2]/form/button').click() # Verify button
                     except Exception as e:
                         print(f"Could not execute OTP command '{otp_command}' for GitHub: {e}")
                         # Potentially raise or ask user for OTP
 
             elif environment == "china":
-                # China local login
-                # The old script navigated directly to a login page for China if needed.
-                # self.selenium_driver.go_to_url(self.config.get_lab_base_url("china").replace("courses/", "login/local"))
+                # China local login - navigate to login page first (like old script)
+                china_login_url = self.config.get_lab_base_url("china").replace("courses/", "login/local")
+                self.selenium_driver.go_to_url(china_login_url)
+                self.selenium_driver.accept_trustarc_cookies()
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password_pin)
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_button"]'))).click()
