@@ -6,6 +6,7 @@ This module provides functionality to:
 2. Extract links from course content, especially the References sections
 3. Validate those links and generate reports
 4. Take screenshots of visited pages for human review
+5. Generate PDF reports with embedded screenshots and hyperlinks
 """
 
 import os
@@ -23,6 +24,23 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+
+# PDF generation imports
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch, cm
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle,
+        PageBreak, KeepTogether, ListFlowable, ListItem
+    )
+    from reportlab.platypus.tableofcontents import TableOfContents
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+    from PIL import Image as PILImage
+    PDF_SUPPORT = True
+except ImportError:
+    PDF_SUPPORT = False
 
 from .lab_manager import LabManager
 from ..utils.config_manager import ConfigManager
@@ -804,15 +822,25 @@ class LinkChecker(LabManager):
         
         return reports
     
-    def generate_report(self, output_format: str = 'text') -> str:
+    def generate_report(self, output_format: str = 'text', output_file: str = None) -> str:
         """
         Generate a summary report of all link checks.
-        Supports 'text', 'json', or 'detailed' format.
+        Supports 'text', 'json', 'detailed', or 'pdf' format.
+        
+        For PDF format, output_file is required and the method returns the file path.
         """
         if output_format == 'json':
             return self._generate_json_report()
         elif output_format == 'detailed':
             return self._generate_detailed_text_report()
+        elif output_format == 'pdf':
+            if not PDF_SUPPORT:
+                raise ImportError("PDF support requires 'reportlab' and 'Pillow'. Install with: pip install reportlab Pillow")
+            if not output_file:
+                # Generate default filename
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_file = f"link_check_report_{timestamp}.pdf"
+            return self._generate_pdf_report(output_file)
         else:
             return self._generate_text_report()
     
@@ -879,6 +907,8 @@ class LinkChecker(LabManager):
     
     def _generate_detailed_text_report(self) -> str:
         """Generate a detailed text report with full chapter/section hierarchy."""
+        ROL_BASE_URL = "https://rol.redhat.com"
+        
         lines = []
         lines.append("=" * 100)
         lines.append("DETAILED LINK CHECK REPORT")
@@ -894,6 +924,31 @@ class LinkChecker(LabManager):
             lines.append(f"Completed: {report.check_completed}")
             lines.append(f"Screenshots Directory: {report.screenshots_dir}")
             lines.append("*" * 100)
+            
+            # Course summary at the beginning
+            lines.append("")
+            lines.append("COURSE SUMMARY")
+            lines.append("-" * 50)
+            lines.append(f"  Sections checked: {len(report.sections)}")
+            lines.append(f"  Total links:      {report.total_links}")
+            lines.append(f"  Valid links:      {report.valid_links}")
+            lines.append(f"  Broken links:     {report.broken_links}")
+            lines.append(f"  Ignored links:    {report.ignored_links}")
+            
+            # Broken links summary at the top with references
+            broken = [r for r in report.results if not r.is_valid]
+            if broken:
+                lines.append("")
+                lines.append("⚠️  BROKEN LINKS IN THIS COURSE:")
+                lines.append("-" * 50)
+                for idx, result in enumerate(broken, 1):
+                    lines.append(f"  {idx}. {result.link_text}")
+                    lines.append(f"     URL: {result.url}")
+                    lines.append(f"     Location: {result.chapter} → {result.source_page}")
+                    lines.append(f"     Error: [{result.status_code or 'N/A'}] {result.error_message}")
+                    if result.screenshot_path:
+                        lines.append(f"     Screenshot: {result.screenshot_path}")
+                    lines.append("")
             
             # Group sections by chapter
             chapters = {}
@@ -915,7 +970,9 @@ class LinkChecker(LabManager):
                     if section_header:
                         section_header = f"[{section_header}] "
                     lines.append(f"  📄 {section_header}{section.title}")
-                    lines.append(f"     URL: {section.url}")
+                    # Full ROL URL
+                    full_url = f"{ROL_BASE_URL}{section.url}" if section.url.startswith('/') else section.url
+                    lines.append(f"     ROL URL: {full_url}")
                     
                     if section.screenshot_path:
                         lines.append(f"     📸 Screenshot: {os.path.basename(section.screenshot_path)}")
@@ -966,16 +1023,6 @@ class LinkChecker(LabManager):
                         lines.append("     (No external links found)")
                     
                     lines.append("-" * 80)
-            
-            # Course summary
-            lines.append("")
-            lines.append("COURSE SUMMARY")
-            lines.append("-" * 50)
-            lines.append(f"  Sections checked: {len(report.sections)}")
-            lines.append(f"  Total links:      {report.total_links}")
-            lines.append(f"  Valid links:      {report.valid_links}")
-            lines.append(f"  Broken links:     {report.broken_links}")
-            lines.append(f"  Ignored links:    {report.ignored_links}")
         
         lines.append("")
         lines.append("=" * 100)
@@ -1049,3 +1096,358 @@ class LinkChecker(LabManager):
             report_data['courses'].append(course_data)
         
         return json.dumps(report_data, indent=2, ensure_ascii=False)
+    
+    def _generate_pdf_report(self, output_file: str) -> str:
+        """
+        Generate a comprehensive PDF report with screenshots and hyperlinks.
+        
+        The PDF includes:
+        - Title page with summary
+        - Table of broken links with hyperlinks to detailed sections
+        - Course chapters and sections with full URLs
+        - Embedded screenshots of external links
+        """
+        from reportlab.platypus import Flowable
+        
+        # Custom anchor for internal links
+        class Anchor(Flowable):
+            def __init__(self, name):
+                Flowable.__init__(self)
+                self.name = name
+                self.width = 0
+                self.height = 0
+            
+            def draw(self):
+                self.canv.bookmarkPage(self.name)
+        
+        # Setup document
+        doc = SimpleDocTemplate(
+            output_file,
+            pagesize=A4,
+            rightMargin=1.5*cm,
+            leftMargin=1.5*cm,
+            topMargin=2*cm,
+            bottomMargin=2*cm
+        )
+        
+        # Define styles
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            spaceAfter=30,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor('#CC0000')  # Red Hat red
+        )
+        
+        heading1_style = ParagraphStyle(
+            'CustomHeading1',
+            parent=styles['Heading1'],
+            fontSize=18,
+            spaceBefore=20,
+            spaceAfter=10,
+            textColor=colors.HexColor('#CC0000')
+        )
+        
+        heading2_style = ParagraphStyle(
+            'CustomHeading2',
+            parent=styles['Heading2'],
+            fontSize=14,
+            spaceBefore=15,
+            spaceAfter=8,
+            textColor=colors.HexColor('#333333')
+        )
+        
+        heading3_style = ParagraphStyle(
+            'CustomHeading3',
+            parent=styles['Heading3'],
+            fontSize=12,
+            spaceBefore=10,
+            spaceAfter=5,
+            textColor=colors.HexColor('#555555')
+        )
+        
+        normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=styles['Normal'],
+            fontSize=10,
+            spaceBefore=3,
+            spaceAfter=3
+        )
+        
+        url_style = ParagraphStyle(
+            'URLStyle',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#0066CC'),
+            spaceBefore=2,
+            spaceAfter=2
+        )
+        
+        error_style = ParagraphStyle(
+            'ErrorStyle',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#CC0000'),
+            spaceBefore=2,
+            spaceAfter=2
+        )
+        
+        success_style = ParagraphStyle(
+            'SuccessStyle',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#006600'),
+            spaceBefore=2,
+            spaceAfter=2
+        )
+        
+        # Build the document content
+        story = []
+        
+        # === TITLE PAGE ===
+        story.append(Spacer(1, 2*inch))
+        story.append(Paragraph("Link Check Report", title_style))
+        story.append(Spacer(1, 0.5*inch))
+        story.append(Paragraph(
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            ParagraphStyle('DateStyle', parent=normal_style, alignment=TA_CENTER)
+        ))
+        story.append(Spacer(1, 1*inch))
+        
+        # Overall summary
+        total_links = sum(r.total_links for r in self.reports)
+        total_valid = sum(r.valid_links for r in self.reports)
+        total_broken = sum(r.broken_links for r in self.reports)
+        total_ignored = sum(r.ignored_links for r in self.reports)
+        
+        summary_data = [
+            ['Metric', 'Count'],
+            ['Courses Checked', str(len(self.reports))],
+            ['Total Links', str(total_links)],
+            ['Valid Links', str(total_valid)],
+            ['Broken Links', str(total_broken)],
+            ['Ignored Links', str(total_ignored)],
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[3*inch, 2*inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#CC0000')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F5F5F5')),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#CCCCCC')),
+            ('FONTSIZE', (0, 1), (-1, -1), 11),
+            # Highlight broken links row
+            ('BACKGROUND', (0, 4), (-1, 4), colors.HexColor('#FFEEEE') if total_broken > 0 else colors.HexColor('#F5F5F5')),
+            ('TEXTCOLOR', (1, 4), (1, 4), colors.HexColor('#CC0000') if total_broken > 0 else colors.black),
+        ]))
+        story.append(summary_table)
+        
+        story.append(PageBreak())
+        
+        # === BROKEN LINKS SUMMARY (with hyperlinks) ===
+        if total_broken > 0:
+            story.append(Paragraph("⚠️ Broken Links Summary", heading1_style))
+            story.append(Paragraph(
+                "The following links returned errors. Click on any link to jump to its detailed section.",
+                normal_style
+            ))
+            story.append(Spacer(1, 0.3*inch))
+            
+            broken_count = 0
+            for report in self.reports:
+                broken = [r for r in report.results if not r.is_valid]
+                if broken:
+                    story.append(Paragraph(f"<b>Course: {report.course_id}</b>", heading2_style))
+                    
+                    for result in broken:
+                        broken_count += 1
+                        anchor_name = f"broken_{broken_count}"
+                        
+                        # Create hyperlink to the detailed section
+                        link_para = Paragraph(
+                            f'<a href="#{anchor_name}" color="blue"><u>{result.link_text}</u></a>',
+                            normal_style
+                        )
+                        story.append(link_para)
+                        story.append(Paragraph(f"URL: {result.url}", url_style))
+                        story.append(Paragraph(
+                            f"Location: {result.chapter} → {result.source_page}",
+                            normal_style
+                        ))
+                        story.append(Paragraph(
+                            f"Error: [{result.status_code or 'N/A'}] {result.error_message}",
+                            error_style
+                        ))
+                        story.append(Spacer(1, 0.2*inch))
+            
+            story.append(PageBreak())
+        
+        # === DETAILED COURSE REPORTS ===
+        broken_counter = 0
+        
+        for report in self.reports:
+            # Course header
+            story.append(Paragraph(f"📚 Course: {report.course_id}", heading1_style))
+            
+            # Course info table
+            rol_base_url = "https://rol.redhat.com"
+            course_info = [
+                ['Property', 'Value'],
+                ['Course ID', report.course_id],
+                ['Check Started', str(report.check_started.strftime('%Y-%m-%d %H:%M:%S') if report.check_started else 'N/A')],
+                ['Check Completed', str(report.check_completed.strftime('%Y-%m-%d %H:%M:%S') if report.check_completed else 'N/A')],
+                ['Sections Checked', str(len(report.sections))],
+                ['Total Links', str(report.total_links)],
+                ['Valid Links', str(report.valid_links)],
+                ['Broken Links', str(report.broken_links)],
+            ]
+            
+            info_table = Table(course_info, colWidths=[2.5*inch, 4*inch])
+            info_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#333333')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F9F9F9')),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#DDDDDD')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            story.append(info_table)
+            story.append(Spacer(1, 0.3*inch))
+            
+            # Group sections by chapter
+            chapters = {}
+            for section in report.sections:
+                chapter = section.chapter or "General"
+                if chapter not in chapters:
+                    chapters[chapter] = []
+                chapters[chapter].append(section)
+            
+            # Output each chapter
+            for chapter_name, chapter_sections in chapters.items():
+                story.append(Paragraph(f"📖 {chapter_name}", heading2_style))
+                
+                for section in chapter_sections:
+                    section_header = f"[{section.section_number}] " if section.section_number else ""
+                    story.append(Paragraph(f"📄 {section_header}{section.title}", heading3_style))
+                    
+                    # Full ROL URL
+                    full_url = f"{rol_base_url}{section.url}" if section.url.startswith('/') else section.url
+                    story.append(Paragraph(
+                        f'ROL URL: <a href="{full_url}" color="blue">{full_url}</a>',
+                        url_style
+                    ))
+                    
+                    # Get results for this section
+                    section_results = [r for r in report.results if r.source_page == section.title]
+                    
+                    if section_results:
+                        story.append(Spacer(1, 0.1*inch))
+                        
+                        # Group by References vs Content
+                        references_links = [r for r in section_results if r.source_section == 'References']
+                        content_links = [r for r in section_results if r.source_section == 'Content']
+                        
+                        for link_group, group_name in [(references_links, "📎 References"), (content_links, "📝 Content Links")]:
+                            if link_group:
+                                story.append(Paragraph(f"<b>{group_name}:</b>", normal_style))
+                                
+                                for result in link_group:
+                                    # Add anchor for broken links
+                                    if not result.is_valid:
+                                        broken_counter += 1
+                                        story.append(Anchor(f"broken_{broken_counter}"))
+                                    
+                                    status_icon = "✓" if result.is_valid else "✗"
+                                    status_code = result.status_code if result.status_code else "ERR"
+                                    status_desc = self._get_http_status_description(result.status_code)
+                                    
+                                    # Link status line
+                                    style = success_style if result.is_valid else error_style
+                                    story.append(Paragraph(
+                                        f"{status_icon} [{status_code}] {result.link_text}",
+                                        style
+                                    ))
+                                    
+                                    # Full URL (clickable)
+                                    story.append(Paragraph(
+                                        f'<a href="{result.url}" color="blue">{result.url}</a>',
+                                        url_style
+                                    ))
+                                    
+                                    # Status description
+                                    story.append(Paragraph(f"Status: {status_desc}", normal_style))
+                                    
+                                    # Response time if available
+                                    if result.response_time_ms:
+                                        story.append(Paragraph(
+                                            f"Response Time: {result.response_time_ms:.0f}ms",
+                                            normal_style
+                                        ))
+                                    
+                                    # Error message for broken links
+                                    if not result.is_valid and result.error_message:
+                                        story.append(Paragraph(
+                                            f"⚠️ Error: {result.error_message}",
+                                            error_style
+                                        ))
+                                    
+                                    # Screenshot
+                                    if result.screenshot_path and os.path.exists(result.screenshot_path):
+                                        try:
+                                            # Get image dimensions and scale appropriately
+                                            with PILImage.open(result.screenshot_path) as img:
+                                                img_width, img_height = img.size
+                                            
+                                            # Scale to fit page width (max 6 inches)
+                                            max_width = 6 * inch
+                                            max_height = 4 * inch
+                                            
+                                            scale_w = max_width / img_width
+                                            scale_h = max_height / img_height
+                                            scale = min(scale_w, scale_h, 1.0)
+                                            
+                                            display_width = img_width * scale
+                                            display_height = img_height * scale
+                                            
+                                            story.append(Spacer(1, 0.1*inch))
+                                            story.append(Paragraph("📸 Screenshot:", normal_style))
+                                            story.append(Image(
+                                                result.screenshot_path,
+                                                width=display_width,
+                                                height=display_height
+                                            ))
+                                        except Exception as e:
+                                            story.append(Paragraph(
+                                                f"Screenshot: {os.path.basename(result.screenshot_path)} (could not embed: {e})",
+                                                normal_style
+                                            ))
+                                    elif result.screenshot_path:
+                                        story.append(Paragraph(
+                                            f"Screenshot: {result.screenshot_path}",
+                                            normal_style
+                                        ))
+                                    
+                                    story.append(Spacer(1, 0.15*inch))
+                    else:
+                        story.append(Paragraph("(No external links found)", normal_style))
+                    
+                    story.append(Spacer(1, 0.2*inch))
+            
+            # Page break between courses
+            if report != self.reports[-1]:
+                story.append(PageBreak())
+        
+        # Build PDF
+        doc.build(story)
+        
+        return output_file

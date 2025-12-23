@@ -334,29 +334,41 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=True, help='Run browser in headless mode')
-@click.option('--output', '-o', default='detailed', type=click.Choice(['text', 'json', 'detailed']), help='Output format (text=summary, detailed=full hierarchy, json=machine-readable)')
-@click.option('--output-file', '-f', default=None, help='Save report to file')
-@click.option('--screenshots/--no-screenshots', default=True, help='Take screenshots of each visited page')
+@click.option('--output', '-o', default='pdf', type=click.Choice(['text', 'json', 'detailed', 'pdf']), help='Output format (text=summary, detailed=full hierarchy, json=machine-readable, pdf=PDF with screenshots)')
+@click.option('--output-file', '-f', default=None, help='Save report to file (required for PDF output)')
+@click.option('--screenshots/--no-screenshots', default=True, help='Take screenshots of each visited external link')
 @click.option('--screenshots-dir', '-s', default=None, help='Directory to save screenshots (default: ./link_checker_screenshots)')
 @click.pass_context
 def check_links(ctx, course, env, browser, headless, output, output_file, screenshots, screenshots_dir):
     """Check links in course content (References sections).
     
-    Takes screenshots of each visited page and generates detailed reports
+    Takes screenshots of each visited external link and generates detailed reports
     showing chapter/section hierarchy with HTTP response codes.
+    
+    The PDF format includes embedded screenshots and hyperlinks to broken link sections.
     
     Examples:
     
-        lx-tool lab check-links --course do0042l-4.20
+        lx-tool lab check-links --course do280-4.18
         
         lx-tool lab check-links --output detailed -f report.txt
         
         lx-tool lab check-links --output json -f report.json --screenshots-dir ./my_screenshots
         
+        lx-tool lab check-links --output pdf -f report.pdf
+        
         lx-tool lab check-links --no-screenshots --headless
     """
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
+    
+    # PDF output requires a filename
+    if output == 'pdf' and not output_file:
+        from datetime import datetime as dt
+        timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
+        course_suffix = f"_{course}" if course else "_all_courses"
+        output_file = f"link_check_report{course_suffix}_{timestamp}.pdf"
+        click.echo(f"PDF output file not specified, using: {output_file}")
     
     click.echo(f"╔{'═'*60}╗")
     click.echo(f"║ {'LINK CHECKER':^58} ║")
@@ -370,6 +382,8 @@ def check_links(ctx, course, env, browser, headless, output, output_file, screen
     if screenshots and screenshots_dir:
         click.echo(f"Screenshots Dir: {screenshots_dir}")
     click.echo(f"Output Format: {output}")
+    if output_file:
+        click.echo(f"Output File: {output_file}")
     click.echo()
     
     checker = None
@@ -391,14 +405,19 @@ def check_links(ctx, course, env, browser, headless, output, output_file, screen
             checker.check_all_courses(environment, take_screenshots=screenshots)
         
         # Generate report
-        report = checker.generate_report(output)
-        
-        if output_file:
-            with open(output_file, 'w') as f:
-                f.write(report)
-            click.echo(f"\n✓ Report saved to {output_file}")
+        if output == 'pdf':
+            # PDF generation returns the file path
+            pdf_path = checker.generate_report(output, output_file)
+            click.echo(f"\n✓ PDF report saved to: {pdf_path}")
         else:
-            click.echo(report)
+            report = checker.generate_report(output)
+            
+            if output_file:
+                with open(output_file, 'w') as f:
+                    f.write(report)
+                click.echo(f"\n✓ Report saved to {output_file}")
+            else:
+                click.echo(report)
         
         # Summary
         total_broken = sum(r.broken_links for r in checker.reports)
@@ -410,6 +429,10 @@ def check_links(ctx, course, env, browser, headless, output, output_file, screen
             
     except KeyboardInterrupt:
         click.echo("\n\nInterrupted by user.")
+        sys.exit(1)
+    except ImportError as e:
+        click.echo(f"✗ Missing dependency: {e}", err=True)
+        click.echo("Install with: pip install reportlab Pillow", err=True)
         sys.exit(1)
     except Exception as e:
         click.echo(f"✗ Error checking links: {e}", err=True)
