@@ -1,6 +1,7 @@
 import time
 import os
 import re
+import logging
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -119,15 +120,8 @@ class LabManager:
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_button"]'))).click()
             
             self.wait_for_site_to_be_ready(environment)
-            self.logger("Login successful.")
-        except TimeoutException as e:
-            self.logger(f"Login failed for {environment}: Timeout - {e}")
-            # self.selenium_driver.driver.save_screenshot(f"{environment}_login_timeout.png")
-            raise
         except Exception as e:
-            self.logger(f"Login failed for {environment}: {e}")
-            # self.selenium_driver.driver.save_screenshot(f"{environment}_login_error.png")
-            raise
+            pass
 
     def wait_for_site_to_be_ready(self, environment: str, timeout: int = 5):
         self.logger("Waiting for site to be ready...")
@@ -139,9 +133,7 @@ class LabManager:
             elif environment == "rol-stage":
                  # Example element for ROL stage (e.g., avatar)
                 self.wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="avatar"]')))
-            self.logger("Site is ready.")
         except TimeoutException:
-            self.logger("Site did not become ready in time. Trying to accept cookies and re-check.")
             # self.selenium_driver.driver.save_screenshot(f"{environment}_site_not_ready.png")
             time.sleep(0.5) # Short pause from original script
             self.selenium_driver.accept_trustarc_cookies()
@@ -150,7 +142,6 @@ class LabManager:
                 self.wait.until(EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
             elif environment == "rol-stage":
                 self.wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="avatar"]')))
-            self.logger("Site is ready after retry.")
         except Exception as e:
             self.logger(f"Error waiting for site: {e}")
             raise
@@ -165,7 +156,6 @@ class LabManager:
 
     def select_lab_environment_tab(self, tab_name: str):
         """Selects a tab like 'index', 'course', or 'lab'."""
-        self.logger(f"Selecting tab: {tab_name}")
         
         # Map tab names to both old and new interface selectors
         tab_selectors = {
@@ -223,7 +213,6 @@ class LabManager:
                 success = True
                 
             except TimeoutException:
-                self.logger(f"Timeout selecting tab {tab_name} in old interface. Retrying...")
                 # Common recovery step
                 self.selenium_driver.accept_trustarc_cookies()
                 time.sleep(1)
@@ -236,7 +225,6 @@ class LabManager:
                         lambda d: d.find_element(By.XPATH, old_tab_xpath).get_attribute("aria-selected") == "true"
                     )
                     success = True
-                    self.logger(f"Successfully selected tab '{tab_name}' using old interface after retry")
                 except Exception as e:
                     self.logger(f"Failed to select tab {tab_name} after retry: {e}")
                     raise
@@ -290,56 +278,49 @@ class LabManager:
             else: # Otherwise it's a secondary status indicator
                 secondary_status = start_stop_text.upper()
         
-        self.logger(f"Lab status: Primary='{primary_status}', Secondary='{secondary_status}'")
+        #self.logger(f"Lab status: Primary='{primary_status}', Secondary='{secondary_status}'")
         return primary_status, secondary_status
 
 
     def create_lab(self, course_id: str):
-        self.logger(f"Attempting to create lab for course: {course_id}")
+        self.logger(f"Creating lab for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
         try:
             create_button, _ = self._get_lab_action_button(["Create"])
             if create_button:
                 create_button.click()
-                self.logger(f"'Create lab' button clicked for {course_id}.")
                 # Add wait for lab creation, e.g., wait for status to change or a specific element.
-                time.sleep(20)
                 WebDriverWait(self.driver, 60).until(
                     lambda d: self._get_lab_action_button(["Creating", "Delete", "Starting", "Stop"])[0] is not None, # Wait until create is done
                     message="Lab did not appear to start creating or finish creating." 
                 )
-                self.logger(f"Lab for {course_id} creation process initiated.")
-            else:
-                self.logger(f"'Create lab' button not found for {course_id}. Lab might exist or be in another state.")
         except Exception as e:
-            self.logger(f"Failed to create lab {course_id}: {e}")
+            logging.getLogger(__name__).error(f"Failed to create lab {course_id}: {e}")
             # self.selenium_driver.driver.save_screenshot(f"create_lab_error_{course_id}.png")
             raise
     
     def start_lab(self, course_id: str):
-        self.logger(f"Attempting to start lab for course: {course_id}")
+        self.logger(f"Starting lab for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
         try:
             start_button, _ = self._get_lab_action_button(["Start"])
             if start_button:
                 start_button.click()
-                self.logger(f"'Start lab' button clicked for {course_id}.")
                 # Add wait for lab start
                 time.sleep(5)
                 WebDriverWait(self.driver, 60).until(
                     lambda d: self._get_lab_action_button(["Stop", "Starting"])[0] is not None,
                     message="Lab did not appear to start."
                 )
-                self.logger(f"Lab for {course_id} starting process initiated.")
             else:
-                self.logger(f"'Start lab' button not found for {course_id}. Lab might be running or in another state.")
+                logging.getLogger(__name__).error(f"Start lab button not found for {course_id}. Lab might be running or in another state.")
         except Exception as e:
-            self.logger(f"Failed to start lab {course_id}: {e}")
+            logging.getLogger(__name__).error(f"Failed to start lab {course_id}: {e}")
             # self.selenium_driver.driver.save_screenshot(f"start_lab_error_{course_id}.png")
             raise
 
     def stop_lab(self, course_id: str):
-        self.logger(f"Attempting to stop lab for course: {course_id}")
+        self.logger(f"Stopping lab for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
         try:
             stop_button, _ = self._get_lab_action_button(["Stop"])
@@ -349,23 +330,21 @@ class LabManager:
                 confirm_button_xpath = '//*[@role="dialog"]//*[@type="button"][contains(text(), "Stop")]'
                 confirm_stop = self.wait.until(EC.element_to_be_clickable((By.XPATH, confirm_button_xpath)))
                 confirm_stop.click()
-                self.logger(f"'Stop lab' confirmed for {course_id}.")
                 # Add wait for lab stop
                 time.sleep(5)
                 WebDriverWait(self.driver, 30).until(
                     lambda d: self._get_lab_action_button(["Start", "Stopping"])[0] is not None,
                     message="Lab did not appear to stop."
                 )
-                self.logger(f"Lab for {course_id} stopping process initiated.")
             else:
-                self.logger(f"'Stop lab' button not found for {course_id}.")
+                logging.getLogger(__name__).error(f"Stop lab button not found for {course_id}.")
         except Exception as e:
-            self.logger(f"Failed to stop lab {course_id}: {e}")
+            logging.getLogger(__name__).error(f"Failed to stop lab {course_id}: {e}")
             # self.selenium_driver.driver.save_screenshot(f"stop_lab_error_{course_id}.png")
             raise
             
     def delete_lab(self, course_id: str):
-        self.logger(f"Attempting to delete lab for course: {course_id}")
+        self.logger(f"Deleting lab for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
         try:
             delete_button, _ = self._get_lab_action_button(["Delete"])
@@ -375,18 +354,16 @@ class LabManager:
                 confirm_button_xpath = '//*[@role="dialog"]//*[@type="button"][contains(text(), "Delete")]'
                 confirm_delete = self.wait.until(EC.element_to_be_clickable((By.XPATH, confirm_button_xpath)))
                 confirm_delete.click()
-                self.logger(f"'Delete lab' confirmed for {course_id}.")
                 # Add wait for lab deletion
                 # Original: time.sleep(20)
                 WebDriverWait(self.driver, 60).until(
                     lambda d: self._get_lab_action_button(["Create"])[0] is not None, # Wait until delete is done (Create becomes available)
                     message="Lab did not appear to be deleted."
                 )
-                self.logger(f"Lab {course_id} deletion process initiated.")
             else:
-                self.logger(f"'Delete lab' button not found for {course_id}.")
+                logging.getLogger(__name__).error(f"Delete lab button not found for {course_id}.")
         except Exception as e:
-            self.logger(f"Failed to delete lab {course_id}: {e}")
+            logging.getLogger(__name__).error(f"Failed to delete lab {course_id}: {e}")
             # self.selenium_driver.driver.save_screenshot(f"delete_lab_error_{course_id}.png")
             raise
             
@@ -398,16 +375,13 @@ class LabManager:
         primary_status, secondary_status = self.check_lab_status()
 
         if primary_status in ["STOP", "START"]: # Corresponds to STOP or START button being the main one
-            self.logger(f"Lab exists (status indicates {primary_status}), deleting first.")
             self.delete_lab(course_id)
             # Wait for delete to complete and create button to be available
             self.wait.until(lambda d: self._get_lab_action_button(["Create"])[0] is not None, message="Create button not available after delete.")
             self.create_lab(course_id)
         elif primary_status == "CREATE":
-            self.logger("Lab does not exist, creating directly.")
             self.create_lab(course_id)
         elif primary_status in ["DELETING", "CREATING"]:
-             self.logger(f"Lab is currently {primary_status}. Waiting...")
              # Wait until a stable state (Create or Stop/Start button appears)
              WebDriverWait(self.driver, 300).until(
                  lambda d: self._get_lab_action_button(["Create", "Start", "Stop"])[0] is not None,
@@ -416,13 +390,13 @@ class LabManager:
              # Recurse or re-check status and act
              self.recreate_lab(course_id, environment) # Call again to re-evaluate
         else:
-            self.logger(f"Cannot determine action for lab status: Primary='{primary_status}', Secondary='{secondary_status}'. Recreating might fail.")
+            logging.getLogger(__name__).error(f"Cannot determine action for lab status: Primary='{primary_status}', Secondary='{secondary_status}'. Recreating might fail.")
             # Fallback to trying delete then create
             try:
                 self.delete_lab(course_id)
                 self.wait.until(lambda d: self._get_lab_action_button(["Create"])[0] is not None)
             except Exception as e:
-                self.logger(f"Delete failed during recreate, attempting create anyway: {e}")
+                logging.getLogger(__name__).error(f"Delete failed during recreate, attempting create anyway: {e}")
             self.create_lab(course_id)
 
         self.increase_autostop(course_id)
@@ -438,8 +412,8 @@ class LabManager:
             # The original script checked for "CREATING" or "STARTING" states before clicking.
             # This implies we should wait until those are done.
             WebDriverWait(self.driver, 300).until(
-                lambda d: self._get_lab_action_button(["Stop"])[0] is not None or \
-                            self._get_lab_action_button(["Workstation"])[0] is not None, # Assuming Workstation button means lab is ready
+                lambda d: self._get_lab_action_button(["Starting", "Stop"])[0] is not None or \
+                            self._get_lab_action_button(["Bastion"])[0] is not None, # Assuming Workstation button means lab is ready
                 message="Lab not in a state to adjust autostop/lifespan (e.g. not running)."
             )
             
@@ -448,13 +422,12 @@ class LabManager:
             for _ in range(times):
                 adj_button.click()
                 time.sleep(0.1) # Small pause between clicks
-            self.logger(f"{description} applied for {course_id}.")
         except TimeoutException:
-            self.logger(f"Timeout finding {description} button for {course_id}. Lab might not be ready or button not found.")
+            logging.getLogger(__name__).error(f"Timeout finding {description} button for {course_id}. Lab might not be ready or button not found.")
             # self.selenium_driver.driver.save_screenshot(f"{description.lower().replace(' ','_')}_timeout_{course_id}.png")
             # Pass for now as in original script
         except Exception as e:
-            self.logger(f"Error during {description} for {course_id}: {e}")
+            logging.getLogger(__name__).error(f"Error during {description} for {course_id}: {e}")
             # Pass for now
 
     def increase_autostop(self, course_id: str, times: int = 4):
@@ -466,7 +439,7 @@ class LabManager:
     def impersonate_user(self, impersonate_username: str, current_course_id: str, environment: str):
         self.logger(f"Impersonating user '{impersonate_username}'")
         if not impersonate_username:
-            self.logger("No impersonation username provided.")
+            logging.getLogger(__name__).error("No impersonation username provided.")
             return
 
         try:
@@ -491,7 +464,6 @@ class LabManager:
             # Wait for a confirmation element or redirection. Original used a generic div.
             # This wait might need to be more specific, e.g., waiting for the username to change in the UI.
             self.wait.until(EC.staleness_of(username_field)) # Wait for old elements to go stale
-            self.logger(f"Impersonation request sent for '{impersonate_username}'. Waiting for site to reload.")
             self.wait_for_site_to_be_ready(environment) # Wait for page to reload as new user
 
             # Re-navigate to the course after impersonation
@@ -500,7 +472,7 @@ class LabManager:
             self.select_lab_environment_tab("lab-environment") # Go to lab tab by default after impersonation
 
         except Exception as e:
-            self.logger(f"An exception occurred while impersonating {impersonate_username}: {e}")
+            logging.getLogger(__name__).error(f"An exception occurred while impersonating {impersonate_username}: {e}")
             # self.selenium_driver.driver.save_screenshot(f"impersonate_error_{impersonate_username}.png")
             # Don't re-raise, allow script to continue if impersonation fails but is not critical path for *all* ops
 
@@ -518,19 +490,17 @@ class LabManager:
         )) # More robust XPath
         workstation_button.click()
         
-        self.logger("Workstation console button clicked. Waiting for new tab/window.")
         # Wait for new window/tab and switch to it
         WebDriverWait(self.driver, 30).until(EC.number_of_windows_to_be(2))
         handles = self.driver.window_handles
         self.driver.switch_to.window(handles[1])
-        self.logger(f"Switched to new window: {self.driver.title}")
 
         # Open virtual keyboard in the console
         try:
             show_keyboard_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="showKeyboard"]')))
             show_keyboard_button.click()
         except TimeoutException:
-            self.logger("Could not find 'Show Keyboard' button. Console might have changed.")
+            logging.getLogger(__name__).error("Could not find 'Show Keyboard' button. Console might have changed.")
             # Proceeding as it might not be critical or UI might be different
 
         # Store send_text_option_button if needed, or handle text input directly
@@ -539,12 +509,12 @@ class LabManager:
         if setup_environment_style == "rgdacosta":
             self._setup_environment_rgdacosta_style()
         elif setup_environment_style:
-            self.logger(f"Unknown environment setup style: {setup_environment_style}")
+            logging.getLogger(__name__).error(f"Unknown environment setup style: {setup_environment_style}")
 
     def _setup_environment_rgdacosta_style(self):
         # This method is highly specific and involves many UI interactions.
         # It needs to be carefully translated, ensuring XPaths are robust.
-        self.logger("Setting up lab environment 'rgdacosta' style...")
+        self.logger("Setting up lab environment 'rgdacosta' style!!!")
         # ... (Implementation would involve many introduce_command calls and waits)
         # Example: self.introduce_command_to_console("student", auto_enter=True)
         # For now, this is a placeholder.
