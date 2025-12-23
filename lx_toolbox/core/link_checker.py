@@ -406,10 +406,29 @@ class LinkChecker(LabManager):
         
         return courses
     
+    # Sections to exclude from link checking (lowercase for case-insensitive matching)
+    EXCLUDED_SECTION_KEYWORDS = [
+        "summary",
+        "lab:",
+        "guided exercise:",
+        "quiz:",
+        "comprehensive review",
+        "preface"
+    ]
+    
+    def _should_exclude_section(self, title: str) -> bool:
+        """Check if a section should be excluded based on its title."""
+        title_lower = title.lower()
+        for keyword in self.EXCLUDED_SECTION_KEYWORDS:
+            if keyword in title_lower:
+                return True
+        return False
+    
     def get_course_sections(self, course_id: str, environment: str) -> list[dict]:
         """
         Get all sections from a course's table of contents.
         Returns a list of dicts with 'title', 'url', 'chapter', 'section_number'.
+        Filters out sections based on EXCLUDED_SECTION_KEYWORDS.
         """
         self.logger(f"Getting sections for course: {course_id}")
         sections = []
@@ -423,6 +442,21 @@ class LinkChecker(LabManager):
             time.sleep(3)  # Wait for course to load
         
         try:
+            # Wait for any backdrop/modal overlay to disappear before interacting
+            try:
+                WebDriverWait(self.driver, 15).until(
+                    EC.invisibility_of_element_located((By.XPATH, '//div[contains(@class, "pf-v5-c-backdrop")]'))
+                )
+            except TimeoutException:
+                # If backdrop doesn't disappear, try to close it or continue anyway
+                self.logger("  ⚠ Backdrop overlay still present, attempting to continue...")
+                try:
+                    # Try clicking outside or pressing Escape to dismiss any modal
+                    self.driver.execute_script("document.body.click();")
+                    time.sleep(0.5)
+                except:
+                    pass
+            
             # Click on "Toggle Table of Contents panel" button to open TOC
             toc_button = self.wait.until(EC.element_to_be_clickable(
                 (By.XPATH, '//button[contains(@aria-label, "Table of Contents") or contains(@aria-label, "Toggle Table of Contents")]')
@@ -430,45 +464,95 @@ class LinkChecker(LabManager):
             
             # Check if TOC is already open by looking for the TOC region
             try:
-                toc_region = self.driver.find_element(By.XPATH, '//region[@aria-label="Table of contents"] | //div[contains(@class, "toc")]//nav')
+                toc_region = self.driver.find_element(By.XPATH, '//div[contains(@class, "ToC")] | //div[@aria-label="Table of contents"]')
                 if not toc_region.is_displayed():
-                    toc_button.click()
-                    time.sleep(0.5)
+                    # Use JavaScript click to bypass any overlay issues
+                    self.driver.execute_script("arguments[0].click();", toc_button)
+                    time.sleep(1)
             except NoSuchElementException:
-                toc_button.click()
-                time.sleep(0.5)
+                # Use JavaScript click to bypass any overlay issues
+                self.driver.execute_script("arguments[0].click();", toc_button)
+                time.sleep(1)
             
-            # Expand all chapters to see all sections
+            # Click on "Expand all" toggle switch to show all chapters
+            # The toggle is a switch with class "pf-v5-c-switch" and label "Expand all"
             try:
-                expand_all = self.driver.find_element(
-                    By.XPATH, 
-                    '//input[@type="checkbox" and following-sibling::*[contains(text(), "Expand all")]] | //button[contains(text(), "Expand all")]'
+                # Try to find the Expand all switch/toggle
+                expand_all_selectors = [
+                    # PatternFly v5 switch with "Expand all" label
+                    '//label[contains(@class, "pf-v5-c-switch") and .//span[contains(text(), "Expand all")]]',
+                    '//span[contains(@class, "pf-v5-c-switch__label") and contains(text(), "Expand all")]/..',
+                    '//input[following-sibling::*[contains(text(), "Expand all")]]',
+                    '//button[contains(text(), "Expand all")]',
+                    # Generic switch/toggle near "Expand all" text
+                    '//*[contains(text(), "Expand all")]/ancestor::label[contains(@class, "switch")]//input',
+                ]
+                
+                expand_all = None
+                for selector in expand_all_selectors:
+                    try:
+                        expand_all = self.driver.find_element(By.XPATH, selector)
+                        if expand_all.is_displayed():
+                            break
+                    except NoSuchElementException:
+                        continue
+                
+                if expand_all and expand_all.is_displayed():
+                    # Check if already expanded by looking for aria-checked or checked state
+                    is_checked = expand_all.get_attribute('aria-checked') == 'true' or expand_all.get_attribute('checked')
+                    if not is_checked:
+                        # Use JavaScript click to bypass overlay issues
+                        self.driver.execute_script("arguments[0].click();", expand_all)
+                        time.sleep(1)
+                        self.logger("  Clicked 'Expand all' toggle")
+                else:
+                    self.logger("  'Expand all' toggle not found, expanding chapters manually...")
+            except Exception as e:
+                logging.debug(f"Could not use 'Expand all' toggle: {e}")
+            
+            # Ensure all chapters are expanded by clicking collapsed accordion toggles
+            try:
+                # Find all collapsed chapter accordion buttons
+                collapsed_chapters = self.driver.find_elements(
+                    By.XPATH,
+                    '//button[contains(@class, "pf-v5-c-accordion__toggle") and @aria-expanded="false"]'
                 )
-                if expand_all.is_displayed():
-                    expand_all.click()
-                    time.sleep(0.5)
-            except NoSuchElementException:
-                # Expand all not available, try to expand each chapter manually
-                try:
-                    chapter_buttons = self.driver.find_elements(
-                        By.XPATH, 
-                        '//button[contains(@aria-expanded, "false") and contains(@class, "chapter")]'
-                    )
-                    for btn in chapter_buttons:
+                
+                if collapsed_chapters:
+                    self.logger(f"  Expanding {len(collapsed_chapters)} collapsed chapters...")
+                    for btn in collapsed_chapters:
                         try:
-                            btn.click()
-                            time.sleep(0.2)
-                        except:
+                            self.driver.execute_script("arguments[0].click();", btn)
+                            time.sleep(0.3)
+                        except Exception as e:
+                            logging.debug(f"Could not expand chapter: {e}")
                             continue
-                except:
-                    pass
+                    time.sleep(0.5)
+            except Exception as e:
+                logging.debug(f"Error expanding chapters: {e}")
             
             # Get all section links from TOC
+            # Look for links that point to course pages
             section_links = self.driver.find_elements(
                 By.XPATH,
-                '//a[contains(@href, "/pages/")]'
+                '//a[contains(@href, "/pages/") and @data-analytics-id="toc-link-ole-lp"]'
             )
             
+            # If no links found with specific data-analytics-id, try broader search
+            if not section_links:
+                section_links = self.driver.find_elements(
+                    By.XPATH,
+                    '//div[contains(@class, "ToC")]//a[contains(@href, "/pages/")]'
+                )
+            
+            # If still no links, try even broader search
+            if not section_links:
+                section_links = self.driver.find_elements(
+                    By.XPATH,
+                    '//a[contains(@href, "/pages/")]'
+                )
+            
+            all_sections = []
             for link in section_links:
                 try:
                     url = link.get_attribute('href')
@@ -485,8 +569,8 @@ class LinkChecker(LabManager):
                         chapter, section_number, clean_title = self._parse_section_title(title)
                         
                         # Avoid duplicates
-                        if not any(s['url'] == path for s in sections):
-                            sections.append({
+                        if not any(s['url'] == path for s in all_sections):
+                            all_sections.append({
                                 'title': title,
                                 'clean_title': clean_title,
                                 'url': path,
@@ -497,7 +581,13 @@ class LinkChecker(LabManager):
                     logging.debug(f"Error processing section link: {e}")
                     continue
             
-            self.logger(f"Found {len(sections)} sections in course {course_id}")
+            # Filter out excluded sections
+            for section in all_sections:
+                if not self._should_exclude_section(section['title']):
+                    sections.append(section)
+            
+            excluded_count = len(all_sections) - len(sections)
+            self.logger(f"Found {len(all_sections)} total sections, {excluded_count} excluded, {len(sections)} to check")
             
         except TimeoutException:
             self.logger(f"Timeout waiting for TOC in course {course_id}")
