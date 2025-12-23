@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 #OLLAMA_MODEL = "aratan/mistral-small-3.1:24b"
 #OLLAMA_MODEL = "qwen3:latest"
 OLLAMA_MODEL = "gemma3:12b" # <--- This is the best model for this task so far
+OLLAMA_MODEL = "granite4:latest"
 #OLLAMA_MODEL = "qwen3:1.7b"
 #OLLAMA_MODEL = "qwen3:8b"
 #OLLAMA_MODEL = "qwen3:30b"
@@ -57,7 +58,7 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openrouter").strip().lower()
 # OpenRouter API settings
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 #OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemma-3-27b-it:free")
-OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "x-ai/grok-4-fast:free")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3.1")
 OPENROUTER_URL = os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 # Optional ranking headers
 OPENROUTER_HTTP_REFERER = os.environ.get("OPENROUTER_HTTP_REFERER", "")
@@ -217,6 +218,7 @@ def askOpenRouter(prompt: str) -> str:
         # Expected: choices[0].message.content which can be a string or list of blocks
         choices = data.get("choices", [])
         if not choices:
+            logger.error(f"OpenRouter returned no choices. Response: {data}")
             return ""
         message = choices[0].get("message", {})
         content = message.get("content", "")
@@ -237,6 +239,14 @@ def askOpenRouter(prompt: str) -> str:
         content_text = re.sub(r"```\s*$", "", content_text)
         content_text = content_text.strip()
         return content_text
+    except requests.exceptions.HTTPError as e:
+        response = getattr(e, "response", None)
+        logger.error(f"OpenRouter HTTP error: {e}")
+        logger.error(f"Response status: {resp.status_code}")
+        logger.error(f"Response body: {resp.text}")
+        logger.error(f"Model used: {OPENROUTER_MODEL}")
+        logger.error(f"Endpoint: {OPENROUTER_URL}")
+        return ""
     except Exception as e:
         logger.error(f"OpenRouter request failed: {e}")
         return ""
@@ -249,10 +259,16 @@ def askLLM(prompt: str) -> str:
     """
     Dispatches to the configured LLM provider. Defaults to Ollama.
     Set env LLM_PROVIDER to "openrouter" to use OpenRouter.
+    If OpenRouter fails, automatically falls back to Ollama.
     """
     provider = LLM_PROVIDER
     if provider == "openrouter":
-        return askOpenRouter(prompt)
+        response = askOpenRouter(prompt)
+        # If OpenRouter returns empty (failed), fall back to Ollama
+        if not response:
+            logger.warning("OpenRouter returned empty response, falling back to Ollama")
+            return askOllama(prompt)
+        return response
     # default
     return askOllama(prompt)
 
@@ -283,7 +299,7 @@ def accept_cookies(driver):
         driver.refresh()
     except Exception as e:
         driver.refresh()
-        logger.warning("accept_cookies failed:", e)
+        logger.warning("accept_cookies failed: %s", e)
 
 def check_cookies(driver):
     """
@@ -512,7 +528,7 @@ def classify_ticket_llm(description: str) -> dict:
     try:
         return json.loads(classifying_response)
     except:
-        logger.error("Could not parse JSON from LLM. Full response:", classifying_response)
+        logger.error("Could not parse JSON from LLM. Full response: %s", classifying_response)
     return {
         "student_feedback": description,
         "language": "en",
@@ -913,8 +929,6 @@ def create_jira(driver, snow_info, analysis_response, classification_data):
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))).send_keys(f'{snow_info["Course"]}: ch{snow_info["Chapter"]}s{snow_info["Section"]} - {analysis_response.get("jira-title", "")} - {snow_info["snow_id"]}')
     time.sleep(3)
     # Add Description
-    color1 = '{color:#0747a6}'
-    color2 = '{color}'
     translated = classification_data.get("translated_student_feedback", snow_info["Description"])
     description = f"""
     |*URL:*|[ch{snow_info["Chapter"]}s{snow_info["Section"]} |{snow_info["URL"]}]|
@@ -949,8 +963,8 @@ def create_jira(driver, snow_info, analysis_response, classification_data):
     # Select Component (course)
     WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]'))).send_keys(snow_info["Course"])
 
-    # Add chapter and section
-    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_12316549"]'))).send_keys(snow_info['Chapter'])
+    # Add chapter number (ch01s01 won't work)
+    WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_12316549"]'))).send_keys(f"{snow_info["Chapter"]}")
 
     # Select version
     version = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="versions-textarea"]')))
@@ -1070,8 +1084,7 @@ def craft_llm_response(snow_info, analysis_response_json):
     6. Maintains a supportive and educational tone
     7. Ends with the signature: {signature}
 
-    Keep the response concise but informative. If the issue is valid, explain that we will create a Jira ticket to fix it in the next release.
-    If it's not a valid issue, provide clarification or guidance to help the student.
+    Keep the response concise but informative. Inform the student that we will create a Jira ticket to fix it in the next release.
     
     Format the response as a JSON object with the following fields:
     - response: the response to the student
@@ -1344,6 +1357,7 @@ def main():
     driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253D5267c5b81bf9c0104862b8cc1d4bcba5%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     #driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253Dfb15730a1bcaf7443407ece03d4bcb6d%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
+#    driver.get("https://redhat.service-now.com/now/nav/ui/classic/params/target/x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_to%253D5267c5b81bf9c0104862b8cc1d4bcba5%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D")
     login_snow(driver)
 
     # Login into rol.redhat.com
