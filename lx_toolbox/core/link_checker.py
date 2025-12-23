@@ -5,14 +5,18 @@ This module provides functionality to:
 1. Navigate through the ROL catalog and courses
 2. Extract links from course content, especially the References sections
 3. Validate those links and generate reports
+4. Take screenshots of visited pages for human review
 """
 
+import os
+import re
 import time
 import logging
 import requests
 from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime
+from pathlib import Path
 import json
 
 from selenium.webdriver.common.by import By
@@ -31,16 +35,31 @@ class LinkCheckResult:
     source_page: str
     source_section: str
     link_text: str
+    chapter: str = ""
+    section_number: str = ""
     status_code: Optional[int] = None
     is_valid: bool = True
     error_message: Optional[str] = None
     response_time_ms: Optional[float] = None
+    screenshot_path: Optional[str] = None
+
+
+@dataclass
+class SectionInfo:
+    """Information about a course section."""
+    title: str
+    url: str
+    chapter: str = ""
+    section_number: str = ""
+    screenshot_path: Optional[str] = None
+    links: list[dict] = field(default_factory=list)
 
 
 @dataclass
 class CourseCheckReport:
     """Report for all link checks in a course."""
     course_id: str
+    course_title: str = ""
     total_links: int = 0
     valid_links: int = 0
     broken_links: int = 0
@@ -48,7 +67,8 @@ class CourseCheckReport:
     check_started: Optional[datetime] = None
     check_completed: Optional[datetime] = None
     results: list[LinkCheckResult] = field(default_factory=list)
-    sections_checked: list[str] = field(default_factory=list)
+    sections: list[SectionInfo] = field(default_factory=list)
+    screenshots_dir: str = ""
 
 
 class LinkChecker(LabManager):
@@ -59,6 +79,7 @@ class LinkChecker(LabManager):
     - Navigating through course catalog
     - Extracting links from course content
     - Validating links and generating reports
+    - Taking screenshots for human review
     """
     
     # URLs to ignore (patterns)
@@ -72,7 +93,8 @@ class LinkChecker(LabManager):
     # Request timeout for link validation
     REQUEST_TIMEOUT = 10
     
-    def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None):
+    def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None,
+                 screenshots_dir: str = None):
         super().__init__(config, browser_name, is_headless)
         self.reports: list[CourseCheckReport] = []
         self.session = requests.Session()
@@ -80,6 +102,73 @@ class LinkChecker(LabManager):
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0'
         })
+        
+        # Setup screenshots directory
+        if screenshots_dir:
+            self.screenshots_base_dir = Path(screenshots_dir)
+        else:
+            self.screenshots_base_dir = Path.cwd() / "link_checker_screenshots"
+        
+        self.screenshots_base_dir.mkdir(parents=True, exist_ok=True)
+        self.current_screenshots_dir: Optional[Path] = None
+    
+    def _sanitize_filename(self, name: str) -> str:
+        """Sanitize a string for use as a filename."""
+        # Replace problematic characters
+        sanitized = re.sub(r'[<>:"/\\|?*]', '_', name)
+        sanitized = re.sub(r'\s+', '_', sanitized)
+        return sanitized[:100]  # Limit length
+    
+    def _take_screenshot(self, name: str, subdir: str = None) -> Optional[str]:
+        """Take a screenshot and save it to the screenshots directory."""
+        try:
+            if subdir:
+                screenshot_dir = self.current_screenshots_dir / subdir
+            else:
+                screenshot_dir = self.current_screenshots_dir
+            
+            screenshot_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%H%M%S")
+            filename = f"{timestamp}_{self._sanitize_filename(name)}.png"
+            filepath = screenshot_dir / filename
+            
+            self.driver.save_screenshot(str(filepath))
+            self.logger(f"    📸 Screenshot saved: {filepath.name}")
+            
+            return str(filepath)
+        except Exception as e:
+            self.logger(f"    ⚠ Failed to take screenshot: {e}")
+            return None
+    
+    def _parse_section_title(self, title: str) -> tuple[str, str, str]:
+        """
+        Parse a section title to extract chapter and section info.
+        Returns (chapter, section_number, clean_title)
+        
+        Examples:
+        - "Section 1.3: The Intertwined Pillars" -> ("Chapter 1", "1.3", "The Intertwined Pillars")
+        - "Chapter 1: Introduction" -> ("Chapter 1", "", "Introduction")
+        - "Preface A: Introduction" -> ("Preface A", "", "Introduction")
+        """
+        chapter = ""
+        section_number = ""
+        clean_title = title
+        
+        # Match patterns like "Section 1.3:", "Chapter 1:", "Preface A:"
+        section_match = re.match(r'^Section\s+(\d+\.\d+):\s*(.*)$', title, re.IGNORECASE)
+        chapter_match = re.match(r'^(Chapter\s+\d+|Preface\s+\w+):\s*(.*)$', title, re.IGNORECASE)
+        
+        if section_match:
+            section_number = section_match.group(1)
+            clean_title = section_match.group(2)
+            chapter_num = section_number.split('.')[0]
+            chapter = f"Chapter {chapter_num}"
+        elif chapter_match:
+            chapter = chapter_match.group(1)
+            clean_title = chapter_match.group(2)
+        
+        return chapter, section_number, clean_title
     
     def _should_ignore_url(self, url: str) -> bool:
         """Check if a URL should be ignored based on patterns."""
@@ -104,13 +193,46 @@ class LinkChecker(LabManager):
                 return True
         return False
     
-    def _validate_link(self, url: str, source_page: str, source_section: str, link_text: str) -> LinkCheckResult:
-        """Validate a single link by making an HTTP HEAD request."""
+    def _get_http_status_description(self, status_code: Optional[int]) -> str:
+        """Get a human-readable description for an HTTP status code."""
+        if status_code is None:
+            return "No Response"
+        
+        descriptions = {
+            200: "OK",
+            201: "Created",
+            204: "No Content",
+            301: "Moved Permanently",
+            302: "Found (Redirect)",
+            304: "Not Modified",
+            400: "Bad Request",
+            401: "Unauthorized",
+            403: "Forbidden",
+            404: "Not Found",
+            405: "Method Not Allowed",
+            408: "Request Timeout",
+            500: "Internal Server Error",
+            502: "Bad Gateway",
+            503: "Service Unavailable",
+            504: "Gateway Timeout",
+        }
+        
+        return descriptions.get(status_code, f"HTTP {status_code}")
+    
+    def _validate_link(self, url: str, source_page: str, source_section: str, 
+                       link_text: str, chapter: str = "", section_number: str = "",
+                       take_screenshot: bool = False) -> LinkCheckResult:
+        """
+        Validate a single link by making an HTTP HEAD request.
+        Optionally navigate to the link and take a screenshot for human review.
+        """
         result = LinkCheckResult(
             url=url,
             source_page=source_page,
             source_section=source_section,
-            link_text=link_text
+            link_text=link_text,
+            chapter=chapter,
+            section_number=section_number
         )
         
         try:
@@ -127,22 +249,67 @@ class LinkChecker(LabManager):
             result.is_valid = response.status_code < 400
             
             if not result.is_valid:
-                result.error_message = f"HTTP {response.status_code}"
+                result.error_message = self._get_http_status_description(response.status_code)
                 
         except requests.exceptions.Timeout:
             result.is_valid = False
-            result.error_message = "Request timed out"
+            result.error_message = "Request Timeout"
         except requests.exceptions.ConnectionError as e:
             result.is_valid = False
-            result.error_message = f"Connection error: {str(e)[:100]}"
+            result.error_message = f"Connection Error: {str(e)[:100]}"
         except requests.exceptions.RequestException as e:
             result.is_valid = False
-            result.error_message = f"Request error: {str(e)[:100]}"
+            result.error_message = f"Request Error: {str(e)[:100]}"
         except Exception as e:
             result.is_valid = False
-            result.error_message = f"Unexpected error: {str(e)[:100]}"
+            result.error_message = f"Unexpected Error: {str(e)[:100]}"
+        
+        # Take screenshot of the external link page if requested
+        if take_screenshot and result.is_valid:
+            result.screenshot_path = self._screenshot_external_link(url, link_text, source_page)
         
         return result
+    
+    def _screenshot_external_link(self, url: str, link_text: str, source_page: str) -> Optional[str]:
+        """
+        Navigate to an external link and take a screenshot.
+        Returns the path to the screenshot file.
+        """
+        try:
+            self.logger(f"      📸 Visiting external link for screenshot...")
+            
+            # Store current URL to return later
+            original_url = self.driver.current_url
+            
+            # Navigate to the external link
+            self.driver.get(url)
+            time.sleep(3)  # Wait for page to load
+            
+            # Create a descriptive filename
+            # Use section and link text for organization
+            section_safe = self._sanitize_filename(source_page)
+            link_safe = self._sanitize_filename(link_text)[:50]
+            
+            # Create subdirectory for the section
+            section_dir = self.current_screenshots_dir / section_safe
+            section_dir.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%H%M%S")
+            filename = f"{timestamp}_{link_safe}.png"
+            filepath = section_dir / filename
+            
+            # Take the screenshot
+            self.driver.save_screenshot(str(filepath))
+            self.logger(f"      📸 Screenshot saved: {section_safe}/{filename}")
+            
+            # Navigate back to ROL (we'll navigate to the next section anyway)
+            # Don't navigate back - let the course navigation handle it
+            
+            return str(filepath)
+            
+        except Exception as e:
+            self.logger(f"      ⚠ Failed to screenshot external link: {e}")
+            return None
     
     def go_to_catalog(self, environment: str):
         """Navigate to the ROL catalog page."""
@@ -242,7 +409,7 @@ class LinkChecker(LabManager):
     def get_course_sections(self, course_id: str, environment: str) -> list[dict]:
         """
         Get all sections from a course's table of contents.
-        Returns a list of dicts with 'title' and 'url'.
+        Returns a list of dicts with 'title', 'url', 'chapter', 'section_number'.
         """
         self.logger(f"Getting sections for course: {course_id}")
         sections = []
@@ -314,11 +481,17 @@ class LinkChecker(LabManager):
                         else:
                             path = url
                         
+                        # Parse chapter and section from title
+                        chapter, section_number, clean_title = self._parse_section_title(title)
+                        
                         # Avoid duplicates
                         if not any(s['url'] == path for s in sections):
                             sections.append({
                                 'title': title,
-                                'url': path
+                                'clean_title': clean_title,
+                                'url': path,
+                                'chapter': chapter,
+                                'section_number': section_number
                             })
                 except Exception as e:
                     logging.debug(f"Error processing section link: {e}")
@@ -336,7 +509,7 @@ class LinkChecker(LabManager):
     def extract_links_from_page(self, page_url: str, page_title: str) -> list[dict]:
         """
         Extract all external links from a course page, especially from the References section.
-        Returns a list of dicts with 'url', 'text', and 'section'.
+        Returns a list of link dicts with 'url', 'text', and 'section'.
         """
         links = []
         
@@ -413,31 +586,60 @@ class LinkChecker(LabManager):
         
         return links
     
-    def check_course_links(self, course_id: str, environment: str) -> CourseCheckReport:
+    def check_course_links(self, course_id: str, environment: str, 
+                           take_screenshots: bool = True) -> CourseCheckReport:
         """
         Check all links in a course.
         Returns a CourseCheckReport with results.
         """
         self.logger(f"Checking links for course: {course_id}")
         
+        # Setup screenshots directory for this course
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.current_screenshots_dir = self.screenshots_base_dir / f"{course_id}_{timestamp}"
+        self.current_screenshots_dir.mkdir(parents=True, exist_ok=True)
+        
         report = CourseCheckReport(
             course_id=course_id,
-            check_started=datetime.now()
+            check_started=datetime.now(),
+            screenshots_dir=str(self.current_screenshots_dir)
         )
         
         try:
             # Get all sections in the course
             sections = self.get_course_sections(course_id, environment)
             
-            for section in sections:
+            # Get course title from first section's chapter or course ID
+            if sections:
+                report.course_title = sections[0].get('chapter', '') or course_id
+            
+            current_chapter = ""
+            
+            for idx, section in enumerate(sections):
                 section_title = section['title']
                 section_url = section['url']
+                chapter = section.get('chapter', '')
+                section_number = section.get('section_number', '')
                 
-                self.logger(f"  Checking section: {section_title}")
-                report.sections_checked.append(section_title)
+                # Log chapter changes
+                if chapter and chapter != current_chapter:
+                    current_chapter = chapter
+                    self.logger(f"\n  📚 {chapter}")
+                
+                self.logger(f"    [{idx+1}/{len(sections)}] {section_title}")
                 
                 # Extract links from this section
                 links = self.extract_links_from_page(section_url, section_title)
+                
+                # Create section info
+                section_info = SectionInfo(
+                    title=section_title,
+                    url=section_url,
+                    chapter=chapter,
+                    section_number=section_number,
+                    links=links
+                )
+                report.sections.append(section_info)
                 
                 for link_info in links:
                     url = link_info['url']
@@ -448,22 +650,26 @@ class LinkChecker(LabManager):
                     
                     report.total_links += 1
                     
-                    # Validate the link
+                    # Validate the link and optionally screenshot the external page
                     result = self._validate_link(
                         url=url,
                         source_page=section_title,
                         source_section=link_info['section'],
-                        link_text=link_info['text']
+                        link_text=link_info['text'],
+                        chapter=chapter,
+                        section_number=section_number,
+                        take_screenshot=take_screenshots
                     )
                     
                     report.results.append(result)
                     
+                    status_str = f"[{result.status_code or 'ERR'}]"
                     if result.is_valid:
                         report.valid_links += 1
-                        self.logger(f"    ✓ {url[:60]}...")
+                        self.logger(f"      ✓ {status_str} {link_info['text'][:50]}")
                     else:
                         report.broken_links += 1
-                        self.logger(f"    ✗ {url[:60]}... ({result.error_message})")
+                        self.logger(f"      ✗ {status_str} {link_info['text'][:50]} - {result.error_message}")
             
         except Exception as e:
             self.logger(f"Error checking course {course_id}: {e}")
@@ -473,7 +679,8 @@ class LinkChecker(LabManager):
         
         return report
     
-    def check_all_courses(self, environment: str, limit: int = None) -> list[CourseCheckReport]:
+    def check_all_courses(self, environment: str, limit: int = None,
+                          take_screenshots: bool = True) -> list[CourseCheckReport]:
         """
         Check links in all courses in the catalog.
         Returns a list of CourseCheckReport objects.
@@ -494,10 +701,12 @@ class LinkChecker(LabManager):
         
         reports = []
         for i, course in enumerate(courses):
-            self.logger(f"\n[{i+1}/{len(courses)}] Checking course: {course['title']} ({course['id']})")
+            self.logger(f"\n{'='*60}")
+            self.logger(f"[{i+1}/{len(courses)}] Checking course: {course['title']} ({course['id']})")
+            self.logger(f"{'='*60}")
             
             try:
-                report = self.check_course_links(course['id'], environment)
+                report = self.check_course_links(course['id'], environment, take_screenshots)
                 reports.append(report)
             except Exception as e:
                 self.logger(f"Failed to check course {course['id']}: {e}")
@@ -508,19 +717,21 @@ class LinkChecker(LabManager):
     def generate_report(self, output_format: str = 'text') -> str:
         """
         Generate a summary report of all link checks.
-        Supports 'text' or 'json' format.
+        Supports 'text', 'json', or 'detailed' format.
         """
         if output_format == 'json':
             return self._generate_json_report()
+        elif output_format == 'detailed':
+            return self._generate_detailed_text_report()
         else:
             return self._generate_text_report()
     
     def _generate_text_report(self) -> str:
         """Generate a human-readable text report."""
         lines = []
-        lines.append("=" * 80)
+        lines.append("=" * 100)
         lines.append("LINK CHECK REPORT")
-        lines.append("=" * 80)
+        lines.append("=" * 100)
         lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append("")
         
@@ -535,42 +746,159 @@ class LinkChecker(LabManager):
             total_broken += report.broken_links
             total_ignored += report.ignored_links
         
-        lines.append(f"SUMMARY:")
-        lines.append(f"  Courses checked: {len(self.reports)}")
-        lines.append(f"  Total links: {total_links}")
-        lines.append(f"  Valid links: {total_valid}")
-        lines.append(f"  Broken links: {total_broken}")
-        lines.append(f"  Ignored links: {total_ignored}")
+        lines.append("SUMMARY")
+        lines.append("-" * 50)
+        lines.append(f"  Courses checked:  {len(self.reports)}")
+        lines.append(f"  Total links:      {total_links}")
+        lines.append(f"  Valid links:      {total_valid}")
+        lines.append(f"  Broken links:     {total_broken}")
+        lines.append(f"  Ignored links:    {total_ignored}")
         lines.append("")
         
         # Detailed broken links
         if total_broken > 0:
-            lines.append("-" * 80)
-            lines.append("BROKEN LINKS:")
-            lines.append("-" * 80)
+            lines.append("-" * 100)
+            lines.append("BROKEN LINKS")
+            lines.append("-" * 100)
             
             for report in self.reports:
                 broken = [r for r in report.results if not r.is_valid]
                 if broken:
-                    lines.append(f"\nCourse: {report.course_id}")
+                    lines.append(f"\n📕 Course: {report.course_id}")
+                    lines.append(f"   Screenshots: {report.screenshots_dir}")
+                    
                     for result in broken:
-                        lines.append(f"  Page: {result.source_page}")
-                        lines.append(f"  Section: {result.source_section}")
-                        lines.append(f"  Link: {result.link_text}")
-                        lines.append(f"  URL: {result.url}")
-                        lines.append(f"  Error: {result.error_message}")
-                        lines.append("")
+                        lines.append(f"\n   📍 Location:")
+                        lines.append(f"      Chapter:  {result.chapter or 'N/A'}")
+                        lines.append(f"      Section:  {result.section_number or 'N/A'} - {result.source_page}")
+                        lines.append(f"      Area:     {result.source_section}")
+                        lines.append(f"   🔗 Link:")
+                        lines.append(f"      Text:     {result.link_text}")
+                        lines.append(f"      URL:      {result.url}")
+                        lines.append(f"   ❌ Error:")
+                        lines.append(f"      Status:   {result.status_code or 'N/A'} - {result.error_message}")
+                        if result.screenshot_path:
+                            lines.append(f"   📸 Screenshot: {result.screenshot_path}")
         
-        lines.append("=" * 80)
+        lines.append("")
+        lines.append("=" * 100)
         lines.append("END OF REPORT")
-        lines.append("=" * 80)
+        lines.append("=" * 100)
+        
+        return "\n".join(lines)
+    
+    def _generate_detailed_text_report(self) -> str:
+        """Generate a detailed text report with full chapter/section hierarchy."""
+        lines = []
+        lines.append("=" * 100)
+        lines.append("DETAILED LINK CHECK REPORT")
+        lines.append("=" * 100)
+        lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append("")
+        
+        for report in self.reports:
+            lines.append("")
+            lines.append("*" * 100)
+            lines.append(f"COURSE: {report.course_id}")
+            lines.append(f"Started: {report.check_started}")
+            lines.append(f"Completed: {report.check_completed}")
+            lines.append(f"Screenshots Directory: {report.screenshots_dir}")
+            lines.append("*" * 100)
+            
+            # Group sections by chapter
+            chapters = {}
+            for section in report.sections:
+                chapter = section.chapter or "General"
+                if chapter not in chapters:
+                    chapters[chapter] = []
+                chapters[chapter].append(section)
+            
+            # Output by chapter
+            for chapter_name, chapter_sections in chapters.items():
+                lines.append("")
+                lines.append(f"📚 {chapter_name}")
+                lines.append("=" * 80)
+                
+                for section in chapter_sections:
+                    lines.append("")
+                    section_header = section.section_number or ""
+                    if section_header:
+                        section_header = f"[{section_header}] "
+                    lines.append(f"  📄 {section_header}{section.title}")
+                    lines.append(f"     URL: {section.url}")
+                    
+                    if section.screenshot_path:
+                        lines.append(f"     📸 Screenshot: {os.path.basename(section.screenshot_path)}")
+                    
+                    if section.links:
+                        lines.append(f"     Links found: {len(section.links)}")
+                        lines.append("")
+                        
+                        # Get results for this section
+                        section_results = [r for r in report.results if r.source_page == section.title]
+                        
+                        # Group by section type (References vs Content)
+                        references_links = [r for r in section_results if r.source_section == 'References']
+                        content_links = [r for r in section_results if r.source_section == 'Content']
+                        
+                        if references_links:
+                            lines.append("     📎 REFERENCES:")
+                            for result in references_links:
+                                status_icon = "✓" if result.is_valid else "✗"
+                                status_code = result.status_code if result.status_code else "ERR"
+                                status_desc = self._get_http_status_description(result.status_code)
+                                
+                                lines.append(f"        {status_icon} [{status_code}] {result.link_text}")
+                                lines.append(f"           URL: {result.url}")
+                                lines.append(f"           Status: {status_desc}")
+                                if result.response_time_ms:
+                                    lines.append(f"           Response Time: {result.response_time_ms:.0f}ms")
+                                if not result.is_valid:
+                                    lines.append(f"           ⚠ Error: {result.error_message}")
+                                lines.append("")
+                        
+                        if content_links:
+                            lines.append("     📝 CONTENT LINKS:")
+                            for result in content_links:
+                                status_icon = "✓" if result.is_valid else "✗"
+                                status_code = result.status_code if result.status_code else "ERR"
+                                status_desc = self._get_http_status_description(result.status_code)
+                                
+                                lines.append(f"        {status_icon} [{status_code}] {result.link_text}")
+                                lines.append(f"           URL: {result.url}")
+                                lines.append(f"           Status: {status_desc}")
+                                if result.response_time_ms:
+                                    lines.append(f"           Response Time: {result.response_time_ms:.0f}ms")
+                                if not result.is_valid:
+                                    lines.append(f"           ⚠ Error: {result.error_message}")
+                                lines.append("")
+                    else:
+                        lines.append("     (No external links found)")
+                    
+                    lines.append("-" * 80)
+            
+            # Course summary
+            lines.append("")
+            lines.append("COURSE SUMMARY")
+            lines.append("-" * 50)
+            lines.append(f"  Sections checked: {len(report.sections)}")
+            lines.append(f"  Total links:      {report.total_links}")
+            lines.append(f"  Valid links:      {report.valid_links}")
+            lines.append(f"  Broken links:     {report.broken_links}")
+            lines.append(f"  Ignored links:    {report.ignored_links}")
+        
+        lines.append("")
+        lines.append("=" * 100)
+        lines.append("END OF DETAILED REPORT")
+        lines.append("=" * 100)
         
         return "\n".join(lines)
     
     def _generate_json_report(self) -> str:
-        """Generate a JSON report."""
+        """Generate a JSON report with full details."""
         report_data = {
             'generated': datetime.now().isoformat(),
+            'screenshots_base_dir': str(self.screenshots_base_dir),
             'summary': {
                 'courses_checked': len(self.reports),
                 'total_links': sum(r.total_links for r in self.reports),
@@ -582,29 +910,52 @@ class LinkChecker(LabManager):
         }
         
         for report in self.reports:
+            # Group sections by chapter
+            chapters = {}
+            for section in report.sections:
+                chapter = section.chapter or "General"
+                if chapter not in chapters:
+                    chapters[chapter] = []
+                
+                section_data = {
+                    'title': section.title,
+                    'section_number': section.section_number,
+                    'url': section.url,
+                    'screenshot': section.screenshot_path,
+                    'links': []
+                }
+                
+                # Get results for this section
+                section_results = [r for r in report.results if r.source_page == section.title]
+                for result in section_results:
+                    section_data['links'].append({
+                        'text': result.link_text,
+                        'url': result.url,
+                        'location': result.source_section,
+                        'status_code': result.status_code,
+                        'status_description': self._get_http_status_description(result.status_code),
+                        'is_valid': result.is_valid,
+                        'error': result.error_message,
+                        'response_time_ms': result.response_time_ms,
+                    })
+                
+                chapters[chapter].append(section_data)
+            
             course_data = {
                 'course_id': report.course_id,
+                'course_title': report.course_title,
+                'screenshots_dir': report.screenshots_dir,
                 'check_started': report.check_started.isoformat() if report.check_started else None,
                 'check_completed': report.check_completed.isoformat() if report.check_completed else None,
-                'total_links': report.total_links,
-                'valid_links': report.valid_links,
-                'broken_links': report.broken_links,
-                'ignored_links': report.ignored_links,
-                'sections_checked': report.sections_checked,
-                'results': [
-                    {
-                        'url': r.url,
-                        'source_page': r.source_page,
-                        'source_section': r.source_section,
-                        'link_text': r.link_text,
-                        'status_code': r.status_code,
-                        'is_valid': r.is_valid,
-                        'error_message': r.error_message,
-                        'response_time_ms': r.response_time_ms,
-                    }
-                    for r in report.results
-                ]
+                'summary': {
+                    'total_links': report.total_links,
+                    'valid_links': report.valid_links,
+                    'broken_links': report.broken_links,
+                    'ignored_links': report.ignored_links,
+                    'sections_checked': len(report.sections),
+                },
+                'chapters': chapters
             }
             report_data['courses'].append(course_data)
         
-        return json.dumps(report_data, indent=2)
+        return json.dumps(report_data, indent=2, ensure_ascii=False)

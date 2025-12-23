@@ -334,39 +334,61 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=True, help='Run browser in headless mode')
-@click.option('--output', '-o', default='text', type=click.Choice(['text', 'json']), help='Output format')
+@click.option('--output', '-o', default='detailed', type=click.Choice(['text', 'json', 'detailed']), help='Output format (text=summary, detailed=full hierarchy, json=machine-readable)')
 @click.option('--output-file', '-f', default=None, help='Save report to file')
+@click.option('--screenshots/--no-screenshots', default=True, help='Take screenshots of each visited page')
+@click.option('--screenshots-dir', '-s', default=None, help='Directory to save screenshots (default: ./link_checker_screenshots)')
 @click.pass_context
-def check_links(ctx, course, env, browser, headless, output, output_file):
+def check_links(ctx, course, env, browser, headless, output, output_file, screenshots, screenshots_dir):
     """Check links in course content (References sections).
+    
+    Takes screenshots of each visited page and generates detailed reports
+    showing chapter/section hierarchy with HTTP response codes.
     
     Examples:
     
         lx-tool lab check-links --course do0042l-4.20
         
-        lx-tool lab check-links --headless --output json -f report.json
+        lx-tool lab check-links --output detailed -f report.txt
+        
+        lx-tool lab check-links --output json -f report.json --screenshots-dir ./my_screenshots
+        
+        lx-tool lab check-links --no-screenshots --headless
     """
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
     
-    click.echo(f"Link checker starting for environment: {environment}")
+    click.echo(f"╔{'═'*60}╗")
+    click.echo(f"║ {'LINK CHECKER':^58} ║")
+    click.echo(f"╚{'═'*60}╝")
+    click.echo(f"Environment: {environment}")
     if course:
-        click.echo(f"Target course: {course}")
+        click.echo(f"Target: Course {course}")
     else:
         click.echo("Target: All courses in catalog")
+    click.echo(f"Screenshots: {'Enabled' if screenshots else 'Disabled'}")
+    if screenshots and screenshots_dir:
+        click.echo(f"Screenshots Dir: {screenshots_dir}")
+    click.echo(f"Output Format: {output}")
     click.echo()
     
+    checker = None
     try:
-        checker = LinkChecker(config=config, browser_name=browser, is_headless=headless)
+        checker = LinkChecker(
+            config=config, 
+            browser_name=browser, 
+            is_headless=headless,
+            screenshots_dir=screenshots_dir
+        )
         reset_step_counter()
         
         # Login
         checker.login(environment=environment)
         
         if course:
-            checker.check_course_links(course, environment)
+            checker.check_course_links(course, environment, take_screenshots=screenshots)
         else:
-            checker.check_all_courses(environment)
+            checker.check_all_courses(environment, take_screenshots=screenshots)
         
         # Generate report
         report = checker.generate_report(output)
