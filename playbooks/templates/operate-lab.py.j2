@@ -403,23 +403,63 @@ def set_environment_in_rgdacosta_style():
             (By.XPATH, '//div[text()="Alt"]'))).click()
     introduce_command('gnome-terminal', auto_enter=True)
 
+def merge_command_fragments(previous_command, current_fragment):
+    previous = previous_command.rstrip()
+    current = current_fragment.lstrip()
+
+    if not previous or not current:
+        return None
+
+    if previous.count("'") % 2 == 1:
+        return f"{previous}{current}"
+    if previous.count('"') % 2 == 1:
+        return f"{previous}{current}"
+
+    if previous.endswith('='):
+        return f"{previous}{current}"
+
+    if previous.endswith('/'):
+        if '/' in current and ' ' not in current:
+            return f"{previous}{current}"
+
+    if current.startswith('--') or (current.startswith('-') and len(current) > 1 and current[1] != ' '):
+        return f"{previous} {current}"
+    if current.startswith(('|', '>', '<')):
+        return f"{previous} {current}"
+    if current.startswith(('&&', '||')):
+        return f"{previous} {current}"
+
+    return None
+
+
 def filter_commands_list(commands):
     commands_array = commands.split("\n")
     composed_command = ''
     filtered_commands_array = []
 
-    for command in commands_array:
+    for raw_command in commands_array:
+        command = raw_command.strip()
         if command == '':
             continue
+
         if multiline_command(command):
             line_without_backslash = re.sub(r'\\+$', '', command.rstrip())
             composed_command = f"{composed_command}{line_without_backslash.rstrip()} "
-        else:
-            if composed_command:
-                filtered_commands_array.append(f"{composed_command}{command}".strip())
-                composed_command = ''
-            else:
-                filtered_commands_array.append(command)
+            continue
+
+        if composed_command:
+            composed_command = f"{composed_command}{command}"
+            filtered_commands_array.append(composed_command.strip())
+            composed_command = ''
+            continue
+
+        if filtered_commands_array:
+            merged_command = merge_command_fragments(filtered_commands_array[-1], command)
+            if merged_command is not None:
+                filtered_commands_array[-1] = merged_command.strip()
+                continue
+
+        filtered_commands_array.append(command)
 
     if composed_command:
         filtered_commands_array.append(composed_command.strip())
@@ -526,7 +566,7 @@ def manage_special_commands(command):
     elif "oc edit" in command:
         introduce_command(command, auto_enter=True)
         prompt_user_enter_to_continue("when the object edit has been saved.")
-    elif ("oc create" in command or "oc apply" in command) and "-f" in command:
+    elif ("oc create" in command or "oc apply" in command) and (" -f " in command or " -k " in command):
         prompt_user_enter_to_continue("when the yaml file has been saved.")
         introduce_command(command, auto_enter=True)
     elif "oc patch" in command:
@@ -540,9 +580,9 @@ def manage_special_commands(command):
         except:
             introduce_command(command, auto_enter=True)
 
-    elif "watch" in command:
+    elif "watch" in command or  ("oc get" in command and " -w " in command):
         introduce_command(command, auto_enter=True)
-        prompt_user_enter_to_continue("when you finished the watch command.")
+        prompt_user_enter_to_continue("when you finished using the watch command.")
     else:
         return 0
 
@@ -556,16 +596,16 @@ def get_ge_and_labs(course):
     step("Getting the list of Guided Exercises and Labs")
     go_to_course(course)
 
-    time.sleep(2)
+    time.sleep(3)
     select_lab_environment_tab("index")
 
     chapter_and_section_list = []
 
-    num_rows = len(driver.find_elements('xpath', '//*[@id="tab-course-toc"]/tbody/tr'))
+    num_rows = len(WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.XPATH, '//*[@id="tab-course-toc"]/tbody/tr'))))
 
     for t_row in range(1, (num_rows + 1)):
-        title = driver.find_element('xpath', '//*[@id="tab-course-toc"]/tbody/tr[' + str(t_row) + ']/td').text
-        title_href = driver.find_element('xpath', '//*[@id="tab-course-toc"]/tbody/tr[' + str(t_row) + ']/td/div/a').get_attribute("href")
+        title = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[@id="tab-course-toc"]/tbody/tr[' + str(t_row) + ']/td'))).text
+        title_href = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[@id="tab-course-toc"]/tbody/tr[' + str(t_row) + ']/td/div/a'))).get_attribute("href")
 
         if "Guided Exercise: " in title or "Lab: " in title:
             try:
