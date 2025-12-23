@@ -35,7 +35,7 @@ class BaseSeleniumDriver:
         else:
             raise ValueError(f"Unsupported browser: {self.browser_name}. Choose 'firefox' or 'chrome'.")
         
-        self.wait = WebDriverWait(self.driver, 5) # Default explicit wait time
+        self.wait = WebDriverWait(self.driver, 2) # Default explicit wait time
 
     def get_driver(self):
         return self.driver
