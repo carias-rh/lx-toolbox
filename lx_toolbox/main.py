@@ -12,6 +12,7 @@ from pathlib import Path
 from .utils.config_manager import ConfigManager
 from .utils.helpers import reset_step_counter
 from .core.lab_manager import LabManager
+from .core.link_checker import LinkChecker
 from .core.servicenow_handler import ServiceNowHandler
 from .core.snow_ai_processor import SnowAIProcessor
 
@@ -327,6 +328,75 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
     except Exception as e:
         click.echo(f"✗ Error running QA: {e}", err=True)
         sys.exit(1)
+
+@lab.command('check-links')
+@click.option('--course', '-c', default=None, help='Specific course ID to check (e.g., rh124-9.3). Checks all if omitted.')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
+@click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
+@click.option('--headless/--no-headless', default=True, help='Run browser in headless mode')
+@click.option('--output', '-o', default='text', type=click.Choice(['text', 'json']), help='Output format')
+@click.option('--output-file', '-f', default=None, help='Save report to file')
+@click.pass_context
+def check_links(ctx, course, env, browser, headless, output, output_file):
+    """Check links in course content (References sections).
+    
+    Examples:
+    
+        lx-tool lab check-links --course do0042l-4.20
+        
+        lx-tool lab check-links --headless --output json -f report.json
+    """
+    config = ctx.obj['config']
+    environment = env or config.get("General", "default_lab_environment", "rol")
+    
+    click.echo(f"Link checker starting for environment: {environment}")
+    if course:
+        click.echo(f"Target course: {course}")
+    else:
+        click.echo("Target: All courses in catalog")
+    click.echo()
+    
+    try:
+        checker = LinkChecker(config=config, browser_name=browser, is_headless=headless)
+        reset_step_counter()
+        
+        # Login
+        checker.login(environment=environment)
+        
+        if course:
+            checker.check_course_links(course, environment)
+        else:
+            checker.check_all_courses(environment)
+        
+        # Generate report
+        report = checker.generate_report(output)
+        
+        if output_file:
+            with open(output_file, 'w') as f:
+                f.write(report)
+            click.echo(f"\n✓ Report saved to {output_file}")
+        else:
+            click.echo(report)
+        
+        # Summary
+        total_broken = sum(r.broken_links for r in checker.reports)
+        if total_broken > 0:
+            click.echo(f"\n⚠ Found {total_broken} broken link(s)", err=True)
+            sys.exit(1)
+        else:
+            click.echo("\n✓ All links valid")
+            
+    except KeyboardInterrupt:
+        click.echo("\n\nInterrupted by user.")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"✗ Error checking links: {e}", err=True)
+        sys.exit(1)
+    finally:
+        try:
+            checker.close_browser()
+        except Exception:
+            pass
 
 @cli.group()
 @click.pass_context
