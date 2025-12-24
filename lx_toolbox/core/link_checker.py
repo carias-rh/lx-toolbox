@@ -365,13 +365,138 @@ class LinkChecker(LabManager):
         except TimeoutException:
             self.logger("Could not apply course filter. Proceeding with current view.")
     
+    def _get_courses_from_current_page(self) -> list[dict]:
+        """
+        Extract courses from the current catalog page.
+        Returns a list of dicts with 'id', 'title', and 'url'.
+        """
+        courses = []
+        
+        # Find all course links
+        # Course links have format: /rol/app/courses/{course-id}
+        course_links = self.driver.find_elements(
+            By.XPATH, 
+            '//a[contains(@href, "/rol/app/courses/") and (text()="Launch" or text()="View" or text()="Access" or text()="LAUNCH")]'
+        )
+        
+        for link in course_links:
+            try:
+                url = link.get_attribute('href')
+                if url and '/rol/app/courses/' in url:
+                    # Extract course ID from URL
+                    # URL format: /rol/app/courses/do0042l-4.20 or /rol/app/courses/do0042l-4.20/pages/overview
+                    parts = url.split('/rol/app/courses/')
+                    if len(parts) > 1:
+                        course_id = parts[1].split('/')[0]
+                        
+                        # Get course title from nearby heading
+                        try:
+                            parent = link.find_element(By.XPATH, './ancestor::div[contains(@class, "pf-")]')
+                            title_elem = parent.find_element(By.XPATH, './/h4')
+                            title = title_elem.text
+                        except:
+                            title = course_id
+                        
+                        # Avoid duplicates
+                        if not any(c['id'] == course_id for c in courses):
+                            courses.append({
+                                'id': course_id,
+                                'title': title,
+                                'url': f"/rol/app/courses/{course_id}"
+                            })
+            except Exception as e:
+                logging.debug(f"Error processing course link: {e}")
+                continue
+        
+        return courses
+    
+    def _get_total_pages(self) -> int:
+        """
+        Get the total number of pagination pages.
+        Returns 1 if no pagination is found.
+        """
+        try:
+            # Look for pagination element
+            pagination = self.driver.find_elements(
+                By.XPATH,
+                '//ul[contains(@class, "pagination")]//li[not(contains(., "«")) and not(contains(., "»")) and not(contains(., "‹")) and not(contains(., "›"))]//a'
+            )
+            
+            if pagination:
+                # Get the highest page number
+                page_numbers = []
+                for page_link in pagination:
+                    try:
+                        page_num = int(page_link.text.strip())
+                        page_numbers.append(page_num)
+                    except ValueError:
+                        continue
+                
+                if page_numbers:
+                    return max(page_numbers)
+            
+            return 1
+        except Exception:
+            return 1
+    
+    def _go_to_page(self, page_number: int) -> bool:
+        """
+        Navigate to a specific page in the pagination.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            # Find and click the page number link
+            page_link = self.driver.find_element(
+                By.XPATH,
+                f'//ul[contains(@class, "pagination")]//li//a[text()="{page_number}"]'
+            )
+            
+            # Use JavaScript click to avoid overlay issues
+            self.driver.execute_script("arguments[0].click();", page_link)
+            time.sleep(2)  # Wait for page to load
+            
+            return True
+        except NoSuchElementException:
+            return False
+        except Exception as e:
+            logging.debug(f"Error navigating to page {page_number}: {e}")
+            return False
+    
+    def _click_next_page(self) -> bool:
+        """
+        Click the "next" (›) button to go to the next page.
+        Returns True if successful, False if no next page.
+        """
+        try:
+            # Find the "next" button (›)
+            next_button = self.driver.find_element(
+                By.XPATH,
+                '//ul[contains(@class, "pagination")]//li//a[contains(text(), "›")]'
+            )
+            
+            # Check if it's disabled or the last page
+            parent_li = next_button.find_element(By.XPATH, './..')
+            if 'disabled' in parent_li.get_attribute('class') or '':
+                return False
+            
+            # Use JavaScript click to avoid overlay issues
+            self.driver.execute_script("arguments[0].click();", next_button)
+            time.sleep(2)  # Wait for page to load
+            
+            return True
+        except NoSuchElementException:
+            return False
+        except Exception as e:
+            logging.debug(f"Error clicking next page: {e}")
+            return False
+    
     def get_all_courses(self) -> list[dict]:
         """
-        Get all courses from the catalog.
+        Get all courses from the catalog, navigating through all pagination pages.
         Returns a list of dicts with 'id', 'title', and 'url'.
         """
         self.logger("Getting list of all courses from catalog...")
-        courses = []
+        all_courses = []
         
         try:
             # Wait for course cards to load
@@ -379,50 +504,50 @@ class LinkChecker(LabManager):
                 (By.XPATH, '//a[contains(@href, "/rol/app/courses/")]')
             ))
             
-            # Find all course links
-            # Course links have format: /rol/app/courses/{course-id}
-            course_links = self.driver.find_elements(
-                By.XPATH, 
-                '//a[contains(@href, "/rol/app/courses/") and (text()="Launch" or text()="View" or text()="Access" or text()="LAUNCH")]'
-            )
+            # Get total number of pages
+            total_pages = self._get_total_pages()
+            self.logger(f"  Found {total_pages} page(s) of courses")
             
-            for link in course_links:
-                try:
-                    url = link.get_attribute('href')
-                    if url and '/rol/app/courses/' in url:
-                        # Extract course ID from URL
-                        # URL format: /rol/app/courses/do0042l-4.20 or /rol/app/courses/do0042l-4.20/pages/overview
-                        parts = url.split('/rol/app/courses/')
-                        if len(parts) > 1:
-                            course_id = parts[1].split('/')[0]
-                            
-                            # Get course title from nearby heading
-                            try:
-                                parent = link.find_element(By.XPATH, './ancestor::div[contains(@class, "pf-")]')
-                                title_elem = parent.find_element(By.XPATH, './/h4')
-                                title = title_elem.text
-                            except:
-                                title = course_id
-                            
-                            # Avoid duplicates
-                            if not any(c['id'] == course_id for c in courses):
-                                courses.append({
-                                    'id': course_id,
-                                    'title': title,
-                                    'url': f"/rol/app/courses/{course_id}"
-                                })
-                except Exception as e:
-                    logging.debug(f"Error processing course link: {e}")
-                    continue
+            # Collect courses from each page
+            current_page = 1
+            while True:
+                self.logger(f"  Fetching courses from page {current_page}/{total_pages}...")
+                
+                # Get courses from current page
+                page_courses = self._get_courses_from_current_page()
+                
+                # Add to all courses (avoiding duplicates)
+                for course in page_courses:
+                    if not any(c['id'] == course['id'] for c in all_courses):
+                        all_courses.append(course)
+                
+                self.logger(f"    Found {len(page_courses)} courses on page {current_page}")
+                
+                # Check if we've processed all pages
+                if current_page >= total_pages:
+                    break
+                
+                # Try to go to the next page
+                if not self._click_next_page():
+                    # If next button doesn't work, try direct page navigation
+                    current_page += 1
+                    if not self._go_to_page(current_page):
+                        self.logger(f"    Could not navigate to page {current_page}, stopping.")
+                        break
+                else:
+                    current_page += 1
+                
+                # Wait for new content to load
+                time.sleep(1)
             
-            self.logger(f"Found {len(courses)} courses in catalog")
+            self.logger(f"Found {len(all_courses)} total courses across {current_page} page(s)")
             
         except TimeoutException:
             self.logger("Timeout waiting for course list. Catalog might be empty or slow to load.")
         except Exception as e:
             self.logger(f"Error getting courses: {e}")
         
-        return courses
+        return all_courses
     
     # Sections to exclude from link checking (lowercase for case-insensitive matching)
     EXCLUDED_SECTION_KEYWORDS = [
