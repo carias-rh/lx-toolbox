@@ -121,14 +121,39 @@ class LinkChecker(LabManager):
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0'
         })
         
-        # Setup screenshots directory
+        # Setup screenshots directory with timestamp for this run
         if screenshots_dir:
             self.screenshots_base_dir = Path(screenshots_dir)
         else:
             self.screenshots_base_dir = Path.cwd() / "link_checker_screenshots"
         
-        self.screenshots_base_dir.mkdir(parents=True, exist_ok=True)
+        # Create a timestamped directory for this run
+        run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.run_screenshots_dir = self.screenshots_base_dir / run_timestamp
+        self.run_screenshots_dir.mkdir(parents=True, exist_ok=True)
+        
         self.current_screenshots_dir: Optional[Path] = None
+    
+    def _parse_course_id(self, course_id: str) -> tuple[str, str]:
+        """
+        Parse a course ID into course name and version.
+        Examples:
+            'do280-4.18' -> ('do280', '4.18')
+            'rh124-9.3' -> ('rh124', '9.3')
+            'ad141-9.0' -> ('ad141', '9.0')
+        """
+        # Split on the last hyphen followed by a digit (version pattern)
+        match = re.match(r'^([a-zA-Z]+\d*)[-_](\d+\.\d+.*)$', course_id)
+        if match:
+            return match.group(1), match.group(2)
+        
+        # Fallback: try splitting on hyphen
+        if '-' in course_id:
+            parts = course_id.rsplit('-', 1)
+            return parts[0], parts[1]
+        
+        # No version found, use course_id as name and "unknown" as version
+        return course_id, "unknown"
     
     def _sanitize_filename(self, name: str) -> str:
         """Sanitize a string for use as a filename."""
@@ -282,52 +307,49 @@ class LinkChecker(LabManager):
             result.is_valid = False
             result.error_message = f"Unexpected Error: {str(e)[:100]}"
         
-        # Take screenshot of the external link page if requested
-        if take_screenshot and result.is_valid:
+        # Take screenshot of the external link page if requested (both valid and invalid)
+        if take_screenshot:
             result.screenshot_path = self._screenshot_external_link(url, link_text, source_page)
         
         return result
     
-    def _screenshot_external_link(self, url: str, link_text: str, source_page: str) -> Optional[str]:
+    def _screenshot_external_link(self, url: str, link_text: str, source_page: str, max_retries: int = 3) -> Optional[str]:
         """
         Navigate to an external link and take a screenshot.
         Returns the path to the screenshot file.
+        Retries on failure up to max_retries times.
         """
-        try:
-            self.logger(f"      📸 Visiting external link for screenshot...")
-            
-            # Store current URL to return later
-            original_url = self.driver.current_url
-            
-            # Navigate to the external link
-            self.driver.get(url)
-            time.sleep(3)  # Wait for page to load
-            
-            # Create a descriptive filename
-            # Use section and link text for organization
-            section_safe = self._sanitize_filename(source_page)
-            link_safe = self._sanitize_filename(link_text)[:50]
-            
-            # Create subdirectory for the section
-            section_dir = self.current_screenshots_dir / section_safe
-            section_dir.mkdir(parents=True, exist_ok=True)
-            
-            timestamp = datetime.now().strftime("%H%M%S")
-            filename = f"{timestamp}_{link_safe}.png"
-            filepath = section_dir / filename
-            
-            # Take the screenshot
-            self.driver.save_screenshot(str(filepath))
-            self.logger(f"      📸 Screenshot saved: {section_safe}/{filename}")
-            
-            # Navigate back to ROL (we'll navigate to the next section anyway)
-            # Don't navigate back - let the course navigation handle it
-            
-            return str(filepath)
-            
-        except Exception as e:
-            self.logger(f"      ⚠ Failed to screenshot external link: {e}")
-            return None
+        section_safe = self._sanitize_filename(source_page)
+        link_safe = self._sanitize_filename(link_text)[:50]
+        
+        for attempt in range(max_retries):
+            try:
+                # Navigate to the external link
+                self.driver.get(url)
+                time.sleep(3)  # Wait for page to load
+                
+                # Create subdirectory for the section
+                section_dir = self.current_screenshots_dir / section_safe
+                section_dir.mkdir(parents=True, exist_ok=True)
+                
+                timestamp = datetime.now().strftime("%H%M%S")
+                filename = f"{timestamp}_{link_safe}.png"
+                filepath = section_dir / filename
+                
+                # Take the screenshot
+                self.driver.save_screenshot(str(filepath))
+                
+                return str(filepath)
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logging.debug(f"Screenshot attempt {attempt + 1} failed for {url}: {e}, retrying...")
+                    time.sleep(2)  # Wait before retry
+                else:
+                    logging.warning(f"Failed to screenshot {url} after {max_retries} attempts: {e}")
+                    return None
+        
+        return None
     
     def go_to_catalog(self, environment: str):
         """Navigate to the ROL catalog page."""
@@ -827,9 +849,9 @@ class LinkChecker(LabManager):
         """
         self.logger(f"Checking links for course: {course_id}")
         
-        # Setup screenshots directory for this course
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_screenshots_dir = self.screenshots_base_dir / f"{course_id}_{timestamp}"
+        # Setup screenshots directory for this course: run_dir/course_name/version/
+        course_name, version = self._parse_course_id(course_id)
+        self.current_screenshots_dir = self.run_screenshots_dir / course_name / version
         self.current_screenshots_dir.mkdir(parents=True, exist_ok=True)
         
         report = CourseCheckReport(
@@ -896,13 +918,13 @@ class LinkChecker(LabManager):
                     
                     report.results.append(result)
                     
-                    status_str = f"[{result.status_code or 'ERR'}]"
+                    status_code = result.status_code or 'ERR'
                     if result.is_valid:
                         report.valid_links += 1
-                        self.logger(f"      ✓ {status_str} {link_info['text'][:50]}")
+                        print(f"      ✓ [{status_code}] {url}")
                     else:
                         report.broken_links += 1
-                        self.logger(f"      ✗ {status_str} {link_info['text'][:50]} - {result.error_message}")
+                        print(f"      ✗ [{status_code}] {url} - {result.error_message}")
             
         except Exception as e:
             self.logger(f"Error checking course {course_id}: {e}")
@@ -918,7 +940,7 @@ class LinkChecker(LabManager):
         Check links in all courses in the catalog.
         Returns a list of CourseCheckReport objects.
         """
-        self.logger("Starting link check for all courses...")
+        self.logger("Fetching course catalog...")
         
         # Go to catalog and filter by courses
         self.go_to_catalog(environment)
@@ -930,22 +952,79 @@ class LinkChecker(LabManager):
         if limit:
             courses = courses[:limit]
         
-        self.logger(f"Will check {len(courses)} courses")
+        print(f"  Found {len(courses)} courses to check")
         
         reports = []
         for i, course in enumerate(courses):
-            self.logger(f"\n{'='*60}")
-            self.logger(f"[{i+1}/{len(courses)}] Checking course: {course['title']} ({course['id']})")
-            self.logger(f"{'='*60}")
+            self.logger(f"Checking course [{i+1}/{len(courses)}]: {course['id']}")
             
             try:
                 report = self.check_course_links(course['id'], environment, take_screenshots)
                 reports.append(report)
+                print(f"    ✓ {report.valid_links} valid, {report.broken_links} broken links")
             except Exception as e:
-                self.logger(f"Failed to check course {course['id']}: {e}")
+                print(f"    ✗ Failed: {e}")
                 continue
         
         return reports
+    
+    def retry_failed_links(self, take_screenshots: bool = True) -> int:
+        """
+        Retry all links that failed in the first round.
+        Updates the reports in place with new results.
+        Returns the number of links that were fixed (now valid).
+        """
+        total_failed = sum(r.broken_links for r in self.reports)
+        if total_failed == 0:
+            print("No failed links to retry.")
+            return 0
+        
+        self.logger(f"Retrying {total_failed} failed link(s)...")
+        
+        fixed_count = 0
+        
+        for report in self.reports:
+            failed_results = [r for r in report.results if not r.is_valid]
+            
+            if not failed_results:
+                continue
+            
+            print(f"\n  📚 {report.course_id} ({len(failed_results)} failed links)")
+            
+            for result in failed_results:
+                # Re-validate the link
+                new_result = self._validate_link(
+                    url=result.url,
+                    source_page=result.source_page,
+                    source_section=result.source_section,
+                    link_text=result.link_text,
+                    chapter=result.chapter,
+                    section_number=result.section_number,
+                    take_screenshot=take_screenshots
+                )
+                
+                # Update the result in place
+                result.status_code = new_result.status_code
+                result.is_valid = new_result.is_valid
+                result.error_message = new_result.error_message
+                result.response_time_ms = new_result.response_time_ms
+                
+                # Update screenshot if a new one was taken
+                if new_result.screenshot_path:
+                    result.screenshot_path = new_result.screenshot_path
+                
+                status_code = result.status_code or 'ERR'
+                if result.is_valid:
+                    fixed_count += 1
+                    report.broken_links -= 1
+                    report.valid_links += 1
+                    print(f"      ✓ [{status_code}] FIXED: {result.url}")
+                else:
+                    print(f"      ✗ [{status_code}] {result.url} - {result.error_message}")
+        
+        print(f"\n  ✓ Retry complete: {fixed_count}/{total_failed} links fixed")
+        
+        return fixed_count
     
     def generate_report(self, output_format: str = 'text', output_file: str = None) -> str:
         """

@@ -334,41 +334,48 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=True, help='Run browser in headless mode')
-@click.option('--output', '-o', default='pdf', type=click.Choice(['text', 'json', 'detailed', 'pdf']), help='Output format (text=summary, detailed=full hierarchy, json=machine-readable, pdf=PDF with screenshots)')
-@click.option('--output-file', '-f', default=None, help='Save report to file (required for PDF output)')
+@click.option('--output-dir', '-d', default='.', help='Directory to save reports (PDF and JSON)')
 @click.option('--screenshots/--no-screenshots', default=True, help='Take screenshots of each visited external link')
 @click.option('--screenshots-dir', '-s', default=None, help='Directory to save screenshots (default: ./link_checker_screenshots)')
+@click.option('--retry/--no-retry', default=True, help='Retry failed links before generating report')
 @click.pass_context
-def check_links(ctx, course, env, browser, headless, output, output_file, screenshots, screenshots_dir):
+def check_links(ctx, course, env, browser, headless, output_dir, screenshots, screenshots_dir, retry):
     """Check links in course content (References sections).
     
-    Takes screenshots of each visited external link and generates detailed reports
-    showing chapter/section hierarchy with HTTP response codes.
+    Takes screenshots of each visited external link (including errors) and generates
+    both PDF and JSON reports showing chapter/section hierarchy with HTTP response codes.
     
-    The PDF format includes embedded screenshots and hyperlinks to broken link sections.
+    Failed links are retried once before generating the final report.
+    
+    The PDF includes embedded screenshots and hyperlinks to broken link sections.
+    The JSON can be used for alternative validation methods.
     
     Examples:
     
         lx-tool lab check-links --course do280-4.18
         
-        lx-tool lab check-links --output detailed -f report.txt
+        lx-tool lab check-links --output-dir ./reports
         
-        lx-tool lab check-links --output json -f report.json --screenshots-dir ./my_screenshots
+        lx-tool lab check-links --no-retry --no-screenshots
         
-        lx-tool lab check-links --output pdf -f report.pdf
-        
-        lx-tool lab check-links --no-screenshots --headless
+        lx-tool lab check-links --screenshots-dir ./my_screenshots
     """
+    from datetime import datetime as dt
+    import os as os_module
+    
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
     
-    # PDF output requires a filename
-    if output == 'pdf' and not output_file:
-        from datetime import datetime as dt
-        timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
-        course_suffix = f"_{course}" if course else "_all_courses"
-        output_file = f"link_check_report{course_suffix}_{timestamp}.pdf"
-        click.echo(f"PDF output file not specified, using: {output_file}")
+    # Generate output filenames
+    timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
+    course_suffix = f"_{course}" if course else "_all_courses"
+    base_filename = f"link_check_report{course_suffix}_{timestamp}"
+    
+    # Ensure output directory exists
+    os_module.makedirs(output_dir, exist_ok=True)
+    
+    pdf_file = os_module.path.join(output_dir, f"{base_filename}.pdf")
+    json_file = os_module.path.join(output_dir, f"{base_filename}.json")
     
     click.echo(f"╔{'═'*60}╗")
     click.echo(f"║ {'LINK CHECKER':^58} ║")
@@ -381,9 +388,9 @@ def check_links(ctx, course, env, browser, headless, output, output_file, screen
     click.echo(f"Screenshots: {'Enabled' if screenshots else 'Disabled'}")
     if screenshots and screenshots_dir:
         click.echo(f"Screenshots Dir: {screenshots_dir}")
-    click.echo(f"Output Format: {output}")
-    if output_file:
-        click.echo(f"Output File: {output_file}")
+    click.echo(f"Retry Failed Links: {'Yes' if retry else 'No'}")
+    click.echo(f"Output Directory: {output_dir}")
+    click.echo(f"Reports: {base_filename}.pdf, {base_filename}.json")
     click.echo()
     
     checker = None
@@ -399,28 +406,48 @@ def check_links(ctx, course, env, browser, headless, output, output_file, screen
         # Login
         checker.login(environment=environment)
         
+        # First round: Check all links
         if course:
             checker.check_course_links(course, environment, take_screenshots=screenshots)
         else:
             checker.check_all_courses(environment, take_screenshots=screenshots)
         
-        # Generate report
-        if output == 'pdf':
-            # PDF generation returns the file path
-            pdf_path = checker.generate_report(output, output_file)
-            click.echo(f"\n✓ PDF report saved to: {pdf_path}")
-        else:
-            report = checker.generate_report(output)
-            
-            if output_file:
-                with open(output_file, 'w') as f:
-                    f.write(report)
-                click.echo(f"\n✓ Report saved to {output_file}")
-            else:
-                click.echo(report)
+        # Second round: Retry failed links
+        if retry:
+            fixed_count = checker.retry_failed_links(take_screenshots=screenshots)
+            if fixed_count > 0:
+                click.echo(f"\n✓ {fixed_count} link(s) fixed on retry")
+        
+        # Generate both PDF and JSON reports
+        click.echo(f"\n{'='*60}")
+        click.echo("Generating reports...")
+        click.echo(f"{'='*60}")
+        
+        # PDF report
+        try:
+            pdf_path = checker.generate_report('pdf', pdf_file)
+            click.echo(f"✓ PDF report: {pdf_path}")
+        except ImportError as e:
+            click.echo(f"⚠ PDF report skipped (missing dependency: {e})")
+            pdf_path = None
+        
+        # JSON report
+        json_content = checker.generate_report('json')
+        with open(json_file, 'w') as f:
+            f.write(json_content)
+        click.echo(f"✓ JSON report: {json_file}")
         
         # Summary
         total_broken = sum(r.broken_links for r in checker.reports)
+        total_links = sum(r.total_links for r in checker.reports)
+        
+        click.echo(f"\n{'='*60}")
+        click.echo("SUMMARY")
+        click.echo(f"{'='*60}")
+        click.echo(f"Total links checked: {total_links}")
+        click.echo(f"Valid links: {total_links - total_broken}")
+        click.echo(f"Broken links: {total_broken}")
+        
         if total_broken > 0:
             click.echo(f"\n⚠ Found {total_broken} broken link(s)", err=True)
             sys.exit(1)
@@ -429,10 +456,6 @@ def check_links(ctx, course, env, browser, headless, output, output_file, screen
             
     except KeyboardInterrupt:
         click.echo("\n\nInterrupted by user.")
-        sys.exit(1)
-    except ImportError as e:
-        click.echo(f"✗ Missing dependency: {e}", err=True)
-        click.echo("Install with: pip install reportlab Pillow", err=True)
         sys.exit(1)
     except Exception as e:
         click.echo(f"✗ Error checking links: {e}", err=True)
