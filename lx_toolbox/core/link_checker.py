@@ -14,6 +14,8 @@ import re
 import time
 import logging
 import requests
+import subprocess
+import shutil
 from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime
@@ -312,6 +314,194 @@ class LinkChecker(LabManager):
             result.screenshot_path = self._screenshot_external_link(url, link_text, source_page)
         
         return result
+    
+    def _get_container_runtime(self) -> Optional[str]:
+        """Get the container runtime command (podman or docker), or None if not available."""
+        # Check for podman first (preferred on RHEL/Fedora)
+        if shutil.which('podman'):
+            return 'podman'
+        # Fall back to docker
+        if shutil.which('docker'):
+            return 'docker'
+        return None
+    
+    def _validate_link_with_linkchecker(self, url: str, source_page: str, source_section: str,
+                                        link_text: str, chapter: str = "", section_number: str = "") -> LinkCheckResult:
+        """
+        Validate a link using the linkchecker container tool.
+        This is faster and more efficient than using Selenium for retries.
+        
+        Returns a LinkCheckResult with validation information.
+        """
+        result = LinkCheckResult(
+            url=url,
+            source_page=source_page,
+            source_section=source_section,
+            link_text=link_text,
+            chapter=chapter,
+            section_number=section_number
+        )
+        
+        container_runtime = self._get_container_runtime()
+        if not container_runtime:
+            result.is_valid = False
+            result.error_message = "Container runtime (podman/docker) not available"
+            return result
+        
+        try:
+            start_time = time.time()
+            
+            # Get current user ID and group ID for container execution
+            uid = os.getuid()
+            gid = os.getgid()
+            
+            # Run linkchecker container
+            # -r 0: no recursion (only check the URL itself)
+            # --check-extern: check external URLs
+            # -o sql: output in SQL format for easy parsing
+            cmd = [
+                container_runtime, 'run', '--rm',
+                '-u', f'{uid}:{gid}',
+                'ghcr.io/linkchecker/linkchecker:latest',
+                '-r', '0',  # No recursion
+                '--check-extern',  # Check external URLs
+                '-o', 'sql',  # SQL output format
+                url
+            ]
+            
+            process = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,  # 30 second timeout per link
+                check=False  # Don't raise on non-zero exit
+            )
+            
+            result.response_time_ms = (time.time() - start_time) * 1000
+            
+            # Parse SQL output
+            # Example: insert into linksdb(...) values ('https://google.es',NULL,NULL,1,'200 OK','Redirected...',NULL,'https://www.google.com/',...);
+            sql_output = process.stdout
+            
+            # Extract the values part from the SQL INSERT statement
+            # Pattern: values ('url',NULL,NULL,valid,'result','warning',NULL,'final_url',...);
+            values_pattern = r"values\s*\(([^)]+)\)"
+            match = re.search(values_pattern, sql_output, re.IGNORECASE)
+            
+            if match:
+                values_str = match.group(1)
+                # Parse the values - they're comma-separated, but we need to handle quoted strings
+                values = self._parse_sql_values(values_str)
+                
+                # Expected order: urlname, parentname, baseref, valid, result, warning, info, url, ...
+                if len(values) >= 8:
+                    # Extract key fields, handling NULL values
+                    valid = values[3].strip() if len(values) > 3 and values[3].upper() != 'NULL' else "0"
+                    status_result = values[4].strip("'\"") if len(values) > 4 and values[4].upper() != 'NULL' else "Unknown"
+                    warning = values[5].strip("'\"") if len(values) > 5 and values[5].upper() != 'NULL' else ""
+                    final_url = values[7].strip("'\"") if len(values) > 7 and values[7].upper() != 'NULL' else url
+                    
+                    # Parse status code from result (e.g., "200 OK" -> 200, "403 Forbidden" -> 403)
+                    # First try: extract number at the start (most common format)
+                    status_match = re.match(r'(\d{3})\s+', status_result)
+                    if status_match:
+                        result.status_code = int(status_match.group(1))
+                    else:
+                        # Second try: find any 3-digit HTTP status code in the string
+                        status_code_match = re.search(r'\b(\d{3})\b', status_result)
+                        if status_code_match:
+                            code = int(status_code_match.group(1))
+                            # Validate it's a reasonable HTTP status code (100-599)
+                            if 100 <= code <= 599:
+                                result.status_code = code
+                        else:
+                            # Fallback: map common status descriptions to codes
+                            status_lower = status_result.lower()
+                            if 'ok' in status_lower:
+                                result.status_code = 200
+                            elif 'forbidden' in status_lower or '403' in status_result:
+                                result.status_code = 403
+                            elif 'not found' in status_lower or '404' in status_result:
+                                result.status_code = 404
+                            elif 'method not allowed' in status_lower or '405' in status_result:
+                                result.status_code = 405
+                            elif 'timeout' in status_lower or '408' in status_result:
+                                result.status_code = 408
+                            elif 'internal server error' in status_lower or '500' in status_result:
+                                result.status_code = 500
+                            elif 'bad gateway' in status_lower or '502' in status_result:
+                                result.status_code = 502
+                            elif 'service unavailable' in status_lower or '503' in status_result:
+                                result.status_code = 503
+                            elif 'gateway timeout' in status_lower or '504' in status_result:
+                                result.status_code = 504
+                            # If still no match, leave status_code as None
+                    
+                    # Determine validity
+                    result.is_valid = (valid == '1' or valid.lower() == 'true')
+                    
+                    if not result.is_valid:
+                        result.error_message = status_result
+                        if warning:
+                            # Truncate long warnings
+                            result.error_message += f" ({warning[:100]})"
+                    elif warning:
+                        # Store redirect info even for valid links
+                        result.error_message = warning[:150]
+                else:
+                    # Couldn't parse properly, mark as error
+                    result.is_valid = False
+                    result.error_message = "Could not parse linkchecker output"
+            else:
+                # No SQL output found, check stderr for errors
+                if process.stderr:
+                    result.is_valid = False
+                    result.error_message = f"Linkchecker error: {process.stderr[:200]}"
+                else:
+                    result.is_valid = False
+                    result.error_message = "No output from linkchecker"
+                    
+        except subprocess.TimeoutExpired:
+            result.is_valid = False
+            result.error_message = "Linkchecker timeout (30s)"
+        except FileNotFoundError:
+            result.is_valid = False
+            result.error_message = "Container runtime not found"
+        except Exception as e:
+            result.is_valid = False
+            result.error_message = f"Linkchecker error: {str(e)[:200]}"
+        
+        return result
+    
+    def _parse_sql_values(self, values_str: str) -> list[str]:
+        """
+        Parse comma-separated SQL values, respecting quoted strings.
+        Handles: 'value',NULL,123,'string with, comma'
+        """
+        values = []
+        current = ""
+        in_quotes = False
+        quote_char = None
+        
+        for char in values_str:
+            if char in ("'", '"') and (not in_quotes or char == quote_char):
+                if in_quotes and char == quote_char:
+                    in_quotes = False
+                    quote_char = None
+                else:
+                    in_quotes = True
+                    quote_char = char
+                current += char
+            elif char == ',' and not in_quotes:
+                values.append(current.strip())
+                current = ""
+            else:
+                current += char
+        
+        if current.strip():
+            values.append(current.strip())
+        
+        return values
     
     def _screenshot_external_link(self, url: str, link_text: str, source_page: str, max_retries: int = 3) -> Optional[str]:
         """
@@ -968,9 +1158,10 @@ class LinkChecker(LabManager):
         
         return reports
     
-    def retry_failed_links(self, take_screenshots: bool = True) -> int:
+    def retry_failed_links(self, take_screenshots: bool = False) -> int:
         """
-        Retry all links that failed in the first round.
+        Retry all links that failed in the first round using the linkchecker container.
+        This is faster and more efficient than using Selenium for retries.
         Updates the reports in place with new results.
         Returns the number of links that were fixed (now valid).
         """
@@ -979,7 +1170,17 @@ class LinkChecker(LabManager):
             print("No failed links to retry.")
             return 0
         
-        self.logger(f"Retrying {total_failed} failed link(s)...")
+        # Check if linkchecker is available
+        container_runtime = self._get_container_runtime()
+        use_linkchecker = container_runtime is not None
+        if use_linkchecker:
+            print(f"🔗 Using linkchecker container for {total_failed} failed link(s)...")
+        else:
+            print("⚠ Warning: linkchecker container not available (podman/docker not found).")
+            print("  Falling back to Selenium-based validation (slower).")
+            print("  Install podman or docker to use faster linkchecker retries.\n")
+        
+        self.logger(f"Retrying {total_failed} failed link(s) using {'linkchecker' if use_linkchecker else 'Selenium'}...")
         
         fixed_count = 0
         
@@ -992,16 +1193,27 @@ class LinkChecker(LabManager):
             print(f"\n  📚 {report.course_id} ({len(failed_results)} failed links)")
             
             for result in failed_results:
-                # Re-validate the link
-                new_result = self._validate_link(
-                    url=result.url,
-                    source_page=result.source_page,
-                    source_section=result.source_section,
-                    link_text=result.link_text,
-                    chapter=result.chapter,
-                    section_number=result.section_number,
-                    take_screenshot=take_screenshots
-                )
+                # Use linkchecker if available, otherwise fall back to Selenium
+                if use_linkchecker:
+                    new_result = self._validate_link_with_linkchecker(
+                        url=result.url,
+                        source_page=result.source_page,
+                        source_section=result.source_section,
+                        link_text=result.link_text,
+                        chapter=result.chapter,
+                        section_number=result.section_number
+                    )
+                else:
+                    # Fallback to Selenium-based validation
+                    new_result = self._validate_link(
+                        url=result.url,
+                        source_page=result.source_page,
+                        source_section=result.source_section,
+                        link_text=result.link_text,
+                        chapter=result.chapter,
+                        section_number=result.section_number,
+                        take_screenshot=take_screenshots
+                    )
                 
                 # Update the result in place
                 result.status_code = new_result.status_code
@@ -1009,7 +1221,7 @@ class LinkChecker(LabManager):
                 result.error_message = new_result.error_message
                 result.response_time_ms = new_result.response_time_ms
                 
-                # Update screenshot if a new one was taken
+                # Update screenshot if a new one was taken (only if using Selenium fallback)
                 if new_result.screenshot_path:
                     result.screenshot_path = new_result.screenshot_path
                 
