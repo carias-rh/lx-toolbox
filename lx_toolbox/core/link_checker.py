@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 
 from selenium.webdriver.common.by import By
@@ -112,6 +113,7 @@ class LinkChecker(LabManager):
     
     # Request timeout for link validation
     REQUEST_TIMEOUT = 10
+    MAX_LINK_WORKERS = 10  # Max threads for parallel link checking
     
     def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None,
                  screenshots_dir: str = None):
@@ -358,14 +360,14 @@ class LinkChecker(LabManager):
             # Run linkchecker container
             # -r 0: no recursion (only check the URL itself)
             # --check-extern: check external URLs
-            # -o sql: output in SQL format for easy parsing
+            # -o text: use text output format (more reliable than SQL for single URLs)
             cmd = [
                 container_runtime, 'run', '--rm',
                 '-u', f'{uid}:{gid}',
                 'ghcr.io/linkchecker/linkchecker:latest',
                 '-r', '0',  # No recursion
                 '--check-extern',  # Check external URLs
-                '-o', 'sql',  # SQL output format
+                '-o', 'text',  # Text output format (SQL doesn't output clean 200 OK results)
                 url
             ]
             
@@ -373,93 +375,68 @@ class LinkChecker(LabManager):
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=10,  # 30 second timeout per link
+                timeout=30,  # 30 second timeout per link
                 check=False  # Don't raise on non-zero exit
             )
             
             result.response_time_ms = (time.time() - start_time) * 1000
             
-            # Parse SQL output
-            # Example: insert into linksdb(...) values ('https://google.es',NULL,NULL,1,'200 OK','Redirected...',NULL,'https://www.google.com/',...);
-            sql_output = process.stdout
+            # Parse text output
+            # Example output:
+            # URL        `https://example.com'
+            # Real URL   https://example.com
+            # Check time 0.176 seconds
+            # Result     Valid: 200 OK
+            # or
+            # Result     Error: 404 Not Found
+            output = process.stdout + process.stderr
             
-            # Extract the values part from the SQL INSERT statement
-            # Pattern: values ('url',NULL,NULL,valid,'result','warning',NULL,'final_url',...);
-            values_pattern = r"values\s*\(([^)]+)\)"
-            match = re.search(values_pattern, sql_output, re.IGNORECASE)
+            # Extract Result line - this is the key field
+            # Format: "Result     Valid: 200 OK" or "Result     Error: 404 Not Found"
+            result_match = re.search(r'Result\s+(Valid|Error):\s*(.+?)(?:\n|$)', output)
             
-            if match:
-                values_str = match.group(1)
-                # Parse the values - they're comma-separated, but we need to handle quoted strings
-                values = self._parse_sql_values(values_str)
+            if result_match:
+                validity = result_match.group(1)
+                status_text = result_match.group(2).strip()
                 
-                # Expected order: urlname, parentname, baseref, valid, result, warning, info, url, ...
-                if len(values) >= 8:
-                    # Extract key fields, handling NULL values
-                    valid = values[3].strip() if len(values) > 3 and values[3].upper() != 'NULL' else "0"
-                    status_result = values[4].strip("'\"") if len(values) > 4 and values[4].upper() != 'NULL' else "Unknown"
-                    warning = values[5].strip("'\"") if len(values) > 5 and values[5].upper() != 'NULL' else ""
-                    final_url = values[7].strip("'\"") if len(values) > 7 and values[7].upper() != 'NULL' else url
+                result.is_valid = (validity == 'Valid')
+                
+                # Extract status code from status text (e.g., "200 OK" -> 200)
+                status_code_match = re.match(r'(\d{3})\s*', status_text)
+                if status_code_match:
+                    result.status_code = int(status_code_match.group(1))
+                else:
+                    # Try to find any 3-digit code in the status text
+                    code_match = re.search(r'\b(\d{3})\b', status_text)
+                    if code_match:
+                        result.status_code = int(code_match.group(1))
+                
+                if not result.is_valid:
+                    result.error_message = status_text
                     
-                    # Parse status code from result (e.g., "200 OK" -> 200, "403 Forbidden" -> 403)
-                    # First try: extract number at the start (most common format)
-                    status_match = re.match(r'(\d{3})\s+', status_result)
-                    if status_match:
-                        result.status_code = int(status_match.group(1))
+                # Check for warnings (e.g., redirects)
+                warning_match = re.search(r'Warning\s+(.+?)(?:\n\n|\Z)', output, re.DOTALL)
+                if warning_match:
+                    warning_text = warning_match.group(1).strip()
+                    if result.is_valid:
+                        result.error_message = warning_text[:150]
                     else:
-                        # Second try: find any 3-digit HTTP status code in the string
-                        status_code_match = re.search(r'\b(\d{3})\b', status_result)
-                        if status_code_match:
-                            code = int(status_code_match.group(1))
-                            # Validate it's a reasonable HTTP status code (100-599)
-                            if 100 <= code <= 599:
-                                result.status_code = code
-                        else:
-                            # Fallback: map common status descriptions to codes
-                            status_lower = status_result.lower()
-                            if 'ok' in status_lower:
-                                result.status_code = 200
-                            elif 'forbidden' in status_lower or '403' in status_result:
-                                result.status_code = 403
-                            elif 'not found' in status_lower or '404' in status_result:
-                                result.status_code = 404
-                            elif 'method not allowed' in status_lower or '405' in status_result:
-                                result.status_code = 405
-                            elif 'timeout' in status_lower or '408' in status_result:
-                                result.status_code = 408
-                            elif 'internal server error' in status_lower or '500' in status_result:
-                                result.status_code = 500
-                            elif 'bad gateway' in status_lower or '502' in status_result:
-                                result.status_code = 502
-                            elif 'service unavailable' in status_lower or '503' in status_result:
-                                result.status_code = 503
-                            elif 'gateway timeout' in status_lower or '504' in status_result:
-                                result.status_code = 504
-                            # If still no match, leave status_code as None
-                    
-                    # Determine validity
-                    result.is_valid = (valid == '1' or valid.lower() == 'true')
-                    
-                    if not result.is_valid:
-                        result.error_message = status_result
-                        if warning:
-                            # Truncate long warnings
-                            result.error_message += f" ({warning[:100]})"
-                    elif warning:
-                        # Store redirect info even for valid links
-                        result.error_message = warning[:150]
-                else:
-                    # Couldn't parse properly, mark as error
-                    result.is_valid = False
-                    result.error_message = "Could not parse linkchecker output"
+                        result.error_message = f"{status_text} ({warning_text[:100]})"
             else:
-                # No SQL output found, check stderr for errors
-                if process.stderr:
+                # Check for common error patterns
+                if '0 errors found' in output and '1 link' in output:
+                    # Success case - linkchecker found no errors
+                    result.is_valid = True
+                    result.status_code = 200
+                elif 'errors found' in output:
+                    # Error case
                     result.is_valid = False
-                    result.error_message = f"Linkchecker error: {process.stderr[:200]}"
+                    error_count = re.search(r'(\d+)\s+errors?\s+found', output)
+                    result.error_message = f"Linkchecker found {error_count.group(1) if error_count else 'unknown'} error(s)"
                 else:
+                    # Couldn't parse output
                     result.is_valid = False
-                    result.error_message = "No output from linkchecker"
+                    result.error_message = f"Could not parse linkchecker output: {output[:200]}"
                     
         except subprocess.TimeoutExpired:
             result.is_valid = False
@@ -1102,72 +1079,11 @@ class LinkChecker(LabManager):
         
         return versions
     
-    def switch_course_version(self, target_version: str) -> bool:
-        """
-        Switch to a different version of the current course.
-        Must be on a course page already.
-        Returns True if successful, False otherwise.
-        """
-        try:
-            # Wait for page to be stable
-            time.sleep(1)
-            
-            # Wait for any loading overlay to disappear
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    EC.invisibility_of_element_located((By.CSS_SELECTOR, ".pf-v5-c-backdrop"))
-                )
-            except:
-                pass
-            
-            # Click the settings button
-            settings_btn = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.ID, "HUD__dock-item__btn--settings"))
-            )
-            self.driver.execute_script("arguments[0].click();", settings_btn)
-            time.sleep(1)
-            
-            # Click the version dropdown
-            version_dropdown = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((
-                    By.XPATH,
-                    "//div[contains(@class, 'settings-panel-version-selector')]//button[contains(@class, 'menu-toggle')]"
-                ))
-            )
-            self.driver.execute_script("arguments[0].click();", version_dropdown)
-            time.sleep(0.5)
-            
-            # Find and click the target version
-            version_option = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((
-                    By.XPATH,
-                    f"//div[contains(@class, 'settings-panel-version-selector')]//ul[@role='menu']//button[@role='menuitem'][.//span[contains(@class, 'menu__item-text') and text()='{target_version}']]"
-                ))
-            )
-            self.driver.execute_script("arguments[0].click();", version_option)
-            
-            # Wait for page to reload with new version
-            time.sleep(3)
-            
-            # Wait for loading to finish
-            try:
-                WebDriverWait(self.driver, 15).until(
-                    EC.invisibility_of_element_located((By.CSS_SELECTOR, ".pf-v5-c-backdrop"))
-                )
-            except:
-                pass
-            
-            print(f"      ✓ Switched to version {target_version}")
-            return True
-            
-        except Exception as e:
-            print(f"      ✗ Failed to switch to version {target_version}: {e}")
-            return False
-    
     def check_all_course_versions(self, course_id: str, environment: str,
                                    take_screenshots: bool = True) -> list[CourseCheckReport]:
         """
         Check links in all available versions of a course.
+        Navigates directly to each version URL (e.g., /courses/do280-4.18/).
         Returns a list of CourseCheckReports, one per version.
         """
         # Parse the course ID to get the base course name
@@ -1189,22 +1105,9 @@ class LinkChecker(LabManager):
             version_course_id = f"{course_name}-{version}"
             print(f"\n  🔄 Checking version {idx + 1}/{len(versions)}: {version_course_id}")
             
-            # For the first version, just navigate directly
-            # For subsequent versions, switch using the settings panel
-            if idx == 0:
-                report = self.check_course_links(version_course_id, environment, take_screenshots)
-            else:
-                # Switch to this version
-                if self.switch_course_version(version):
-                    # Update screenshots directory for this version
-                    self.current_screenshots_dir = self.run_screenshots_dir / course_name / version
-                    self.current_screenshots_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    # Check this version
-                    report = self.check_course_links(version_course_id, environment, take_screenshots)
-                else:
-                    print(f"      ⚠ Skipping version {version} due to switch failure")
-                    continue
+            # Navigate directly to this version - check_course_links handles navigation
+            # URL structure: https://rol.redhat.com/rol/app/courses/{course_id}/pages/...
+            report = self.check_course_links(version_course_id, environment, take_screenshots)
             
             reports.append(report)
             self.reports.append(report)
@@ -1223,6 +1126,15 @@ class LinkChecker(LabManager):
         course_name, version = self._parse_course_id(course_id)
         self.current_screenshots_dir = self.run_screenshots_dir / course_name / version
         self.current_screenshots_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Determine validation method: use linkchecker container when screenshots disabled (faster)
+        use_linkchecker = not take_screenshots and self._get_container_runtime() is not None
+        if use_linkchecker:
+            self.logger("  Using linkchecker container for fast validation (no screenshots)")
+        elif take_screenshots:
+            self.logger("  Using Selenium for validation with screenshots")
+        else:
+            self.logger("  Using HTTP requests for validation (container not available)")
         
         report = CourseCheckReport(
             course_id=course_id,
@@ -1266,35 +1178,89 @@ class LinkChecker(LabManager):
                 )
                 report.sections.append(section_info)
                 
+                # Filter out ignored URLs and prepare links for checking
+                links_to_check = []
                 for link_info in links:
                     url = link_info['url']
-                    
                     if self._should_ignore_url(url):
                         report.ignored_links += 1
-                        continue
-                    
-                    report.total_links += 1
-                    
-                    # Validate the link and optionally screenshot the external page
-                    result = self._validate_link(
-                        url=url,
-                        source_page=section_title,
-                        source_section=link_info['section'],
-                        link_text=link_info['text'],
-                        chapter=chapter,
-                        section_number=section_number,
-                        take_screenshot=take_screenshots
-                    )
-                    
-                    report.results.append(result)
-                    
-                    status_code = result.status_code or 'ERR'
-                    if result.is_valid:
-                        report.valid_links += 1
-                        print(f"      ✓ [{status_code}] {url}")
                     else:
-                        report.broken_links += 1
-                        print(f"      ✗ [{status_code}] {url} - {result.error_message}")
+                        links_to_check.append({
+                            'url': url,
+                            'source_page': section_title,
+                            'source_section': link_info['section'],
+                            'link_text': link_info['text'],
+                            'chapter': chapter,
+                            'section_number': section_number
+                        })
+                
+                report.total_links += len(links_to_check)
+                
+                # Use parallel checking with linkchecker, sequential with Selenium
+                if use_linkchecker and links_to_check:
+                    # Parallel link checking with ThreadPoolExecutor
+                    with ThreadPoolExecutor(max_workers=self.MAX_LINK_WORKERS) as executor:
+                        # Submit all link checks
+                        future_to_link = {
+                            executor.submit(
+                                self._validate_link_with_linkchecker,
+                                link['url'],
+                                link['source_page'],
+                                link['source_section'],
+                                link['link_text'],
+                                link['chapter'],
+                                link['section_number']
+                            ): link for link in links_to_check
+                        }
+                        
+                        # Process results as they complete
+                        for future in as_completed(future_to_link):
+                            link = future_to_link[future]
+                            try:
+                                result = future.result()
+                            except Exception as e:
+                                result = LinkCheckResult(
+                                    url=link['url'],
+                                    source_page=link['source_page'],
+                                    source_section=link['source_section'],
+                                    link_text=link['link_text'],
+                                    chapter=link['chapter'],
+                                    section_number=link['section_number'],
+                                    is_valid=False,
+                                    error_message=f"Thread error: {str(e)[:100]}"
+                                )
+                            
+                            report.results.append(result)
+                            
+                            status_code = result.status_code or 'ERR'
+                            if result.is_valid:
+                                report.valid_links += 1
+                                print(f"      ✓ [{status_code}] {link['url']}")
+                            else:
+                                report.broken_links += 1
+                                print(f"      ✗ [{status_code}] {link['url']} - {result.error_message}")
+                else:
+                    # Sequential checking (with Selenium for screenshots)
+                    for link in links_to_check:
+                        result = self._validate_link(
+                            url=link['url'],
+                            source_page=link['source_page'],
+                            source_section=link['source_section'],
+                            link_text=link['link_text'],
+                            chapter=link['chapter'],
+                            section_number=link['section_number'],
+                            take_screenshot=take_screenshots
+                        )
+                        
+                        report.results.append(result)
+                        
+                        status_code = result.status_code or 'ERR'
+                        if result.is_valid:
+                            report.valid_links += 1
+                            print(f"      ✓ [{status_code}] {link['url']}")
+                        else:
+                            report.broken_links += 1
+                            print(f"      ✗ [{status_code}] {link['url']} - {result.error_message}")
             
         except Exception as e:
             self.logger(f"Error checking course {course_id}: {e}")
@@ -1867,13 +1833,18 @@ class LinkChecker(LabManager):
                         broken_count += 1
                         anchor_name = f"broken_{broken_count}"
                         
-                        # Create hyperlink to the detailed section
+                        # Create hyperlink to the detailed section in the PDF
                         link_para = Paragraph(
-                            f'<a href="#{anchor_name}" color="blue"><u>{result.link_text}</u></a>',
+                            f'<a href="#{anchor_name}" color="blue"><u>{result.link_text}</u></a> '
+                            f'<font size="8">(jump to details)</font>',
                             normal_style
                         )
                         story.append(link_para)
-                        story.append(Paragraph(f"URL: {result.url}", url_style))
+                        # Make the URL clickable to test it directly in a browser
+                        story.append(Paragraph(
+                            f'URL: <a href="{result.url}" color="#0066cc"><u>{result.url}</u></a>',
+                            url_style
+                        ))
                         story.append(Paragraph(
                             f"Location: {result.chapter} → {result.source_page}",
                             normal_style
