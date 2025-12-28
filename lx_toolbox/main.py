@@ -338,8 +338,9 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
 @click.option('--screenshots/--no-screenshots', default=True, help='Take screenshots of each visited external link')
 @click.option('--screenshots-dir', '-s', default=None, help='Directory to save screenshots (default: ./link_checker_screenshots)')
 @click.option('--retry/--no-retry', default=True, help='Retry failed links before generating report')
+@click.option('--all-versions/--single-version', default=False, help='Check all available versions of the course')
 @click.pass_context
-def check_links(ctx, course, env, browser, headless, output_dir, screenshots, screenshots_dir, retry):
+def check_links(ctx, course, env, browser, headless, output_dir, screenshots, screenshots_dir, retry, all_versions):
     """Check links in course content (References sections).
     
     Takes screenshots of each visited external link (including errors) and generates
@@ -353,6 +354,8 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
     Examples:
     
         lx-tool lab check-links --course do280-4.18
+        
+        lx-tool lab check-links --course rh124-9.3 --all-versions
         
         lx-tool lab check-links --output-dir ./reports
         
@@ -383,6 +386,10 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
     click.echo(f"Environment: {environment}")
     if course:
         click.echo(f"Target: Course {course}")
+        if all_versions:
+            click.echo("Mode: Check ALL available versions")
+        else:
+            click.echo("Mode: Single version only")
     else:
         click.echo("Target: All courses in catalog")
     click.echo(f"Screenshots: {'Enabled' if screenshots else 'Disabled'}")
@@ -408,7 +415,12 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
         
         # First round: Check all links
         if course:
-            checker.check_course_links(course, environment, take_screenshots=screenshots)
+            if all_versions:
+                # Check all available versions of this course
+                checker.check_all_course_versions(course, environment, take_screenshots=screenshots)
+            else:
+                # Check only the specified version
+                checker.check_course_links(course, environment, take_screenshots=screenshots)
         else:
             checker.check_all_courses(environment, take_screenshots=screenshots)
         

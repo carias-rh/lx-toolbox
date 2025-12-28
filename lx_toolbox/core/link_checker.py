@@ -373,7 +373,7 @@ class LinkChecker(LabManager):
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=30,  # 30 second timeout per link
+                timeout=10,  # 30 second timeout per link
                 check=False  # Don't raise on non-zero exit
             )
             
@@ -1030,6 +1030,186 @@ class LinkChecker(LabManager):
             self.logger(f"Error extracting links from {page_url}: {e}")
         
         return links
+    
+    def get_available_versions(self, course_id: str, environment: str) -> list[str]:
+        """
+        Get all available versions for a course by checking the settings panel.
+        Returns a list of version strings (e.g., ['10.0', '9.3', '8.2']).
+        """
+        versions = []
+        
+        try:
+            # Navigate to the course first
+            course_url = self.config.get_lab_base_url(environment) + course_id
+            self.logger(f"Getting available versions for {course_id}...")
+            self.driver.get(course_url)
+            time.sleep(3)  # Wait for page to load
+            
+            # Wait for any loading overlay to disappear
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, ".pf-v5-c-backdrop"))
+                )
+            except:
+                pass
+            
+            # Click the settings button
+            settings_btn = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "HUD__dock-item__btn--settings"))
+            )
+            self.driver.execute_script("arguments[0].click();", settings_btn)
+            time.sleep(1)
+            
+            # Click the version dropdown
+            version_dropdown = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((
+                    By.XPATH, 
+                    "//div[contains(@class, 'settings-panel-version-selector')]//button[contains(@class, 'menu-toggle')]"
+                ))
+            )
+            self.driver.execute_script("arguments[0].click();", version_dropdown)
+            time.sleep(0.5)
+            
+            # Get all version options
+            version_items = self.driver.find_elements(
+                By.XPATH,
+                "//div[contains(@class, 'settings-panel-version-selector')]//ul[@role='menu']//button[@role='menuitem']"
+            )
+            
+            for item in version_items:
+                try:
+                    version_text = item.find_element(
+                        By.XPATH, ".//span[contains(@class, 'menu__item-text')]"
+                    ).text.strip()
+                    if version_text:
+                        versions.append(version_text)
+                except:
+                    pass
+            
+            # Close the dropdown by clicking elsewhere
+            self.driver.find_element(By.TAG_NAME, "body").click()
+            time.sleep(0.3)
+            
+            # Close settings panel
+            try:
+                settings_btn = self.driver.find_element(By.ID, "HUD__dock-item__btn--settings")
+                self.driver.execute_script("arguments[0].click();", settings_btn)
+            except:
+                pass
+                
+        except Exception as e:
+            self.logger(f"Error getting versions for {course_id}: {e}")
+        
+        return versions
+    
+    def switch_course_version(self, target_version: str) -> bool:
+        """
+        Switch to a different version of the current course.
+        Must be on a course page already.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            # Wait for page to be stable
+            time.sleep(1)
+            
+            # Wait for any loading overlay to disappear
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, ".pf-v5-c-backdrop"))
+                )
+            except:
+                pass
+            
+            # Click the settings button
+            settings_btn = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "HUD__dock-item__btn--settings"))
+            )
+            self.driver.execute_script("arguments[0].click();", settings_btn)
+            time.sleep(1)
+            
+            # Click the version dropdown
+            version_dropdown = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((
+                    By.XPATH,
+                    "//div[contains(@class, 'settings-panel-version-selector')]//button[contains(@class, 'menu-toggle')]"
+                ))
+            )
+            self.driver.execute_script("arguments[0].click();", version_dropdown)
+            time.sleep(0.5)
+            
+            # Find and click the target version
+            version_option = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((
+                    By.XPATH,
+                    f"//div[contains(@class, 'settings-panel-version-selector')]//ul[@role='menu']//button[@role='menuitem'][.//span[contains(@class, 'menu__item-text') and text()='{target_version}']]"
+                ))
+            )
+            self.driver.execute_script("arguments[0].click();", version_option)
+            
+            # Wait for page to reload with new version
+            time.sleep(3)
+            
+            # Wait for loading to finish
+            try:
+                WebDriverWait(self.driver, 15).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, ".pf-v5-c-backdrop"))
+                )
+            except:
+                pass
+            
+            print(f"      ✓ Switched to version {target_version}")
+            return True
+            
+        except Exception as e:
+            print(f"      ✗ Failed to switch to version {target_version}: {e}")
+            return False
+    
+    def check_all_course_versions(self, course_id: str, environment: str,
+                                   take_screenshots: bool = True) -> list[CourseCheckReport]:
+        """
+        Check links in all available versions of a course.
+        Returns a list of CourseCheckReports, one per version.
+        """
+        # Parse the course ID to get the base course name
+        course_name, current_version = self._parse_course_id(course_id)
+        
+        # Get all available versions
+        versions = self.get_available_versions(course_id, environment)
+        
+        if not versions:
+            print(f"  ⚠ No versions found for {course_name}, checking {course_id} only")
+            report = self.check_course_links(course_id, environment, take_screenshots)
+            return [report]
+        
+        print(f"  📚 Found {len(versions)} version(s) for {course_name}: {', '.join(versions)}")
+        
+        reports = []
+        
+        for idx, version in enumerate(versions):
+            version_course_id = f"{course_name}-{version}"
+            print(f"\n  🔄 Checking version {idx + 1}/{len(versions)}: {version_course_id}")
+            
+            # For the first version, just navigate directly
+            # For subsequent versions, switch using the settings panel
+            if idx == 0:
+                report = self.check_course_links(version_course_id, environment, take_screenshots)
+            else:
+                # Switch to this version
+                if self.switch_course_version(version):
+                    # Update screenshots directory for this version
+                    self.current_screenshots_dir = self.run_screenshots_dir / course_name / version
+                    self.current_screenshots_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Check this version
+                    report = self.check_course_links(version_course_id, environment, take_screenshots)
+                else:
+                    print(f"      ⚠ Skipping version {version} due to switch failure")
+                    continue
+            
+            reports.append(report)
+            self.reports.append(report)
+        
+        return reports
     
     def check_course_links(self, course_id: str, environment: str, 
                            take_screenshots: bool = True) -> CourseCheckReport:
