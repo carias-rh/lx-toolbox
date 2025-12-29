@@ -332,15 +332,16 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
 @lab.command('check-links')
 @click.option('--course', '-c', default=None, help='Specific course ID to check (e.g., rh124-9.3). Checks all if omitted.')
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
-@click.option('--browser', '-b', default='chrome', help='Browser to use (firefox, chrome)')
+@click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless/headfull mode')
 @click.option('--output-dir', '-d', default='.', help='Directory to save reports (PDF and JSON)')
 @click.option('--screenshots/--no-screenshots', default=True, help='Take screenshots of each visited external link')
 @click.option('--screenshots-dir', '-s', default=None, help='Directory to save screenshots (default: ./link_checker_screenshots)')
 @click.option('--retry/--no-retry', default=True, help='Retry failed links before generating report')
 @click.option('--all-versions/--single-version', default=False, help='Check all available versions of the course')
+@click.option('--create-jira/--no-jira', default=False, help='Create Jira tickets for broken links (prefilled, requires manual review)')
 @click.pass_context
-def check_links(ctx, course, env, browser, headless, output_dir, screenshots, screenshots_dir, retry, all_versions):
+def check_links(ctx, course, env, browser, headless, output_dir, screenshots, screenshots_dir, retry, all_versions, create_jira):
     """Check links in course content (References sections).
     
     Takes screenshots of each visited external link (including errors) and generates
@@ -362,6 +363,8 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
         lx-tool lab check-links --no-retry --no-screenshots
         
         lx-tool lab check-links --screenshots-dir ./my_screenshots
+        
+        lx-tool lab check-links --course do280-4.18 --create-jira
     """
     from datetime import datetime as dt
     import os as os_module
@@ -396,6 +399,7 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
     if screenshots and screenshots_dir:
         click.echo(f"Screenshots Dir: {screenshots_dir}")
     click.echo(f"Retry Failed Links: {'Yes' if retry else 'No'}")
+    click.echo(f"Create Jira for broken links: {'Yes' if create_jira else 'No'}")
     click.echo(f"Output Directory: {output_dir}")
     click.echo(f"Reports: {base_filename}.pdf, {base_filename}.json")
     click.echo()
@@ -460,9 +464,24 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
         click.echo(f"Valid links: {total_links - total_broken}")
         click.echo(f"Broken links: {total_broken}")
         
+        # Create Jira tickets if requested and there are broken links
+        if create_jira and total_broken > 0:
+            click.echo(f"\n{'='*60}")
+            click.echo("CREATING JIRA TICKETS")
+            click.echo(f"{'='*60}")
+            jira_count = checker.create_jiras_for_all_broken_links(
+                pdf_file=pdf_path if pdf_path else None,
+                json_file=json_file
+            )
+            if jira_count > 0:
+                click.echo(f"\n✓ Created {jira_count} Jira ticket draft(s)")
+                click.echo("  Please review each tab and submit manually")
+        
         if total_broken > 0:
             click.echo(f"\n⚠ Found {total_broken} broken link(s)", err=True)
-            sys.exit(1)
+            # Don't exit immediately if Jira tabs are open - user needs to review
+            if not create_jira:
+                sys.exit(1)
         else:
             click.echo("\n✓ All links valid")
             
@@ -474,7 +493,8 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
         sys.exit(1)
     finally:
         try:
-            checker.close_browser()
+            if not create_jira:
+                checker.close_browser()
         except Exception:
             pass
 

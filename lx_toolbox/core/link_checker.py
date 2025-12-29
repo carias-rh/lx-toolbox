@@ -1384,6 +1384,348 @@ class LinkChecker(LabManager):
         
         return fixed_count
     
+    def login_jira(self) -> bool:
+        """
+        Attempt to login to Jira using RH SSO.
+        Now with more debug info.
+        
+        Returns True if login was successful or already logged in.
+        """
+        self.logger("Logging into Jira")
+        try:
+            self.driver.get("https://issues.redhat.com/secure/Dashboard.jspa")
+            time.sleep(5)
+            
+            username_field = None
+
+            # Try to locate the username field
+            try:
+                username_field = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, '//*[@id="username"]'))
+                )
+            except Exception as e:
+                self.logger(f"Username field not found on first attempt: {e}")
+
+            # Check if we need to login (look for login link in navbar)
+            try:
+                if not username_field:
+                    login_link = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a'))
+                    )
+                    login_link.click()
+                    time.sleep(2)
+
+                
+                # If redirected to SSO, enter credentials
+                try:
+
+                    # Get credentials from config
+                    username = self.config.get("Credentials", "RH_USERNAME")
+                    pin = self.config.get("Credentials", "RH_PIN")
+                    otp_command = self.config.get("Credentials", "ROL_OTP_COMMAND")
+                    WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, '//*[@id="username-verification"]'))).send_keys(username + "@redhat.com")
+                    WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
+
+
+                    if not username or not pin:
+                        self.logger("Missing RH_USERNAME/RH_PIN for Jira login - manual login required")
+                        time.sleep(30)
+                        return True
+
+                    # Get OTP if command is configured
+                    otp_value = ""
+                    if otp_command:
+                        try:
+                            otp_value = os.popen(otp_command).read().strip()
+                        except Exception as e:
+                            self.logger(f"Could not execute OTP command: {e}")
+
+                    WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
+                    full_password = f"{str(pin)}{otp_value}"
+                    WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))
+                    ).send_keys(full_password)
+
+                    WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))
+                    ).click()
+                    time.sleep(10)
+
+                except Exception as e1:
+                    self.logger(f"No SSO page, or already logged in? Exception: {e1}")
+                    pass
+
+            except Exception as e2:
+                # No login link found - already logged in
+                self.logger(f"Already logged into Jira or could not find navbar login link. Exception: {e2}")
+
+            self.logger("Jira login process concluded (end of function).")
+            return True
+
+        except Exception as e:
+            self.logger(f"Jira login flow encountered an exception: {e}")
+            import traceback
+            self.logger(traceback.format_exc())
+            return False
+    
+    def _build_broken_links_jql(self, course_id: str, broken_urls: list[str]) -> str:
+        """
+        Build a JQL query to search for existing tickets with the same broken URLs.
+        This helps avoid creating duplicate tickets.
+        """
+        from urllib.parse import quote
+        
+        # Parse course name (component) from course_id
+        course_name, version = self._parse_course_id(course_id)
+        course_name_upper = course_name.upper()
+        
+        # Handle RH199 special case (like in snow_ai_processor.py)
+        if course_name_upper == "RH199":
+            component_clause = 'component in (RH134, RH199, RH124)'
+        else:
+            component_clause = f'component = "{course_name_upper}"'
+        
+        # Build URL search clause - search for any of the broken URLs in description
+        # Limit to first 5 URLs to avoid JQL length limits
+        url_searches = []
+        for url in broken_urls[:5]:
+            # Extract domain and path for searching (avoid special chars issues)
+            url_clean = url.replace('https://', '').replace('http://', '').split('#')[0]
+            if len(url_clean) > 50:
+                url_clean = url_clean[:50]
+            url_searches.append(f'text ~ "{url_clean}"')
+        
+        url_clause = f"({' OR '.join(url_searches)})" if url_searches else ""
+        
+        # Build full JQL
+        jql = f'project = PTL AND resolution = Unresolved AND {component_clause}'
+        if url_clause:
+            jql += f' AND {url_clause}'
+        jql += ' ORDER BY created DESC'
+        
+        return jql
+    
+    def _build_broken_links_search_url(self, course_id: str, broken_urls: list[str]) -> str:
+        """Build Jira search URL to check for existing broken link tickets."""
+        from urllib.parse import quote
+        jql = self._build_broken_links_jql(course_id, broken_urls)
+        return f"https://issues.redhat.com/issues/?jql={quote(jql)}"
+    
+    def create_jira_for_broken_links(self, report: 'CourseCheckReport', 
+                                      pdf_file: str = None, json_file: str = None) -> bool:
+        """
+        Create a Jira ticket for broken links found in a course.
+        Opens a new tab with the prefilled ticket for human review.
+        
+        Args:
+            report: CourseCheckReport with broken links
+            pdf_file: Path to PDF report to attach
+            json_file: Path to JSON report to attach
+            
+        Returns:
+            True if Jira creation was initiated, False otherwise
+        """
+        from urllib.parse import quote
+        from selenium.webdriver.common.keys import Keys
+        
+        # Get broken links from report
+        broken_results = [r for r in report.results if not r.is_valid]
+        
+        if not broken_results:
+            self.logger("No broken links to report for this course")
+            return False
+        
+        broken_urls = [r.url for r in broken_results]
+        course_name, version = self._parse_course_id(report.course_id)
+        
+        self.logger(f"Creating Jira ticket for {len(broken_results)} broken links in {report.course_id}")
+        
+        # First, open search to check for existing tickets
+        search_url = self._build_broken_links_search_url(report.course_id, broken_urls)
+        
+        # Open in new window to not interfere with ongoing course link checking
+        self.driver.switch_to.new_window('window')
+        
+        # Navigate to Jira project
+        self.driver.get("https://issues.redhat.com/projects/PTL/issues")
+        time.sleep(5)
+        
+        try:
+            # Click Create button
+            WebDriverWait(self.driver, 20).until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="create_link"]'))
+            ).click()
+            time.sleep(2)
+            
+            # Select Text mode for description
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[2]/button'))
+                ).click()
+            except:
+                pass
+            
+            # Fill Summary
+            summary = f"{course_name.upper()}-{version}: Broken Links Report - {len(broken_results)} broken link(s)"
+            WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))
+            ).send_keys(summary)
+            
+            # Build description with broken links
+            description_lines = [
+                f"*Broken Links Report for {course_name.upper()} v{version}*",
+                f"",
+                f"||Chapter||Section||Link Text||URL||Status Code||Error||",
+            ]
+            
+            for result in broken_results:
+                status = result.status_code or 'ERR'
+                error = (result.error_message or 'Unknown')[:50]
+                link_text = (result.link_text or 'N/A')[:30]
+                description_lines.append(
+                    f"|{result.chapter}|{result.section_number}|{link_text}|[{result.url}]|{status}|{error}|"
+                )
+            
+            description_lines.extend([
+                "",
+                "*Search for existing tickets:*",
+                f"[Search JQL|{search_url}]",
+                "",
+                f"_Report generated: {report.check_completed.strftime('%Y-%m-%d %H:%M:%S') if report.check_completed else 'N/A'}_",
+            ])
+            
+            if pdf_file:
+                description_lines.append(f"_PDF Report: {Path(pdf_file).name}_")
+            if json_file:
+                description_lines.append(f"_JSON Report: {Path(json_file).name}_")
+            
+            description = "\n".join(description_lines)
+            
+            # Fill description
+            desc_field = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="description"]'))
+            )
+            desc_field.clear()
+            desc_field.send_keys(description)
+            
+            # Switch back to Visual mode
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[1]/button'))
+                ).click()
+            except:
+                pass
+            
+            # Set Component (course)
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]'))
+                ).send_keys(course_name.upper())
+            except Exception as e:
+                logging.debug(f"Failed to set component: {e}")
+            
+            
+            # Attach files (PDF and JSON reports)
+            files_to_attach = []
+            if pdf_file and os.path.exists(pdf_file):
+                files_to_attach.append(os.path.abspath(pdf_file))
+            if json_file and os.path.exists(json_file):
+                files_to_attach.append(os.path.abspath(json_file))
+            
+            attached_files = []
+            for file_path in files_to_attach:
+                try:
+                    # Find the file input element and send the file path
+                    # Jira typically has a hidden file input that we can send keys to
+                    try:
+                        file_input = self.driver.find_element(By.CSS_SELECTOR, 'input[type="file"]')
+                        file_input.send_keys(file_path)
+                        attached_files.append(os.path.basename(file_path))
+                        time.sleep(2)  # Wait for upload to complete
+                    except Exception as e:
+                        logging.debug(f"Could not find file input for {file_path}: {e}")
+                        
+                except Exception as e:
+                    logging.debug(f"Failed to attach file {file_path}: {e}")        
+
+            # Set Version
+            try:
+                version_field = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[@id="versions-textarea"]'))
+                )
+                version_field.send_keys(Keys.HOME)
+                version_field.send_keys(course_name.upper())
+            except Exception as e:
+                logging.debug(f"Failed to set version: {e}")
+
+            # Set Priority to Minor
+            try:
+                # Click Priority tab
+                WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//ul[@role="tablist"]//strong[text()="Priority"]'))
+                ).click()
+                time.sleep(0.5)
+                
+                priority_field = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]'))
+                )
+                priority_field.send_keys(Keys.CONTROL + "a")
+                priority_field.send_keys(Keys.DELETE)
+                priority_field.send_keys("Minor")
+                priority_field.send_keys(Keys.TAB)
+            except Exception as e:
+                logging.debug(f"Failed to set priority: {e}")
+
+            
+            print(f"\n  📝 Jira ticket prefilled in new tab")
+            print(f"     Summary: {summary}")
+            print(f"     Broken links: {len(broken_results)}")
+            if attached_files:
+                print(f"     📎 Attached: {', '.join(attached_files)}")
+            else:
+                if pdf_file:
+                    print(f"     📎 Please attach manually: {pdf_file}")
+                if json_file:
+                    print(f"     📎 Please attach manually: {json_file}")
+            print(f"     ⚠️  Review and submit manually")
+            
+            return True
+            
+        except Exception as e:
+            self.logger(f"Failed to create Jira ticket: {e}")
+            return False
+    
+    def create_jiras_for_all_broken_links(self, pdf_file: str = None, json_file: str = None) -> int:
+        """
+        Create Jira tickets for all courses with broken links.
+        Opens one tab per course that has broken links.
+        
+        Returns the number of Jira tickets initiated.
+        """
+        # Login to Jira first
+        if not self.login_jira():
+            self.logger("Failed to login to Jira - skipping ticket creation")
+            return 0
+        
+        jira_count = 0
+        
+        for report in self.reports:
+            broken_count = sum(1 for r in report.results if not r.is_valid)
+            if broken_count > 0:
+                if self.create_jira_for_broken_links(report, pdf_file, json_file):
+                    jira_count += 1
+                time.sleep(2)  # Brief pause between tabs
+        
+        if jira_count > 0:
+            print(f"\n{'='*60}")
+            print(f"Created {jira_count} Jira ticket draft(s) in new tabs")
+            print(f"Please review each tab and submit manually")
+            print(f"{'='*60}")
+        
+        return jira_count
+    
     def generate_report(self, output_format: str = 'text', output_file: str = None) -> str:
         """
         Generate a summary report of all link checks.
