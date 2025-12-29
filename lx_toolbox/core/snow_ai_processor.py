@@ -15,6 +15,8 @@ from selenium.webdriver.common.keys import Keys
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger, reset_step_counter
 from .lab_manager import LabManager
+from .jira_handler import JiraHandler
+from .servicenow_handler import ServiceNowHandler
 
 
 class SnowAIProcessor:
@@ -32,26 +34,33 @@ class SnowAIProcessor:
         self.driver = self.lab_mgr.driver
         self.wait = self.lab_mgr.wait
         self._rol_logged_in = False
+        
+        # Initialize JiraHandler for Jira login
+        self.jira_handler = JiraHandler(
+            driver=self.driver,
+            wait=self.wait,
+            config=config,
+            logger=self.logger
+        )
+        
+        # Initialize ServiceNowHandler for ServiceNow operations
+        self.snow_handler = ServiceNowHandler(
+            driver=self.driver,
+            wait=self.wait,
+            config=config,
+            logger=self.logger
+        )
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:30b")
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:12b")
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
-        self.OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-        self.OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3.1")
-        self.OPENROUTER_URL = os.environ.get("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
-        self.OPENROUTER_HTTP_REFERER = os.environ.get("OPENROUTER_HTTP_REFERER", "")
-        self.OPENROUTER_X_TITLE = os.environ.get("OPENROUTER_X_TITLE", "")
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
 
-        # ServiceNow defaults
-        self.SNOW_BASE_URL = self.config.get("ServiceNow", "SNOW_BASE_URL", "https://redhat.service-now.com")
-        # Default Feedback queue URL (hardcoded as in original script)
-        self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL = (
-            f"{self.SNOW_BASE_URL}/now/nav/ui/classic/params/target/"
-            "x_redha_red_hat_tr_x_red_hat_training_list.do%3Fsysparm_query%3Dassigned_toDYNAMIC90d1921e5f510100a9ad2572f2b477fe%255EstateIN2%255Eactive%253Dtrue%255Eshort_descriptionLIKEFeedback%3A%26sysparm_first_row%3D1%26sysparm_view%3D"
-        )
+        # ServiceNow URLs from handler
+        self.SNOW_BASE_URL = self.snow_handler.base_url
+        self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL = self.snow_handler.feedback_queue_url
 
         # Rich prompt examples (ported from original template)
         self.content_issues_examples = (
@@ -116,71 +125,11 @@ class SnowAIProcessor:
             logging.getLogger(__name__).error(f"Could not run Ollama: {e}")
             return ""
 
-    def _ask_openrouter(self, prompt: str) -> str:
-        if not self.OPENROUTER_API_KEY:
-            logging.getLogger(__name__).error("OPENROUTER_API_KEY is not set; cannot use OpenRouter.")
-            return ""
-
-        headers = {
-            "Authorization": f"Bearer {self.OPENROUTER_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        if self.OPENROUTER_HTTP_REFERER:
-            headers["HTTP-Referer"] = self.OPENROUTER_HTTP_REFERER
-        if self.OPENROUTER_X_TITLE:
-            headers["X-Title"] = self.OPENROUTER_X_TITLE
-
-        payload = {
-            "model": self.OPENROUTER_MODEL,
-            "messages": [{"role": "user", "content": [{"type": "text", "text": str(prompt)}]}],
-        }
-
-        try:
-            resp = requests.post(self.OPENROUTER_URL, headers=headers, data=json.dumps(payload), timeout=120)
-            resp.raise_for_status()
-            data = resp.json()
-            choices = data.get("choices", [])
-            if not choices:
-                logging.getLogger(__name__).error(f"OpenRouter returned no choices. Response: {data}")
-                return ""
-            message = choices[0].get("message", {})
-            content = message.get("content", "")
-            if isinstance(content, list):
-                text_parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
-                content_text = "\n".join([p for p in text_parts if p])
-            elif isinstance(content, str):
-                content_text = content
-            else:
-                content_text = ""
-
-            content_text = re.sub(r"```json\s*", "", content_text)
-            content_text = re.sub(r"```\s*$", "", content_text)
-            content_text = content_text.strip()
-            logging.getLogger(__name__).info(f"LLM[openrouter:{self.OPENROUTER_MODEL}] response: {content_text[:1000]}")
-            return content_text
-        except requests.exceptions.HTTPError as e:
-            logging.getLogger(__name__).error(f"OpenRouter HTTP error: {e}")
-            try:
-                logging.getLogger(__name__).error(f"Response status: {resp.status_code}")
-                logging.getLogger(__name__).error(f"Response body: {resp.text}")
-            except Exception:
-                pass
-            logging.getLogger(__name__).error(f"Model used: {self.OPENROUTER_MODEL}")
-            logging.getLogger(__name__).error(f"Endpoint: {self.OPENROUTER_URL}")
-            return ""
-        except Exception as e:
-            logging.getLogger(__name__).error(f"OpenRouter request failed: {e}")
-            return ""
 
     def ask_llm(self, prompt: str) -> str:
+        """Ask the LLM a question and return the response using some LLM provider such as ollama."""
         provider = self.LLM_PROVIDER
-        logging.getLogger(__name__).info(f"LLM request via provider={provider}")
-        if provider == "openrouter":
-            response = self._ask_openrouter(prompt)
-            if not response:
-                logging.getLogger(__name__).warning("OpenRouter returned empty response, falling back to Ollama")
-                return self._ask_ollama(prompt)
-            return response
+        logging.getLogger(__name__).debug(f"LLM request via provider={provider}")
         return self._ask_ollama(prompt)
 
     # --------------------------
@@ -230,52 +179,20 @@ class SnowAIProcessor:
         return container.text
 
     # --------------------------
-    # ServiceNow helpers
+    # ServiceNow helpers (delegated to ServiceNowSeleniumHandler)
     # --------------------------
     def login_snow(self):
-        """Login to ServiceNow using RH SSO, composing password from PIN + OTP command if configured."""
-        self.logger("Login into ServiceNow")
-        username = self.config.get("Credentials", "RH_USERNAME")
-        pin = self.config.get("Credentials", "RH_PIN")
-        otp_command = self.config.get("Credentials", "ROL_OTP_COMMAND")
-        if not username or not pin:
-            raise ValueError("Missing RH_USERNAME/RH_PIN for ServiceNow login")
-
-        try:
-            self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
-            otp_value = ""
-            if otp_command:
-                try:
-                    otp_value = os.popen(otp_command).read().strip()
-                except Exception as e:
-                    logging.getLogger(__name__).warning(f"Could not execute OTP command: {e}")
-
-            full_password = f"{str(pin)}{otp_value}"
-            self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(full_password)
-            self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
-            time.sleep(15)
-        except Exception as e:
-            raise RuntimeError(f"ServiceNow login failed: {e}")
+        """Login to ServiceNow using the ServiceNowSeleniumHandler."""
+        self.snow_handler.login(use_session=True)
 
     def switch_to_iframe(self):
         """Switch to SNOW content iframe through macroponent shadow DOM."""
-        try:
-            self.driver.switch_to.default_content()
-            macroponent = WebDriverWait(self.driver, 3).until(
-                EC.presence_of_element_located((By.XPATH, '//*[starts-with(local-name(), "macro")]'))
-            )
-            shadow_root = self.driver.execute_script('return arguments[0].shadowRoot', macroponent)
-            iframe = shadow_root.find_element(By.CSS_SELECTOR, 'iframe#gsft_main')
-            WebDriverWait(self.driver, 3).until(EC.frame_to_be_available_and_switch_to_it(iframe))
-        except Exception as e:
-            raise RuntimeError(f"Unable to switch to ServiceNow iframe: {e}")
+        self.snow_handler.switch_to_iframe()
 
     def get_snow_info(self, snow_id: str) -> dict:
         """Open ticket page and parse key fields from description and form controls."""
         self.logger(f"Getting SNOW info for ticket {snow_id}")
-        self.driver.get(f"{self.SNOW_BASE_URL}/surl.do?n={snow_id}")
-        time.sleep(5)
-        self.switch_to_iframe()
+        self.snow_handler.navigate_to_ticket(snow_id)
 
         description = self.driver.find_element(By.XPATH, '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]').get_attribute('value')
         full_name = self.driver.find_element(By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute('value')
@@ -315,26 +232,8 @@ class SnowAIProcessor:
         return info
 
     def get_ticket_ids_from_queue(self) -> list:
-        """Open queue (current page assumed) and collect visible ticket numbers; empty if none."""
-        ticket_ids = []
-        try:
-            self.switch_to_iframe()
-            tickets_in_line = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training"]/div[1]'))
-            ).text
-            if tickets_in_line.strip() == 'No records to display':
-                return ticket_ids
-            table_body = WebDriverWait(self.driver, 3).until(
-                EC.presence_of_element_located((By.XPATH, '//tbody[@class="list2_body -sticky-group-headers"]'))
-            )
-            ticket_elements = table_body.find_elements(By.XPATH, './/a[@class="linked formlink"]')
-            for ticket in ticket_elements:
-                ticket_id = ticket.text.strip()
-                if ticket_id:
-                    ticket_ids.append(ticket_id)
-        except Exception as e:
-            logging.getLogger(__name__).error(f"Error retrieving ticket IDs: {e}")
-        return ticket_ids
+        """Get list of ticket IDs from the current queue view."""
+        return self.snow_handler.get_ticket_ids_from_queue()
 
     # --------------------------
     # Ticket understanding
@@ -692,18 +591,14 @@ Translate the following text from {language} to english:
     # Window/Tab Orchestration
     # --------------------------
     def login_jira(self):
-        try:
-            self.driver.get("https://issues.redhat.com/secure/Dashboard.jspa")
-            time.sleep(5)
-            # Try to click a generic login link if present; ignore failures
-            try:
-                login_link = WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a')))
-                login_link.click()
-                time.sleep(2)
-            except Exception:
-                pass
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"Jira login flow encountered an exception: {e}")
+        """
+        Login to Jira using the JiraHandler.
+        
+        First tries session login (SSO may already be active from ServiceNow).
+        If not logged in, attempts SSO login with available credentials.
+        If credentials are not available, prompts for manual authentication.
+        """
+        self.jira_handler.login(use_session=True)
 
     def prelogin_all(self, environment: str = "rol"):
         # 1) ServiceNow queue (base window)
@@ -736,7 +631,6 @@ Translate the following text from {language} to english:
         # 3) Jira login in new tab (within base window)
         self.driver.switch_to.new_window('tab')
         self.login_tab_handles['jira'] = self.driver.current_window_handle
-        self.logger("Login into Jira")
         self.login_jira()
 
         # Return focus to ServiceNow tab in base window for visibility
@@ -902,9 +796,8 @@ Translate the following text from {language} to english:
                     # Fetch guide text from website for content analysis
                     guide_text = ""
                     try:
-                        self.logger("Fetching guide text from website")
                         guide_text = self.fetch_guide_text_from_website(snow_info.get("URL", ""))
-                        logging.getLogger(__name__).info(f"Fetched guide text length: {len(guide_text)}")
+                        self.logger(f"Fetched guide text length: {len(guide_text)}")
                     except Exception as e:
                         logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
 

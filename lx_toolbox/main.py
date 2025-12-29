@@ -7,13 +7,14 @@ import click
 import sys
 import os
 import logging
+import time
 from pathlib import Path
 
 from .utils.config_manager import ConfigManager
 from .utils.helpers import reset_step_counter
 from .core.lab_manager import LabManager
 from .core.link_checker import LinkChecker
-from .core.servicenow_handler import ServiceNowHandler
+from .core.servicenow_autoassign import ServiceNowAutoAssign
 from .core.snow_ai_processor import SnowAIProcessor
 
 # Initialize config manager with paths relative to the package
@@ -104,6 +105,17 @@ def start(ctx, course_id, env, browser, headless):
         elif secondary_status in ["STOP", "STOPPING"]:
             click.echo(f"Lab {course_id} is already running or stopping.")
         
+
+        primary_status, secondary_status = lab_mgr.check_lab_status()
+        # Wait until secondary status is not "STARTING"
+        if secondary_status == "STARTING":
+            time.sleep(15)
+        # Wait until lab has been created and is running        
+        if primary_status == "CREATING":
+            time.sleep(30)
+            primary_status, secondary_status = lab_mgr.check_lab_status()
+
+
         # Increase autostop and lifespan
         lab_mgr.increase_autostop(course_id=course_id)
         lab_mgr.increase_lifespan(course_id=course_id)
@@ -515,7 +527,7 @@ def assign(ctx, team, assignee, continuous, interval):
     config = ctx.obj['config']
     
     try:
-        snow_handler = ServiceNowHandler(config)
+        snow_handler = ServiceNowAutoAssign(config)
         
         # Test connection first
         if not snow_handler.test_connection():
@@ -548,7 +560,7 @@ def list_tickets(ctx, team, limit):
     config = ctx.obj['config']
     
     try:
-        snow_handler = ServiceNowHandler(config)
+        snow_handler = ServiceNowAutoAssign(config)
         
         if not snow_handler.test_connection():
             click.echo("✗ Failed to connect to ServiceNow", err=True)
@@ -581,7 +593,7 @@ def test(ctx):
     config = ctx.obj['config']
     
     try:
-        snow_handler = ServiceNowHandler(config)
+        snow_handler = ServiceNowAutoAssign(config)
         
         # Test ServiceNow connection
         if snow_handler.test_connection():

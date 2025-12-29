@@ -9,7 +9,8 @@ class ConfigManager:
         # It will also gracefully fail if .env doesn't exist.
         load_dotenv(dotenv_path=env_file_path)
 
-        self.config = configparser.ConfigParser()
+        # Disable interpolation to allow % characters in URLs (e.g., URL-encoded query strings)
+        self.config = configparser.ConfigParser(interpolation=None)
         
         # Check if the config file exists before trying to read it
         if not os.path.exists(config_file_path):

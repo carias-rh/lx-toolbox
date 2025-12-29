@@ -199,7 +199,7 @@ class LabManager:
             
             self.wait_for_site_to_be_ready(environment)
         except Exception as e:
-            logging.getLogger(__name__).warning(f"Login process exception: {e}")
+            pass
 
     def wait_for_site_to_be_ready(self, environment: str, timeout: int = 5):
         self.logger("Waiting for site to be ready...")
@@ -310,7 +310,7 @@ class LabManager:
         if not success:
             raise Exception(f"Could not select tab '{tab_name}' in either new or old interface")
             
-    def _get_lab_action_button(self, action_texts: list[str], timeout: int = 5):
+    def _get_lab_action_button(self, action_texts: list[str], timeout: int = 1):
         """Helper to find a lab action button (Create, Start, Stop, Delete)."""
         # Combined logic for finding create/delete or start/stop buttons
         # XPATH from original: //*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Action")]
@@ -334,7 +334,6 @@ class LabManager:
         This simplifies the original check_lab_status_button which took 'first' or 'second'.
         We now look for specific keywords.
         """
-        self.logger("Checking lab status...")
         self.select_lab_environment_tab("lab-environment")
 
         # Check for Create/Creating or Delete/Deleting button (usually primary)
@@ -495,7 +494,13 @@ class LabManager:
                 message="Lab not in a state to adjust autostop/lifespan (e.g. not running)."
             )
             
+
+            # Scroll to bottom of the lab environment tab to ensure all controls/buttons are visible
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(0.3)
+            
             button_xpath = f'//*[@id="tab-course-lab-environment"]/div/table/tr[{button_xpath_part}]/td[2]/button'
+            WebDriverWait(self.driver, 120).until(EC.visibility_of_element_located((By.XPATH, button_xpath)))
             adj_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, button_xpath)))
             for _ in range(times):
                 adj_button.click()
