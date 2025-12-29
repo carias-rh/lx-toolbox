@@ -1584,8 +1584,10 @@ class LinkChecker(LabManager):
                 status = result.status_code or 'ERR'
                 error = (result.error_message or 'Unknown')[:50]
                 link_text = (result.link_text or 'N/A')[:30]
+                # Create hyperlink to the course section page for easy developer access
+                section_link = f"[{result.section_number}|{result.source_page}]" if result.source_page else result.section_number
                 description_lines.append(
-                    f"|{result.chapter}|{result.section_number}|{link_text}|[{result.url}]|{status}|{error}|"
+                    f"|{result.chapter}|{section_link}|{link_text}|[{result.url}]|{status}|{error}|"
                 )
             
             description_lines.extend([
@@ -1637,16 +1639,30 @@ class LinkChecker(LabManager):
             attached_files = []
             for file_path in files_to_attach:
                 try:
-                    # Find the file input element and send the file path
-                    # Jira typically has a hidden file input that we can send keys to
-                    try:
-                        file_input = self.driver.find_element(By.CSS_SELECTOR, 'input[type="file"]')
+                    print(f"Attaching file: {file_path}")
+                    # Find the file input element - need to find it fresh each time
+                    # as Jira may recreate the element after each upload
+                    file_inputs = self.driver.find_elements(By.CSS_SELECTOR, 'input[type="file"]')
+                    if file_inputs:
+                        file_input = file_inputs[0]
+                        # Clear any existing value using JavaScript
+                        self.driver.execute_script("arguments[0].value = '';", file_input)
+                        time.sleep(0.5)
+                        # Send the file path
                         file_input.send_keys(file_path)
                         attached_files.append(os.path.basename(file_path))
-                        time.sleep(2)  # Wait for upload to complete
-                    except Exception as e:
-                        logging.debug(f"Could not find file input for {file_path}: {e}")
-                        
+                        # Wait for upload to complete - check for upload progress to finish
+                        time.sleep(5)
+                        # Wait until no upload progress bars are visible
+                        try:
+                            WebDriverWait(self.driver, 30).until_not(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, '.upload-progress, .uploading'))
+                            )
+                        except:
+                            pass  # Continue if no progress indicator found
+                        time.sleep(2)  # Extra buffer between uploads
+                    else:
+                        logging.debug(f"No file input found for {file_path}")
                 except Exception as e:
                     logging.debug(f"Failed to attach file {file_path}: {e}")        
 
