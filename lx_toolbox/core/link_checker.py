@@ -1295,7 +1295,7 @@ class LinkChecker(LabManager):
             self.logger(f"Checking course [{i+1}/{len(courses)}]: {course['id']}")
             
             try:
-                report = self.check_course_links(course['id'], environment, take_screenshots)
+                report = self.check_all_course_versions(course['id'], environment, take_screenshots)
                 reports.append(report)
                 print(f"    ✓ {report.valid_links} valid, {report.broken_links} broken links")
             except Exception as e:
