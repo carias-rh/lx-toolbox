@@ -20,20 +20,14 @@ Create a `.env` file in the project root directory (`lx-toolbox/.env`):
 ```bash
 # Lab Credentials for ROL environment
 RH_USERNAME=your_username
-RH_PIN=your_pin_or_password
-
-# For ROL with OTP (One-Time Password)
-# If you need OTP, uncomment and set this command
-# ROL_OTP_COMMAND=curl -sL https://your-otp-service.com/get_otp
 
 # GitHub credentials for ROL-Stage
 GITHUB_USERNAME=your_github_username
 GITHUB_PASSWORD=your_github_password
-# GITHUB_OTP_COMMAND=2fa github
 
 # China environment credentials
-CHINA_USERNAME=rhls_test_basic_cn_003
-CHINA_PASSWORD=redhat123
+CHINA_USERNAME=china_username
+CHINA_PASSWORD=china_password
 
 # ServiceNow API credentials (for future use)
 SNOW_INSTANCE_URL=https://yourinstance.service-now.com
@@ -90,20 +84,16 @@ The ConfigManager:
 3. Then looks in config.ini under `[Credentials]` for `rh_username`
 4. Returns `None` if not found
 
-## OTP (One-Time Password) Handling
+## Login Process
 
-For environments that require OTP, you can specify a command that returns the OTP:
+**Important:** Login is **manual** and requires user interaction. The automation tools only assist by:
+- **Autofilling usernames** to reduce repetitive typing
+- Opening the browser and navigating to login pages
 
-```bash
-# Example OTP commands
-ROL_OTP_COMMAND=curl -sL https://sso-service.example.com/get_otp
-GITHUB_OTP_COMMAND=2fa github  # If you have a 2fa CLI tool
-```
-
-**Security Note:** The OTP command execution using `os.popen()` has security implications. Consider:
-- Using a proper OTP library or service
-- Prompting for OTP interactively
-- Using a secure credential manager
+**2FA/OTP Authentication:**
+- Two-factor authentication (2FA) and OTP codes **cannot be automated** per company policy
+- Users must manually enter their 2FA/OTP codes when prompted during login
+- The automation will pause and wait for manual completion of the authentication process
 
 ## Verifying Your Configuration
 
@@ -117,7 +107,6 @@ This will show:
 ```
 [Credentials Status]
 RH_USERNAME: ✓ Set
-RH_PIN: ✗ Not set
 GITHUB_USERNAME: ✓ Set
 ...
 ```

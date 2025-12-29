@@ -37,12 +37,12 @@ class LabManager:
             # The pin in the old script was complex, involving an OTP call.
             # For now, let's assume pin/password is a single value or OTP is handled externally.
             pin = self.config.get("Credentials", "RH_PIN") 
-            otp_command = self.config.get("Credentials", "ROL_OTP_COMMAND") # e.g., "curl -sL ..." or "2fa redhat"
+            otp_command = self.config.get("Credentials", "ROL_OTP_COMMAND")
             return username, pin, otp_command
         elif environment == "rol-stage":
             username = self.config.get("Credentials", "GITHUB_USERNAME")
             password = self.config.get("Credentials", "GITHUB_PASSWORD")
-            otp_command = self.config.get("Credentials", "GITHUB_OTP_COMMAND") # e.g., "2fa github"
+            otp_command = self.config.get("Credentials", "GITHUB_OTP_COMMAND") 
             return username, password, otp_command
         elif environment == "china":
             # China environment in the old script had hardcoded credentials in the template itself

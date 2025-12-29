@@ -611,98 +611,14 @@ def jira(ctx):
     click.echo("Jira commands not yet implemented. Coming soon!")
     # TODO: Implement Jira commands when JiraHandler is ready
 
-@cli.group()
-@click.pass_context
-def snowai(ctx):
-    """SNOW AI processing commands (ROL navigation via LabManager)."""
-    pass
-
-@snowai.command()
-@click.argument('course_id')
-@click.argument('course_url')
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
-@click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
-@click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
-@click.option('--description', '-d', default='', help='Student feedback description to classify/analyze')
-@click.pass_context
-def analyze(ctx, course_id, course_url, env, browser, headless, description):
-    """Analyze a feedback against a course page using the new framework."""
-    config = ctx.obj['config']
-    try:
-        processor = SnowAIProcessor(config=config, browser_name=browser, is_headless=headless)
-        reset_step_counter()
-
-        # Ensure login and start lab adjustments similarly to original flow
-        processor.start_lab_for_course(course_id=course_id, environment=env)
-
-        # Fetch section info and guide text
-        section, guide_text = processor.fetch_section_and_guide_text(course_url)
-
-        click.echo(f"Section: {section}")
-        click.echo(f"Guide text length: {len(guide_text)} characters")
-
-        if not description:
-            click.echo("No description provided for analysis (-d). Skipping LLM analysis.")
-            return
-
-        classification = processor.classify_ticket_llm(description)
-        click.echo(f"Classification: {json.dumps(classification, ensure_ascii=False)}")
-
-        if classification.get('language') and classification.get('language') != 'en':
-            translated = processor.translate_text(description, classification.get('language'))
-        else:
-            translated = description
-
-        analysis = {}
-        if classification.get('is_content_issue_ticket'):
-            analysis = processor.analyze_content_issue(description, guide_text)
-        elif classification.get('is_environment_issue'):
-            analysis = processor.analyze_environment_issue(description)
-
-        click.echo(f"Analysis: {json.dumps(analysis, ensure_ascii=False)}")
-
-    except Exception as e:
-        click.echo(f"✗ Error in SNOW AI analyze: {e}", err=True)
-        raise
-    finally:
-        try:
-            processor.close()
-        except Exception:
-            pass
-
-@snowai.command()
+@cli.command()
 @click.option('-t', '--ticket', 'tickets', multiple=True, help='SNOW ticket number (repeatable). If omitted, uses user queue.')
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
-def run(ctx, tickets, env, browser, headless):
-    """Process SNOW tickets by number, or default to user's feedback queue when none provided."""
-    config = ctx.obj['config']
-    try:
-        processor = SnowAIProcessor(config=config, browser_name=browser, is_headless=headless)
-        reset_step_counter()
-        results = processor.run(list(tickets) if tickets else None, environment=env)
-        # Print concise results
-        for r in results:
-            click.echo(f"{r['snow']['snow_id']}: {r['classification'].get('summary','')} | content_issue={r['classification'].get('is_content_issue_ticket')} env_issue={r['classification'].get('is_environment_issue')}")
-    except Exception as e:
-        click.echo(f"✗ Error running SNOW AI queue processor: {e}", err=True)
-        raise
-    finally:
-        try:
-            processor.close()
-        except Exception:
-            pass
-
-@snowai.command(name='run-windowed')
-@click.option('-t', '--ticket', 'tickets', multiple=True, help='SNOW ticket number (repeatable). If omitted, uses user queue.')
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
-@click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
-@click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
-@click.pass_context
-def run_windowed(ctx, tickets, env, browser, headless):
-    """Open one window per ticket. For each window: SNOW ticket, ROL section, Jira search, Jira create."""
+def snowai(ctx, tickets, env, browser, headless):
+    """Process SNOW tickets with LLM analysis. Opens one window per ticket with tabs for SNOW, ROL, Jira search, and Jira create."""
     config = ctx.obj['config']
     try:
         processor = SnowAIProcessor(config=config, browser_name=browser, is_headless=headless)
@@ -710,7 +626,7 @@ def run_windowed(ctx, tickets, env, browser, headless):
         processor.run_windowed(list(tickets) if tickets else None, environment=env)
         click.echo("✓ Opened windows/tabs. You can now work each ticket in its own window.")
     except Exception as e:
-        click.echo(f"✗ Error running windowed flow: {e}", err=True)
+        click.echo(f"✗ Error running SNOW AI processor: {e}", err=True)
         raise
     finally:
         # Intentionally do not close the browser; the user will work in the windows

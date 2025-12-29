@@ -6,20 +6,6 @@ This document explains how to configure and extend the ServiceNow auto-assignmen
 
 The ServiceNow auto-assignment system uses a flexible, team-based configuration approach that eliminates the need for separate template files per team. Instead, team-specific behavior is defined through Python dataclasses that can be easily extended.
 
-## Architecture Benefits
-
-### Before (Jinja2 Templates)
-- Required separate `.j2` template files for each team
-- Conditional logic scattered throughout templates
-- Hard to maintain and extend
-- Risk of code duplication
-
-### After (Team Configuration Classes)
-- Single codebase with team-specific configuration
-- Clean separation of logic and configuration
-- Easy to add new teams without code duplication
-- Type-safe configuration with validation
-
 ## TeamConfig Class
 
 ```python
@@ -94,7 +80,7 @@ Best Regards,
 **Special Processing:**
 - Extracts user information from ticket description
 - Performs LMS API lookups for full names
-- Auto-resolves tickets from specific reporters
+- Auto-resolves tickets from specific jira reporters (LX and PLT)
 - Extracts course/version information for project codes
 - Creates formatted short descriptions
 
@@ -230,7 +216,7 @@ teams["custom"] = TeamConfig(
 )
 ```
 
-### Complex Acknowledgment Templates
+### Custom Acknowledgment Templates
 
 Use more sophisticated templates with conditional logic:
 
@@ -262,43 +248,6 @@ def get_external_assignee(self, team_config: TeamConfig) -> str:
         return self.config.get("General", "default_assignee")
 ```
 
-## Best Practices
-
-### 1. Use Environment Variables for Sensitive Data
-```python
-# Good
-api_url = self.config.get("T3", "T3_API_URL")
-
-# Bad  
-api_url = "https://hardcoded-url.com"
-```
-
-### 2. Provide Fallback Values
-```python
-assignee = self.get_round_robin_assignee(team_config) or \
-           self.config.get("General", "default_assignee") or \
-           "fallback_user"
-```
-
-### 3. Add Comprehensive Error Handling
-```python
-try:
-    # Team-specific processing
-    result = self.custom_processing(ticket)
-except SpecificException as e:
-    logger.warning(f"Non-critical error: {e}")
-    # Continue with generic processing
-except Exception as e:
-    logger.error(f"Critical error: {e}")
-    return False
-```
-
-### 4. Log Important Actions
-```python
-logger.info(f"Assigned ticket {ticket['number']} to {assignee_name} (team: {team_key})")
-logger.debug(f"Applied updates: {updates}")
-```
-
 ## Testing New Configurations
 
 ### 1. Test Connection
@@ -316,18 +265,6 @@ logger.debug(f"Applied updates: {updates}")
 ./scripts/lx-tool snow assign t3 --assignee "test_user"
 ```
 
-### 4. Monitor Logs
-Check the logs for any errors or unexpected behavior during processing.
-
-## Migration from Templates
-
-When migrating from Jinja2 templates:
-
-1. **Extract Configuration**: Move team-specific values to `TeamConfig`
-2. **Convert Logic**: Transform Jinja2 conditionals to Python methods
-3. **Preserve Behavior**: Ensure the new code produces identical results
-4. **Test Thoroughly**: Compare old vs new behavior with real tickets
-5. **Document Changes**: Update team documentation
 
 ## Troubleshooting
 
@@ -371,5 +308,3 @@ Potential improvements to the team configuration system:
 1. **Dynamic Configuration**: Load team configs from external files or databases
 2. **Workflow Engine**: Define complex assignment workflows per team  
 3. **Machine Learning**: Automatic categorization and routing
-4. **Metrics Dashboard**: Track team performance and assignment statistics
-5. **A/B Testing**: Compare different assignment strategies 
