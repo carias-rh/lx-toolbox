@@ -657,8 +657,10 @@ def config(ctx):
     # Credentials (just show if they're set, not the values)
     click.echo("\n[Credentials Status]")
     cred_keys = [
-        'RH_USERNAME', 'RH_PIN', 'GITHUB_USERNAME', 'GITHUB_PASSWORD',
-        'CHINA_USERNAME', 'CHINA_PASSWORD', 'SNOW_API_USER', 'JIRA_API_USER'
+        'RH_USERNAME', 'RH_PASSWORD', 'RH_AUTH_HELPER',
+        'GITHUB_USERNAME', 'GITHUB_PASSWORD', 'GITHUB_AUTH_HELPER',
+        'CHINA_USERNAME', 'CHINA_PASSWORD', 
+        'SNOW_API_USER', 'JIRA_API_USER'
     ]
     for key in cred_keys:
         value = config.get('Credentials', key)

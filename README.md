@@ -244,14 +244,8 @@ See [CREDENTIALS.md](CREDENTIALS.md) for detailed information on setting up cred
 
 ### Authentication and Login
 
-**Important:** Login is **manual** and requires user interaction. The automation tools provide minimal assistance:
-- **Autofills usernames** to reduce repetitive typing tasks
-- Opens the browser and navigates to login pages
-
-**2FA/OTP Policy:**
-- Two-factor authentication (2FA) and OTP codes **cannot be automated** per company policy
-- Users must manually enter their 2FA/OTP codes when prompted during login
-- The automation will pause and wait for manual completion of the authentication process
+The automation assists with login by autofilling credentials when configured:
+- **Username** is autofilled when `RH_USERNAME` is set
 
 ### Quick Setup
 

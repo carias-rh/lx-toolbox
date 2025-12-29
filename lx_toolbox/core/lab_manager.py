@@ -13,6 +13,9 @@ from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger, reset_step_counter
 
 class LabManager:
+    # External service verification field IDs (from third-party login pages)
+    _GITHUB_VERIFY_FIELD = "app_totp"
+    
     def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None):
         self.config = config
         self.logger = step_logger # Alias for convenience
@@ -28,111 +31,175 @@ class LabManager:
         self.driver = self.selenium_driver.get_driver()
         self.wait = self.selenium_driver.wait # Convenience
 
+    def _prompt_for_manual_login(self, message: str = None):
+        """
+        Prompt the user to complete authentication manually.
+        Waits until the user presses Enter in the CLI.
+        
+        Args:
+            message: Optional custom message to display
+        """
+        if message:
+            print(f"\n{'='*60}")
+            print(message)
+            print(f"{'='*60}")
+        else:
+            print(f"\n{'='*60}")
+            print("Manual authentication required.")
+            print("Please complete the login in the browser.")
+            print(f"{'='*60}")
+        
+        input("Press Enter once you have completed the login...")
+
     def _get_credentials(self, environment: str):
-        """Helper to fetch credentials for a given environment."""
-        # This is a simplified example. Actual credential names might vary.
-        # Assumes .env keys like RH_USERNAME, RH_PIN, GITHUB_USERNAME, GITHUB_PASSWORD
+        """
+        Helper to fetch credentials for a given environment.
+        
+        Returns:
+            Tuple of (username, password, auth_helper_cmd)
+        """
         if environment == "rol":
             username = self.config.get("Credentials", "RH_USERNAME")
-            # The pin in the old script was complex, involving an OTP call.
-            # For now, let's assume pin/password is a single value or OTP is handled externally.
-            pin = self.config.get("Credentials", "RH_PIN") 
-            otp_command = self.config.get("Credentials", "ROL_OTP_COMMAND")
-            return username, pin, otp_command
+            password = self.config.get("Credentials", "RH_PASSWORD")
+            auth_helper = self.config.get("Credentials", "RH_AUTH_HELPER")
+            return username, password, auth_helper
         elif environment == "rol-stage":
             username = self.config.get("Credentials", "GITHUB_USERNAME")
             password = self.config.get("Credentials", "GITHUB_PASSWORD")
-            otp_command = self.config.get("Credentials", "GITHUB_OTP_COMMAND") 
-            return username, password, otp_command
+            auth_helper = self.config.get("Credentials", "GITHUB_AUTH_HELPER")
+            return username, password, auth_helper
         elif environment == "china":
-            # China environment in the old script had hardcoded credentials in the template itself
-            # This should be moved to config
             username = self.config.get("Credentials", "CHINA_USERNAME")
             password = self.config.get("Credentials", "CHINA_PASSWORD")
             return username, password, None
         else:
             raise ValueError(f"Unknown environment for credentials: {environment}")
 
+    def _get_auth_token(self, auth_helper: str) -> str:
+        """Execute auth helper command and return the token."""
+        if not auth_helper:
+            return ""
+        try:
+            return os.popen(auth_helper).read().replace('\n', '')
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"Auth helper returned empty: {e}")
+            return ""
+
     def login(self, environment: str):
+        """
+        Login to the specified environment.
+        
+        If credentials are configured, they will be autofilled.
+        If credentials are not available, the user will be prompted to complete
+        authentication manually in the browser.
+        
+        Args:
+            environment: The target environment (rol, rol-stage, china)
+        """
         self.logger(f"Login into '{environment}' environment")
         base_url = self.config.get_lab_base_url(environment)
         if not base_url:
             raise ValueError(f"Base URL for environment '{environment}' not configured.")
 
-        # Navigate to a generic course page to trigger login if not already on the domain
-        # The old script went to rh124-9.3, adjust if a more generic entry point is better
-        self.selenium_driver.go_to_url(base_url + "rh124-9.3") # Placeholder course
+        # Navigate to a generic course page to trigger login
+        self.selenium_driver.go_to_url(base_url + "rh124-9.3")
 
-        username, password_pin, otp_command = self._get_credentials(environment)
-
-        if not username or not password_pin:
-            raise ValueError(f"Username or password/pin not configured for environment '{environment}'.")
+        username, password, auth_helper = self._get_credentials(environment)
 
         try:
             if environment == "rol":
-                # RH SSO Login Flow - matching old script behavior
-                # Check cookies first (like old script)
                 self.selenium_driver.accept_trustarc_cookies(timeout=5)
                 
-                self.wait.until(EC.element_to_be_clickable(
-                    (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
-                )).send_keys(f"{username}@redhat.com")
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
-                
-                # NOTE: rh-sso-flow button click is commented out in old script, so we skip it
-                # self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="rh-sso-flow"]'))).click()
-                
-                # RH SSO - wait for username field (should appear automatically after clicking login-show-step2)
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
-                
-                otp_value = ""
-                if otp_command:
-                    try:
-                        # This is a security risk and highly dependent on the local setup.
-                        # Consider abstracting this to a function passed in, or user input.
-                        print(f"Executing OTP command: {otp_command}")
-                        otp_value = os.popen(otp_command).read().replace('\n', '')
-                    except Exception as e:
-                        print(f"Could not execute OTP command '{otp_command}': {e}")
-                        # Potentially raise or ask user for OTP
-                
-                # Match old script: use replace('\n', '') instead of strip()
-                full_password = str(password_pin).replace('\n', '') + str(otp_value)
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(full_password)
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
+                if username:
+                    self.wait.until(EC.element_to_be_clickable(
+                        (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
+                    )).send_keys(f"{username}@redhat.com")
+                    self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
+                    
+                    self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
+                    
+                    if password:
+                        # Build full credential string
+                        auth_token = self._get_auth_token(auth_helper)
+                        full_credential = str(password).replace('\n', '') + str(auth_token)
+                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(full_credential)
+                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
+                    else:
+                        self._prompt_for_manual_login(
+                            "Username autofilled. Please enter your password and complete authentication."
+                        )
+                else:
+                    self._prompt_for_manual_login(
+                        "Credentials not configured. Please complete the login manually."
+                    )
 
             elif environment == "rol-stage":
-                # GitHub Login Flow
                 self.selenium_driver.accept_trustarc_cookies(timeout=1)
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click() # Assuming this is "Login with GitHub"
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_field"]'))).send_keys(username)
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password_pin)
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//input[@type="submit"]'))).click() # Match old script XPath
-
-                if otp_command: # If 2FA is expected
-                    otp_input_field = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app_totp"]')))
-                    otp_input_field.click()
-                    try:
-                        print(f"Executing OTP command: {otp_command}")
-                        otp_value = os.popen(otp_command).read().replace('\n', '')
-                        otp_input_field.send_keys(otp_value)
-                        #self.driver.find_element(By.XPATH, '/html/body/div[1]/div[3]/main/div/div[3]/div[2]/form/button').click() # Verify button
-                    except Exception as e:
-                        print(f"Could not execute OTP command '{otp_command}' for GitHub: {e}")
-                        # Potentially raise or ask user for OTP
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click()
+                
+                if username:
+                    self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_field"]'))).send_keys(username)
+                    
+                    if password:
+                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password)
+                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//input[@type="submit"]'))).click()
+                        
+                        # Handle additional verification if needed
+                        if auth_helper:
+                            try:
+                                verify_field = self.wait.until(EC.element_to_be_clickable(
+                                    (By.XPATH, f'//*[@id="{self._GITHUB_VERIFY_FIELD}"]')
+                                ))
+                                verify_field.click()
+                                auth_token = self._get_auth_token(auth_helper)
+                                if auth_token:
+                                    verify_field.send_keys(auth_token)
+                            except TimeoutException:
+                                pass
+                        else:
+                            try:
+                                WebDriverWait(self.driver, 3).until(
+                                    EC.presence_of_element_located(
+                                        (By.XPATH, f'//*[@id="{self._GITHUB_VERIFY_FIELD}"]')
+                                    )
+                                )
+                                self._prompt_for_manual_login(
+                                    "Additional verification required. Please complete it in the browser."
+                                )
+                            except TimeoutException:
+                                pass
+                    else:
+                        self._prompt_for_manual_login(
+                            "Username autofilled. Please enter your password and complete authentication."
+                        )
+                else:
+                    self._prompt_for_manual_login(
+                        "Credentials not configured. Please complete the login manually."
+                    )
 
             elif environment == "china":
-                # China local login - navigate to login page first (like old script)
                 china_login_url = self.config.get_lab_base_url("china").replace("courses/", "login/local")
                 self.selenium_driver.go_to_url(china_login_url)
                 self.selenium_driver.accept_trustarc_cookies()
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password_pin)
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_button"]'))).click()
+                
+                if username:
+                    self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
+                    
+                    if password:
+                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password)
+                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_button"]'))).click()
+                    else:
+                        self._prompt_for_manual_login(
+                            "Username autofilled. Please enter your password and complete authentication."
+                        )
+                else:
+                    self._prompt_for_manual_login(
+                        "Credentials not configured. Please complete the login manually."
+                    )
             
             self.wait_for_site_to_be_ready(environment)
         except Exception as e:
-            pass
+            logging.getLogger(__name__).warning(f"Login process exception: {e}")
 
     def wait_for_site_to_be_ready(self, environment: str, timeout: int = 5):
         self.logger("Waiting for site to be ready...")

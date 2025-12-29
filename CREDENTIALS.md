@@ -23,18 +23,16 @@ RH_USERNAME=your_username
 
 # GitHub credentials for ROL-Stage
 GITHUB_USERNAME=your_github_username
-GITHUB_PASSWORD=your_github_password
 
 # China environment credentials
 CHINA_USERNAME=china_username
-CHINA_PASSWORD=china_password
 
-# ServiceNow API credentials (for future use)
+# ServiceNow API credentials
 SNOW_INSTANCE_URL=https://yourinstance.service-now.com
 SNOW_API_USER=your_snow_user
 SNOW_API_PASSWORD=your_snow_password
 
-# Jira API credentials (for future use)
+# Jira API credentials
 JIRA_SERVER_URL=https://yourjira.example.com
 JIRA_API_USER=your_jira_user
 JIRA_API_TOKEN=your_jira_api_token
@@ -51,13 +49,10 @@ Export environment variables in your shell:
 ```bash
 # In bash/zsh
 export RH_USERNAME="your_username"
-export RH_PIN="your_pin"
 export GITHUB_USERNAME="your_github_username"
-export GITHUB_PASSWORD="your_github_password"
 
 # Make them permanent by adding to ~/.bashrc or ~/.zshrc
 echo 'export RH_USERNAME="your_username"' >> ~/.bashrc
-echo 'export RH_PIN="your_pin"' >> ~/.bashrc
 ```
 
 ### Method 3: Using config.ini (Not Recommended for Sensitive Data)
@@ -90,10 +85,6 @@ The ConfigManager:
 - **Autofilling usernames** to reduce repetitive typing
 - Opening the browser and navigating to login pages
 
-**2FA/OTP Authentication:**
-- Two-factor authentication (2FA) and OTP codes **cannot be automated** per company policy
-- Users must manually enter their 2FA/OTP codes when prompted during login
-- The automation will pause and wait for manual completion of the authentication process
 
 ## Verifying Your Configuration
 
@@ -123,13 +114,15 @@ GITHUB_USERNAME: ✓ Set
 
 ## Troubleshooting
 
-If you get "Username or password/pin not configured for environment 'rol'", check:
+If you encounter issues with credentials, check:
 
 1. The `.env` file exists in the project root
 2. The variable names match exactly (case-sensitive)
 3. No typos in variable names
 4. The `.env` file has proper formatting (KEY=value, no spaces around =)
 5. You're running the script from the correct directory
+
+**Note:** If `RH_USERNAME` is not configured, the automation will prompt you to complete the login manually in the browser. 
 
 ## Example: Quick Setup for ROL
 
@@ -140,13 +133,12 @@ cp .env.example .env
 # 2. Edit the .env file
 nano .env  # or vim, code, etc.
 
-# 3. Add your credentials
+# 3. Add your username (password entry is manual for security)
 RH_USERNAME=myusername
-RH_PIN=mypin123
 
 # 4. Test the configuration
 ./lx-toolbox/scripts/lx-tool config
 
-# 5. Try starting a lab
+# 5. Try starting a lab (you'll complete authentication in the browser)
 ./lx-toolbox/scripts/lx-tool lab start rh124-9.3
 ``` 

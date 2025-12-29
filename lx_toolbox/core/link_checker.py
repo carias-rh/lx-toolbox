@@ -46,6 +46,7 @@ except ImportError:
     PDF_SUPPORT = False
 
 from .lab_manager import LabManager
+from .jira_handler import JiraHandler
 from ..utils.config_manager import ConfigManager
 
 
@@ -90,6 +91,7 @@ class CourseCheckReport:
     results: list[LinkCheckResult] = field(default_factory=list)
     sections: list[SectionInfo] = field(default_factory=list)
     screenshots_dir: str = ""
+    environment: str = "rol"  # Lab environment used (rol, rol_stage, china)
 
 
 class LinkChecker(LabManager):
@@ -124,6 +126,14 @@ class LinkChecker(LabManager):
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0'
         })
+        
+        # Initialize JiraHandler for Jira login
+        self.jira_handler = JiraHandler(
+            driver=self.driver,
+            wait=self.wait,
+            config=config,
+            logger=self.logger
+        )
         
         # Setup screenshots directory with timestamp for this run
         if screenshots_dir:
@@ -1107,10 +1117,10 @@ class LinkChecker(LabManager):
             
             # Navigate directly to this version - check_course_links handles navigation
             # URL structure: https://rol.redhat.com/rol/app/courses/{course_id}/pages/...
+            # Note: check_course_links already appends to self.reports
             report = self.check_course_links(version_course_id, environment, take_screenshots)
             
             reports.append(report)
-            self.reports.append(report)
         
         return reports
     
@@ -1139,7 +1149,8 @@ class LinkChecker(LabManager):
         report = CourseCheckReport(
             course_id=course_id,
             check_started=datetime.now(),
-            screenshots_dir=str(self.current_screenshots_dir)
+            screenshots_dir=str(self.current_screenshots_dir),
+            environment=environment
         )
         
         try:
@@ -1295,9 +1306,12 @@ class LinkChecker(LabManager):
             self.logger(f"Checking course [{i+1}/{len(courses)}]: {course['id']}")
             
             try:
-                report = self.check_all_course_versions(course['id'], environment, take_screenshots)
-                reports.append(report)
-                print(f"    ✓ {report.valid_links} valid, {report.broken_links} broken links")
+                version_reports = self.check_all_course_versions(course['id'], environment, take_screenshots)
+                reports.extend(version_reports)
+                # Sum up stats across all versions
+                total_valid = sum(r.valid_links for r in version_reports)
+                total_broken = sum(r.broken_links for r in version_reports)
+                print(f"    ✓ {total_valid} valid, {total_broken} broken links across {len(version_reports)} version(s)")
             except Exception as e:
                 print(f"    ✗ Failed: {e}")
                 continue
@@ -1386,89 +1400,15 @@ class LinkChecker(LabManager):
     
     def login_jira(self) -> bool:
         """
-        Attempt to login to Jira using RH SSO.
-        Now with more debug info.
+        Login to Jira using the JiraHandler.
+        
+        First tries session login (SSO may already be active from ROL).
+        If not logged in, attempts SSO login with available credentials.
+        If credentials are not available, prompts for manual authentication.
         
         Returns True if login was successful or already logged in.
         """
-        self.logger("Logging into Jira")
-        try:
-            self.driver.get("https://issues.redhat.com/secure/Dashboard.jspa")
-            time.sleep(5)
-            
-            username_field = None
-
-            # Try to locate the username field
-            try:
-                username_field = WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, '//*[@id="username"]'))
-                )
-            except Exception as e:
-                self.logger(f"Username field not found on first attempt: {e}")
-
-            # Check if we need to login (look for login link in navbar)
-            try:
-                if not username_field:
-                    login_link = WebDriverWait(self.driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a'))
-                    )
-                    login_link.click()
-                    time.sleep(2)
-
-                
-                # If redirected to SSO, enter credentials
-                try:
-
-                    # Get credentials from config
-                    username = self.config.get("Credentials", "RH_USERNAME")
-                    pin = self.config.get("Credentials", "RH_PIN")
-                    otp_command = self.config.get("Credentials", "ROL_OTP_COMMAND")
-                    WebDriverWait(self.driver, 5).until(
-                        EC.presence_of_element_located((By.XPATH, '//*[@id="username-verification"]'))).send_keys(username + "@redhat.com")
-                    WebDriverWait(self.driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
-
-
-                    if not username or not pin:
-                        self.logger("Missing RH_USERNAME/RH_PIN for Jira login - manual login required")
-                        time.sleep(30)
-                        return True
-
-                    # Get OTP if command is configured
-                    otp_value = ""
-                    if otp_command:
-                        try:
-                            otp_value = os.popen(otp_command).read().strip()
-                        except Exception as e:
-                            self.logger(f"Could not execute OTP command: {e}")
-
-                    WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
-                    full_password = f"{str(pin)}{otp_value}"
-                    WebDriverWait(self.driver, 10).until(
-                        EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))
-                    ).send_keys(full_password)
-
-                    WebDriverWait(self.driver, 10).until(
-                        EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))
-                    ).click()
-                    time.sleep(10)
-
-                except Exception as e1:
-                    self.logger(f"No SSO page, or already logged in? Exception: {e1}")
-                    pass
-
-            except Exception as e2:
-                # No login link found - already logged in
-                self.logger(f"Already logged into Jira or could not find navbar login link. Exception: {e2}")
-
-            self.logger("Jira login process concluded (end of function).")
-            return True
-
-        except Exception as e:
-            self.logger(f"Jira login flow encountered an exception: {e}")
-            import traceback
-            self.logger(traceback.format_exc())
-            return False
+        return self.jira_handler.login(use_session=True)
     
     def _build_broken_links_jql(self, course_id: str, broken_urls: list[str]) -> str:
         """
@@ -1580,12 +1520,24 @@ class LinkChecker(LabManager):
                 f"||Chapter||Section||Link Text||URL||Status Code||Error||",
             ]
             
+            # Build lookup from section title to section URL for creating hyperlinks
+            # Get base URL from config based on environment used for this report
+            # Config URLs are like https://rol.redhat.com/rol/app/courses/ - extract just the domain
+            config_url = self.config.get_lab_base_url(report.environment) or "https://rol.redhat.com/rol/app/courses/"
+            rol_base_url = config_url.split('/rol/')[0] if '/rol/' in config_url else config_url.rstrip('/')
+            section_url_lookup = {section.title: section.url for section in report.sections}
+            
             for result in broken_results:
                 status = result.status_code or 'ERR'
                 error = (result.error_message or 'Unknown')[:50]
                 link_text = (result.link_text or 'N/A')[:30]
                 # Create hyperlink to the course section page for easy developer access
-                section_link = f"[{result.section_number}|{result.source_page}]" if result.source_page else result.section_number
+                section_url = section_url_lookup.get(result.source_page, "")
+                if section_url:
+                    full_url = f"{rol_base_url}{section_url}" if section_url.startswith('/') else section_url
+                    section_link = f"[{result.section_number}|{full_url}]"
+                else:
+                    section_link = result.section_number
                 description_lines.append(
                     f"|{result.chapter}|{section_link}|{link_text}|[{result.url}]|{status}|{error}|"
                 )
