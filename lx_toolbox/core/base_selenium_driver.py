@@ -27,10 +27,11 @@ class BaseSeleniumDriver:
             if self.is_headless:
                 options.add_argument("-headless") # Corrected from set_headless()
             self.driver = webdriver.Firefox(options=options)
-            # Example of adding an extension, adapt path from config
-            # copy_on_select_xpi_path = self.config_manager.get("Paths", "copy_on_select_xpi")
-            # if copy_on_select_xpi_path and os.path.exists(copy_on_select_xpi_path):
-            #     self.driver.install_addon(os.path.expanduser(copy_on_select_xpi_path), temporary=True)
+            # Install the Copy On Select Firefox extension if present.
+            # Adapted from playbook: driver.install_addon(os.path.expanduser('{{ playbook_dir }}/../copy_on_select-1.0-an+fx.xpi'), temporary=True)
+            copy_on_select_xpi_path = os.path.expanduser(os.path.join(os.path.dirname(__file__), "../../copy_on_select-1.0-an+fx.xpi"))
+            if os.path.exists(copy_on_select_xpi_path):
+                self.driver.install_addon(copy_on_select_xpi_path, temporary=True)
             self.driver.maximize_window()
         else:
             raise ValueError(f"Unsupported browser: {self.browser_name}. Choose 'firefox' or 'chrome'.")
@@ -67,33 +68,3 @@ class BaseSeleniumDriver:
     
     def wait_for_element_visible(self, by: By, value: str, timeout: int = 5):
         return WebDriverWait(self.driver, timeout).until(EC.presence_of_element_located((by, value)))
-
-    # Add other common Selenium interaction methods here if needed
-    # e.g., click, send_keys, find_element, find_elements
-
-# Example Usage (for testing this module directly)
-# if __name__ == '__main__':
-#     # Assuming you have a ConfigManager instance or mock it
-#     # from lx_toolbox.utils.config_manager import ConfigManager
-#     # cfg = ConfigManager(config_file_path='../../config/config.ini.example') # Adjust path for direct run
-    
-#     # Test Firefox
-#     print("Testing Firefox")
-#     base_driver_ff = BaseSeleniumDriver(browser_name="firefox", is_headless=True)
-#     try:
-#         base_driver_ff.go_to_url("https://www.example.com")
-#         print(f"Firefox Page title: {base_driver_ff.driver.title}")
-#         # base_driver_ff.accept_trustarc_cookies() # Example.com doesn't have this
-#     finally:
-#         base_driver_ff.close()
-
-#     # Test Chrome (requires chromedriver in PATH or specified)
-#     # print("\nTesting Chrome")
-#     # base_driver_ch = BaseSeleniumDriver(browser_name="chrome", is_headless=True)
-#     # try:
-#     #     base_driver_ch.go_to_url("https://www.example.com")
-#     #     print(f"Chrome Page title: {base_driver_ch.driver.title}")
-#     # finally:
-#     #     base_driver_ch.close()
-
-#     print("\nBaseSeleniumDriver tests complete.") 

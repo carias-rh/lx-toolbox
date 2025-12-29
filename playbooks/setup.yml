@@ -9,6 +9,7 @@
           - python3-pip
           - firefox.x86_64
           - chromium.x86_64
+          - chromedriver.x86_64
         state: present
       tags: install
   
@@ -16,16 +17,6 @@
       ansible.builtin.pip:
         name: selenium
         executable: pip3
-      tags: install
-
-    - name: Install xq
-      shell: 'curl -sSL https://bit.ly/install-xq | sudo bash'
-      tags: install
-
-    - name: Install Ollama
-      ansible.builtin.shell: curl -fsSL https://ollama.com/install.sh | sh
-      args:
-        creates: /usr/bin/ollama
       tags: install
       
     - name: Download selenium drivers
@@ -44,18 +35,9 @@
         - geckodriver-v0.36.0-linux64.tar.gz
       tags: drivers
 
-    - name: Install wrapper scripts into /usr/bin/
-      ansible.builtin.template:
-        src: "./templates/wrapper-scripts/{{ item }}"
-        dest: "/usr/bin/{{ item | splitext | first }}"
-        mode: 0755
-      loop:
-        - start.j2
-        - delete.j2
-        - recreate.j2
-        - impersonate.j2
-        - qa.j2
-        - jira.j2
-        - snow.j2
-        - snow-ai.j2
-      tags: scripts
+    - name: Install Ollama
+      ansible.builtin.shell: curl -fsSL https://ollama.com/install.sh | sh
+      args:
+        creates: /usr/bin/ollama
+      tags: install
+      

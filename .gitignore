@@ -27,3 +27,5 @@ servicenow_auth.py
 debug/
 link_checker_screenshots/
 CREDENTIALS.md
+link_check*
+*link*

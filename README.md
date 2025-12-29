@@ -33,7 +33,12 @@ Automation tools for various work tasks including lab operations, ServiceNow, an
    pip install -r requirements.txt
    ```
 
-3. Set up your credentials:
+3. Install selenium and drivers
+   ```bash
+   ansible-playbook playbooks/setup.yml -K
+   ```
+
+4. Set up your credentials:
    ```bash
    # Copy the template
    cp env.template .env
@@ -42,7 +47,7 @@ Automation tools for various work tasks including lab operations, ServiceNow, an
    vim .env  # or use your preferred editor
    ```
 
-4. (Optional) Configure settings:
+5. (Optional) Configure settings:
    ```bash
    cp config/config.ini.example config/config.ini
    # Edit config/config.ini if needed
