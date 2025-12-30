@@ -154,6 +154,154 @@ class LinkChecker(LabManager):
         self.run_screenshots_dir.mkdir(parents=True, exist_ok=True)
         
         self.current_screenshots_dir: Optional[Path] = None
+        self._access_redhat_logged_in = False
+    
+    def login_access_redhat(self) -> bool:
+        """
+        Login to access.redhat.com using SSO.
+        
+        This is useful for checking links that require authentication on access.redhat.com
+        (e.g., knowledge base articles that return 403 Forbidden for anonymous users).
+        
+        Uses the same credentials as the ROL login since they share the same SSO.
+        
+        Returns:
+            True if login was successful or already logged in, False otherwise.
+        """
+        if self._access_redhat_logged_in:
+            self.logger("Already logged into access.redhat.com")
+            return True
+        
+        self.logger("Logging into access.redhat.com (for authenticated link checking)...")
+        
+        try:
+            # Navigate to a page on access.redhat.com that requires login
+            # Using the SSO login URL directly
+            self.selenium_driver.go_to_url("https://access.redhat.com/login")
+            time.sleep(2)
+            
+            # Get credentials from config (same as ROL)
+            username, password, auth_helper = self._get_credentials("rol")
+            
+            if not username:
+                self.logger("⚠ No credentials configured - some access.redhat.com links may fail with 403")
+                return False
+            
+            try:
+                # Accept cookies if present
+                self.selenium_driver.accept_trustarc_cookies(timeout=3)
+            except:
+                pass
+            
+            # Check if we're already logged in (SSO may have carried over from ROL)
+            try:
+                # Look for the user menu that appears when logged in
+                WebDriverWait(self.driver, 3).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".pf-c-avatar, .logged-in, #UserButton"))
+                )
+                self.logger("✓ Already authenticated (SSO session active)")
+                self._access_redhat_logged_in = True
+                return True
+            except TimeoutException:
+                pass  # Not logged in, proceed with login
+            
+            # Step 1: Enter email/username on the first page
+            try:
+                # Try the standard SSO login page username field
+                username_field = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable(
+                        (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
+                    )
+                )
+                username_field.clear()
+                username_field.send_keys(f"{username}@redhat.com")
+                
+                # Click "Next" button
+                self.wait.until(EC.element_to_be_clickable(
+                    (By.XPATH, '//*[@id="login-show-step2"]')
+                )).click()
+                
+            except TimeoutException:
+                # Try alternative: direct SSO page
+                try:
+                    username_field = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.ID, "username"))
+                    )
+                    username_field.clear()
+                    username_field.send_keys(username)
+                except TimeoutException:
+                    self.logger("⚠ Could not find login form on access.redhat.com")
+                    self._prompt_for_manual_login(
+                        "Please complete the login to access.redhat.com manually."
+                    )
+                    self._access_redhat_logged_in = True
+                    return True
+            
+            # Step 2: Enter username on the SSO page (if not already done)
+            try:
+                username_field_sso = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))
+                )
+                username_field_sso.clear()
+                username_field_sso.send_keys(username)
+            except TimeoutException:
+                pass  # Already on password step
+            
+            # Step 3: Enter password
+            if password:
+                try:
+                    # Build full credential string (password + optional OTP)
+                    auth_token = self._get_auth_token(auth_helper)
+                    full_credential = str(password).replace('\n', '') + str(auth_token)
+                    
+                    password_field = WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))
+                    )
+                    password_field.clear()
+                    password_field.send_keys(full_credential)
+                    
+                    # Click submit button
+                    self.wait.until(EC.element_to_be_clickable(
+                        (By.XPATH, '//*[@id="submit"]')
+                    )).click()
+                    
+                    # Wait for login to complete
+                    time.sleep(3)
+                    
+                    # Verify login success by checking for logged-in indicator
+                    try:
+                        WebDriverWait(self.driver, 10).until(
+                            EC.any_of(
+                                EC.url_contains("access.redhat.com"),
+                                EC.presence_of_element_located((By.CSS_SELECTOR, ".pf-c-avatar, .logged-in, #UserButton"))
+                            )
+                        )
+                        self.logger("✓ Successfully logged into access.redhat.com")
+                        self._access_redhat_logged_in = True
+                        return True
+                    except TimeoutException:
+                        self.logger("⚠ Login may not have completed - continuing anyway")
+                        self._access_redhat_logged_in = True
+                        return True
+                        
+                except TimeoutException as e:
+                    self.logger(f"⚠ Timeout during password entry: {e}")
+                    self._prompt_for_manual_login(
+                        "Please complete the login to access.redhat.com manually."
+                    )
+                    self._access_redhat_logged_in = True
+                    return True
+            else:
+                # No password configured - prompt for manual login
+                self._prompt_for_manual_login(
+                    "Username autofilled. Please enter your password and complete authentication."
+                )
+                self._access_redhat_logged_in = True
+                return True
+                
+        except Exception as e:
+            self.logger(f"⚠ Error during access.redhat.com login: {e}")
+            return False
     
     def _parse_course_id(self, course_id: str) -> tuple[str, str]:
         """
@@ -1704,6 +1852,140 @@ class LinkChecker(LabManager):
         
         return jira_count
     
+    def load_reports_from_directory(self, reports_dir: str, skip_courses: list[str] = None, only_courses: list[str] = None) -> int:
+        """
+        Load CourseCheckReport objects from JSON files in a directory.
+        
+        This allows creating Jira tickets from previously generated reports
+        without re-running the link checker.
+        
+        Args:
+            reports_dir: Path to directory containing JSON report files
+            skip_courses: Optional list of course IDs to skip (already processed)
+            only_courses: Optional list of course IDs to process (if set, only these are loaded)
+            
+        Returns:
+            Number of reports loaded with broken links
+        """
+        reports_path = Path(reports_dir)
+        if not reports_path.exists():
+            raise FileNotFoundError(f"Reports directory not found: {reports_dir}")
+        
+        # Find all JSON files (excluding all_courses combined report)
+        json_files = sorted(reports_path.glob("link_check_report_*.json"))
+        json_files = [f for f in json_files if "all_courses" not in f.name]
+        
+        if not json_files:
+            self.logger(f"No JSON report files found in {reports_dir}")
+            return 0
+        
+        skip_courses = skip_courses or []
+        only_courses = only_courses or []
+        loaded_count = 0
+        broken_count = 0
+        
+        for json_file in json_files:
+            try:
+                with open(json_file, 'r') as f:
+                    data = json.load(f)
+                
+                # Each JSON file contains one course in the 'courses' array
+                for course_data in data.get('courses', []):
+                    course_id = course_data.get('course_id', '')
+                    
+                    # Skip if in skip list
+                    if course_id in skip_courses:
+                        self.logger(f"  Skipping {course_id} (already processed)")
+                        continue
+                    
+                    # Skip if only_courses is set and this course is not in the list
+                    if only_courses and course_id not in only_courses:
+                        continue
+                    
+                    # Parse check times
+                    check_started = None
+                    check_completed = None
+                    if course_data.get('check_started'):
+                        check_started = datetime.fromisoformat(course_data['check_started'])
+                    if course_data.get('check_completed'):
+                        check_completed = datetime.fromisoformat(course_data['check_completed'])
+                    
+                    # Create CourseCheckReport
+                    report = CourseCheckReport(
+                        course_id=course_id,
+                        course_title=course_data.get('course_title', course_id),
+                        screenshots_dir=course_data.get('screenshots_dir', ''),
+                        environment=course_data.get('environment', 'rol'),
+                        check_started=check_started,
+                        check_completed=check_completed,
+                        total_links=course_data.get('summary', {}).get('total_links', 0),
+                        valid_links=course_data.get('summary', {}).get('valid_links', 0),
+                        broken_links=course_data.get('summary', {}).get('broken_links', 0),
+                        ignored_links=course_data.get('summary', {}).get('ignored_links', 0),
+                    )
+                    
+                    # Find corresponding PDF file
+                    pdf_file = course_data.get('pdf_file')
+                    if pdf_file and os.path.exists(pdf_file):
+                        report.pdf_file = pdf_file
+                    else:
+                        # Try to find PDF with same base name
+                        pdf_candidate = json_file.with_suffix('.pdf')
+                        if pdf_candidate.exists():
+                            report.pdf_file = str(pdf_candidate)
+                    
+                    # Set JSON file path
+                    json_file_path = course_data.get('json_file')
+                    if json_file_path and os.path.exists(json_file_path):
+                        report.json_file = json_file_path
+                    else:
+                        report.json_file = str(json_file)
+                    
+                    # Load sections and results from chapters
+                    for chapter_name, sections in course_data.get('chapters', {}).items():
+                        for section_data in sections:
+                            # Create SectionInfo
+                            section_info = SectionInfo(
+                                title=section_data.get('title', ''),
+                                url=section_data.get('url', ''),
+                                chapter=chapter_name if chapter_name != 'General' else '',
+                                section_number=section_data.get('section_number', ''),
+                                screenshot_path=section_data.get('screenshot'),
+                            )
+                            report.sections.append(section_info)
+                            
+                            # Create LinkCheckResult for each link
+                            for link_data in section_data.get('links', []):
+                                result = LinkCheckResult(
+                                    url=link_data.get('url', ''),
+                                    source_page=section_data.get('title', ''),
+                                    source_section=link_data.get('location', ''),
+                                    link_text=link_data.get('text', ''),
+                                    chapter=chapter_name if chapter_name != 'General' else '',
+                                    section_number=section_data.get('section_number', ''),
+                                    status_code=link_data.get('status_code'),
+                                    is_valid=link_data.get('is_valid', True),
+                                    error_message=link_data.get('error'),
+                                    response_time_ms=link_data.get('response_time_ms'),
+                                )
+                                report.results.append(result)
+                    
+                    self.reports.append(report)
+                    loaded_count += 1
+                    
+                    if report.broken_links > 0:
+                        broken_count += 1
+                        self.logger(f"  ✓ Loaded {course_id}: {report.broken_links} broken link(s)")
+                    else:
+                        self.logger(f"  ✓ Loaded {course_id}: No broken links")
+                        
+            except Exception as e:
+                self.logger(f"  ✗ Error loading {json_file.name}: {e}")
+                continue
+        
+        self.logger(f"\nLoaded {loaded_count} reports, {broken_count} with broken links")
+        return broken_count
+    
     def generate_report(self, output_format: str = 'text', output_file: str = None) -> str:
         """
         Generate a summary report of all link checks.
@@ -1964,6 +2246,9 @@ class LinkChecker(LabManager):
                 'course_id': report.course_id,
                 'course_title': report.course_title,
                 'screenshots_dir': report.screenshots_dir,
+                'environment': report.environment,
+                'pdf_file': report.pdf_file,
+                'json_file': report.json_file,
                 'check_started': report.check_started.isoformat() if report.check_started else None,
                 'check_completed': report.check_completed.isoformat() if report.check_completed else None,
                 'summary': {

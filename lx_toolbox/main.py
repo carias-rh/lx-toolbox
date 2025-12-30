@@ -412,8 +412,11 @@ def check_links(ctx, course, env, browser, headless, screenshots, screenshots_di
         )
         reset_step_counter()
         
-        # Login
+        # Login to ROL
         checker.login(environment=environment)
+        
+        # Also login to access.redhat.com (to avoid 403 on knowledge base articles)
+        checker.login_access_redhat()
         
         # First round: Check all links
         if course:
@@ -502,6 +505,87 @@ def check_links(ctx, course, env, browser, headless, screenshots, screenshots_di
                 checker.close_browser()
         except Exception:
             pass
+
+@lab.command('create-jiras')
+@click.argument('reports_dir', type=click.Path(exists=True))
+@click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
+@click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
+@click.option('--skip', '-s', multiple=True, help='Course IDs to skip (can be specified multiple times)')
+@click.option('--only', '-o', multiple=True, help='Only process these course IDs (can be specified multiple times)')
+@click.pass_context
+def create_jiras(ctx, reports_dir, browser, headless, skip, only):
+    """
+    Create Jira tickets from existing link check reports.
+    
+    Loads JSON reports from the specified directory and creates Jira tickets
+    for courses with broken links. Useful for resuming after an interrupted run.
+    
+    REPORTS_DIR is the path to a directory containing link check report files
+    (e.g., link_check_reports/20251229_224911/).
+    
+    Examples:
+    
+        lx-tool lab create-jiras link_check_reports/20251229_224911/
+        
+        lx-tool lab create-jiras ./reports --skip do100-1.22 --skip rh124-9.3
+        
+        lx-tool lab create-jiras ./reports --only do121-4.10 --only rh294-9.0
+    """
+    config = ctx.obj['config']
+    
+    try:
+        from .core.link_checker import LinkChecker
+        from .utils.helpers import reset_step_counter
+        
+        reset_step_counter()
+        
+        # Initialize LinkChecker (we need the browser for Jira interaction)
+        checker = LinkChecker(config=config, browser_name=browser, is_headless=headless)
+        
+        click.echo(f"\n{'='*60}")
+        click.echo("LOADING REPORTS FROM DIRECTORY")
+        click.echo(f"{'='*60}")
+        click.echo(f"📂 Reports directory: {reports_dir}")
+        
+        # Load reports from directory
+        skip_list = list(skip) if skip else []
+        only_list = list(only) if only else []
+        
+        if only_list:
+            click.echo(f"✅ Only processing courses: {', '.join(only_list)}")
+        if skip_list:
+            click.echo(f"⏭️  Skipping courses: {', '.join(skip_list)}")
+        
+        broken_count = checker.load_reports_from_directory(reports_dir, skip_courses=skip_list, only_courses=only_list)
+        
+        if broken_count == 0:
+            click.echo("\n✓ No courses with broken links found in reports")
+            return
+        
+        click.echo(f"\n{'='*60}")
+        click.echo("CREATING JIRA TICKETS")
+        click.echo(f"{'='*60}")
+        
+        # Create Jira tickets for all loaded reports with broken links
+        jira_count = checker.create_jiras_for_all_broken_links()
+        
+        if jira_count > 0:
+            click.echo(f"\n✓ Created {jira_count} Jira ticket draft(s)")
+            click.echo("  Please review each tab and submit manually")
+        else:
+            click.echo("\n⚠ No Jira tickets created")
+            
+    except FileNotFoundError as e:
+        click.echo(f"✗ Error: {e}", err=True)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        click.echo("\n\nInterrupted by user.")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"✗ Error creating Jira tickets: {e}", err=True)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 @cli.group()
 @click.pass_context

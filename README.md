@@ -128,6 +128,7 @@ The Link Checker validates all external links in course content (References sect
 - **Multi-version support**: Can check all versions of a course
 - **Jira integration**: Optionally creates prefilled Jira tickets for broken links
 - **Fast validation**: Uses containerized `linkchecker` tool for quick checks when screenshots aren't needed
+- **Authenticated access**: Automatically logs into access.redhat.com to check knowledge base articles that require authentication (avoiding 403 Forbidden errors)
 
 **Report Structure:**
 
