@@ -346,18 +346,22 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless/headfull mode')
-@click.option('--output-dir', '-d', default='.', help='Directory to save reports (PDF and JSON)')
 @click.option('--screenshots/--no-screenshots', default=True, help='Take screenshots of each visited external link')
-@click.option('--screenshots-dir', '-s', default=None, help='Directory to save screenshots (default: ./link_checker_screenshots)')
+@click.option('--screenshots-dir', '-s', default=None, help='Custom directory for screenshots (default: link_check_reports/timestamp/screenshots)')
 @click.option('--retry/--no-retry', default=True, help='Retry failed links before generating report')
 @click.option('--all-versions/--single-version', default=False, help='Check all available versions of the course')
 @click.option('--create-jira/--no-jira', default=False, help='Create Jira tickets for broken links (prefilled, requires manual review)')
 @click.pass_context
-def check_links(ctx, course, env, browser, headless, output_dir, screenshots, screenshots_dir, retry, all_versions, create_jira):
+def check_links(ctx, course, env, browser, headless, screenshots, screenshots_dir, retry, all_versions, create_jira):
     """Check links in course content (References sections).
     
     Takes screenshots of each visited external link (including errors) and generates
     both PDF and JSON reports showing chapter/section hierarchy with HTTP response codes.
+    
+    Reports are saved in: link_check_reports/TIMESTAMP/
+    - Per-course PDF and JSON reports
+    - Combined all_courses PDF and JSON
+    - Screenshots in screenshots/ subdirectory
     
     Failed links are retried once before generating the final report.
     
@@ -370,30 +374,14 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
         
         lx-tool lab check-links --course rh124-9.3 --all-versions
         
-        lx-tool lab check-links --output-dir ./reports
-        
         lx-tool lab check-links --no-retry --no-screenshots
-        
-        lx-tool lab check-links --screenshots-dir ./my_screenshots
         
         lx-tool lab check-links --course do280-4.18 --create-jira
     """
-    from datetime import datetime as dt
     import os as os_module
     
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
-    
-    # Generate output filenames
-    timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
-    course_suffix = f"_{course}" if course else "_all_courses"
-    base_filename = f"link_check_report{course_suffix}_{timestamp}"
-    
-    # Ensure output directory exists
-    os_module.makedirs(output_dir, exist_ok=True)
-    
-    pdf_file = os_module.path.join(output_dir, f"{base_filename}.pdf")
-    json_file = os_module.path.join(output_dir, f"{base_filename}.json")
     
     click.echo(f"╔{'═'*60}╗")
     click.echo(f"║ {'LINK CHECKER':^58} ║")
@@ -412,8 +400,6 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
         click.echo(f"Screenshots Dir: {screenshots_dir}")
     click.echo(f"Retry Failed Links: {'Yes' if retry else 'No'}")
     click.echo(f"Create Jira for broken links: {'Yes' if create_jira else 'No'}")
-    click.echo(f"Output Directory: {output_dir}")
-    click.echo(f"Reports: {base_filename}.pdf, {base_filename}.json")
     click.echo()
     
     checker = None
@@ -446,24 +432,34 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
             if fixed_count > 0:
                 click.echo(f"\n✓ {fixed_count} link(s) fixed on retry")
         
-        # Generate both PDF and JSON reports
+        # Generate reports in link_check_reports/timestamp/
         click.echo(f"\n{'='*60}")
         click.echo("Generating reports...")
         click.echo(f"{'='*60}")
+        click.echo(f"Reports directory: {checker.run_reports_dir}")
         
-        # PDF report
+        # Generate per-course PDF and JSON reports
+        for report in checker.reports:
+            click.echo(f"\n📚 {report.course_id}:")
+            try:
+                checker.generate_course_reports(report)
+            except Exception as e:
+                click.echo(f"  ⚠ Error generating report: {e}")
+        
+        # Generate combined all_courses report
+        all_courses_base = os_module.path.join(str(checker.run_reports_dir), f"link_check_report_all_courses_{checker.run_timestamp}")
+        click.echo(f"\n📊 All courses combined report:")
         try:
-            pdf_path = checker.generate_report('pdf', pdf_file)
-            click.echo(f"✓ PDF report: {pdf_path}")
+            pdf_path = checker.generate_report('pdf', f"{all_courses_base}.pdf")
+            click.echo(f"  📄 PDF: {pdf_path}")
         except ImportError as e:
-            click.echo(f"⚠ PDF report skipped (missing dependency: {e})")
-            pdf_path = None
+            click.echo(f"  ⚠ PDF report skipped (missing dependency: {e})")
         
-        # JSON report
         json_content = checker.generate_report('json')
+        json_file = f"{all_courses_base}.json"
         with open(json_file, 'w') as f:
             f.write(json_content)
-        click.echo(f"✓ JSON report: {json_file}")
+        click.echo(f"  📋 JSON: {json_file}")
         
         # Summary
         total_broken = sum(r.broken_links for r in checker.reports)
@@ -481,10 +477,7 @@ def check_links(ctx, course, env, browser, headless, output_dir, screenshots, sc
             click.echo(f"\n{'='*60}")
             click.echo("CREATING JIRA TICKETS")
             click.echo(f"{'='*60}")
-            jira_count = checker.create_jiras_for_all_broken_links(
-                pdf_file=pdf_path if pdf_path else None,
-                json_file=json_file
-            )
+            jira_count = checker.create_jiras_for_all_broken_links()
             if jira_count > 0:
                 click.echo(f"\n✓ Created {jira_count} Jira ticket draft(s)")
                 click.echo("  Please review each tab and submit manually")

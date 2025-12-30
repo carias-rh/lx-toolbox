@@ -92,6 +92,8 @@ class CourseCheckReport:
     sections: list[SectionInfo] = field(default_factory=list)
     screenshots_dir: str = ""
     environment: str = "rol"  # Lab environment used (rol, rol_stage, china)
+    pdf_file: str = ""  # Path to generated PDF report for this course
+    json_file: str = ""  # Path to generated JSON report for this course
 
 
 class LinkChecker(LabManager):
@@ -135,15 +137,20 @@ class LinkChecker(LabManager):
             logger=self.logger
         )
         
-        # Setup screenshots directory with timestamp for this run
+        # Setup reports directory with timestamp for this run
+        # Structure: link_check_reports/timestamp/screenshots/
+        self.reports_base_dir = Path.cwd() / "link_check_reports"
+        self.run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.run_reports_dir = self.reports_base_dir / self.run_timestamp
+        self.run_reports_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Screenshots go inside the run directory
         if screenshots_dir:
             self.screenshots_base_dir = Path(screenshots_dir)
+            self.run_screenshots_dir = self.screenshots_base_dir / self.run_timestamp
         else:
-            self.screenshots_base_dir = Path.cwd() / "link_checker_screenshots"
-        
-        # Create a timestamped directory for this run
-        run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.run_screenshots_dir = self.screenshots_base_dir / run_timestamp
+            self.screenshots_base_dir = self.run_reports_dir / "screenshots"
+            self.run_screenshots_dir = self.screenshots_base_dir
         self.run_screenshots_dir.mkdir(parents=True, exist_ok=True)
         
         self.current_screenshots_dir: Optional[Path] = None
@@ -1453,16 +1460,14 @@ class LinkChecker(LabManager):
         jql = self._build_broken_links_jql(course_id, broken_urls)
         return f"https://issues.redhat.com/issues/?jql={quote(jql)}"
     
-    def create_jira_for_broken_links(self, report: 'CourseCheckReport', 
-                                      pdf_file: str = None, json_file: str = None) -> bool:
+    def create_jira_for_broken_links(self, report: 'CourseCheckReport') -> bool:
         """
         Create a Jira ticket for broken links found in a course.
         Opens a new tab with the prefilled ticket for human review.
+        Uses the report's own pdf_file and json_file paths.
         
         Args:
             report: CourseCheckReport with broken links
-            pdf_file: Path to PDF report to attach
-            json_file: Path to JSON report to attach
             
         Returns:
             True if Jira creation was initiated, False otherwise
@@ -1476,6 +1481,10 @@ class LinkChecker(LabManager):
         if not broken_results:
             self.logger("No broken links to report for this course")
             return False
+        
+        # Use report's own files
+        pdf_file = report.pdf_file if report.pdf_file else None
+        json_file = report.json_file if report.json_file else None
         
         broken_urls = [r.url for r in broken_results]
         course_name, version = self._parse_course_id(report.course_id)
@@ -1665,10 +1674,11 @@ class LinkChecker(LabManager):
             self.logger(f"Failed to create Jira ticket: {e}")
             return False
     
-    def create_jiras_for_all_broken_links(self, pdf_file: str = None, json_file: str = None) -> int:
+    def create_jiras_for_all_broken_links(self) -> int:
         """
         Create Jira tickets for all courses with broken links.
         Opens one tab per course that has broken links.
+        Each ticket uses its own course-specific PDF and JSON report files.
         
         Returns the number of Jira tickets initiated.
         """
@@ -1682,7 +1692,7 @@ class LinkChecker(LabManager):
         for report in self.reports:
             broken_count = sum(1 for r in report.results if not r.is_valid)
             if broken_count > 0:
-                if self.create_jira_for_broken_links(report, pdf_file, json_file):
+                if self.create_jira_for_broken_links(report):
                     jira_count += 1
                 time.sleep(2)  # Brief pause between tabs
         
@@ -1968,6 +1978,44 @@ class LinkChecker(LabManager):
             report_data['courses'].append(course_data)
         
         return json.dumps(report_data, indent=2, ensure_ascii=False)
+    
+    def generate_course_reports(self, report: 'CourseCheckReport') -> tuple[str, str]:
+        """
+        Generate PDF and JSON reports for a single course.
+        Saves files to the run_reports_dir and stores paths in the report object.
+        
+        Returns:
+            Tuple of (pdf_path, json_path)
+        """
+        course_name, version = self._parse_course_id(report.course_id)
+        base_filename = f"link_check_report_{report.course_id}_{self.run_timestamp}"
+        
+        pdf_file = str(self.run_reports_dir / f"{base_filename}.pdf")
+        json_file = str(self.run_reports_dir / f"{base_filename}.json")
+        
+        # Temporarily save current reports and replace with single report
+        original_reports = self.reports
+        self.reports = [report]
+        
+        try:
+            # Generate PDF
+            if PDF_SUPPORT:
+                self._generate_pdf_report(pdf_file)
+                report.pdf_file = pdf_file
+                print(f"  📄 PDF: {pdf_file}")
+            
+            # Generate JSON
+            json_content = self._generate_json_report()
+            with open(json_file, 'w') as f:
+                f.write(json_content)
+            report.json_file = json_file
+            print(f"  📋 JSON: {json_file}")
+            
+        finally:
+            # Restore original reports
+            self.reports = original_reports
+        
+        return pdf_file, json_file
     
     def _generate_pdf_report(self, output_file: str) -> str:
         """
