@@ -344,7 +344,7 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
 @lab.command('check-links')
 @click.option('--course', '-c', default=None, help='Specific course ID to check (e.g., rh124-9.3). Checks all if omitted.')
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
-@click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
+@click.option('--browser', '-b', default='chrome', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless/headfull mode')
 @click.option('--screenshots/--no-screenshots', default=True, help='Take screenshots of each visited external link')
 @click.option('--screenshots-dir', '-s', default=None, help='Custom directory for screenshots (default: link_check_reports/timestamp/screenshots)')
@@ -415,9 +415,6 @@ def check_links(ctx, course, env, browser, headless, screenshots, screenshots_di
         # Login to ROL
         checker.login(environment=environment)
         
-        # Also login to access.redhat.com (to avoid 403 on knowledge base articles)
-        checker.login_access_redhat()
-        
         # First round: Check all links
         if course:
             if all_versions:
@@ -480,31 +477,21 @@ def check_links(ctx, course, env, browser, headless, screenshots, screenshots_di
             click.echo(f"\n{'='*60}")
             click.echo("CREATING JIRA TICKETS")
             click.echo(f"{'='*60}")
-            jira_count = checker.create_jiras_for_all_broken_links()
-            if jira_count > 0:
-                click.echo(f"\n✓ Created {jira_count} Jira ticket draft(s)")
-                click.echo("  Please review each tab and submit manually")
+            checker.create_jiras_for_all_broken_links()
         
         if total_broken > 0:
             click.echo(f"\n⚠ Found {total_broken} broken link(s)", err=True)
-            # Don't exit immediately if Jira tabs are open - user needs to review
-            if not create_jira:
-                sys.exit(1)
         else:
             click.echo("\n✓ All links valid")
+        
+        # Keep browser open - wait for user
+        click.echo("\n📌 Browser kept open. Press Enter to close and exit...")
+        input()
             
     except KeyboardInterrupt:
         click.echo("\n\nInterrupted by user.")
-        sys.exit(1)
     except Exception as e:
         click.echo(f"✗ Error checking links: {e}", err=True)
-        sys.exit(1)
-    finally:
-        try:
-            if not create_jira:
-                checker.close_browser()
-        except Exception:
-            pass
 
 @lab.command('create-jiras')
 @click.argument('reports_dir', type=click.Path(exists=True))
@@ -569,23 +556,19 @@ def create_jiras(ctx, reports_dir, browser, headless, skip, only):
         # Create Jira tickets for all loaded reports with broken links
         jira_count = checker.create_jiras_for_all_broken_links()
         
-        if jira_count > 0:
-            click.echo(f"\n✓ Created {jira_count} Jira ticket draft(s)")
-            click.echo("  Please review each tab and submit manually")
-        else:
+        if jira_count == 0:
             click.echo("\n⚠ No Jira tickets created")
+        
+        # Keep browser open - wait for user
+        click.echo("\n📌 Browser kept open. Press Enter to close and exit...")
+        input()
             
     except FileNotFoundError as e:
         click.echo(f"✗ Error: {e}", err=True)
-        sys.exit(1)
     except KeyboardInterrupt:
         click.echo("\n\nInterrupted by user.")
-        sys.exit(1)
     except Exception as e:
         click.echo(f"✗ Error creating Jira tickets: {e}", err=True)
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
 
 @cli.group()
 @click.pass_context

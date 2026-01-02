@@ -118,6 +118,8 @@ class LinkChecker(LabManager):
     # Request timeout for link validation
     REQUEST_TIMEOUT = 10
     MAX_LINK_WORKERS = 10  # Max threads for parallel link checking
+    MAX_PARALLEL_TABS = 15  # Max browser tabs for parallel screenshot taking
+    PAGE_LOAD_TIMEOUT = 300  # Timeout in seconds for page loads (5 minutes for slow sites)
     
     def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None,
                  screenshots_dir: str = None):
@@ -155,8 +157,56 @@ class LinkChecker(LabManager):
         
         self.current_screenshots_dir: Optional[Path] = None
         self._access_redhat_logged_in = False
+        
+        # Parallel screenshot futures (section-level parallelism)
+        self._screenshot_futures: list = []
+        self._screenshot_executor: Optional[ThreadPoolExecutor] = None
     
-    def login_access_redhat(self) -> bool:
+    def _is_access_redhat_url(self, url: str) -> bool:
+        """Check if a URL is from access.redhat.com (requires authentication)."""
+        return 'access.redhat.com' in url.lower()
+    
+    def _validate_url_with_browser(self, url: str) -> tuple[int, bool]:
+        """
+        Validate a URL using the browser (Selenium) instead of HTTP requests.
+        This uses the browser's authenticated session.
+        
+        Returns:
+            Tuple of (status_code, is_valid)
+        """
+        try:
+            # Store current URL to return to
+            original_url = self.driver.current_url
+            
+            # Navigate to the URL
+            self.driver.get(url)
+            time.sleep(2)  # Wait for page to load
+            
+            # Check for common error indicators
+            page_source = self.driver.page_source.lower()
+            page_title = self.driver.title.lower() if self.driver.title else ""
+            current_url = self.driver.current_url.lower()
+            
+            # Check for 403 Forbidden
+            if '403' in page_title or 'forbidden' in page_title or 'access denied' in page_source[:1000]:
+                return (403, False)
+            
+            # Check for 404 Not Found
+            if '404' in page_title or 'not found' in page_title:
+                return (404, False)
+            
+            # Check for login redirects (session expired)
+            if 'login' in current_url and 'access.redhat.com' not in current_url:
+                return (401, False)
+            
+            # If we got here without errors, assume success
+            return (200, True)
+            
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"Browser validation error for {url}: {e}")
+            return (0, False)
+    
+    def login_access_redhat(self, force: bool = False) -> bool:
         """
         Login to access.redhat.com using SSO.
         
@@ -165,14 +215,21 @@ class LinkChecker(LabManager):
         
         Uses the same credentials as the ROL login since they share the same SSO.
         
+        Args:
+            force: If True, forces re-login even if already logged in (useful when session expires)
+        
         Returns:
             True if login was successful or already logged in, False otherwise.
         """
-        if self._access_redhat_logged_in:
+        if self._access_redhat_logged_in and not force:
             self.logger("Already logged into access.redhat.com")
             return True
         
-        self.logger("Logging into access.redhat.com (for authenticated link checking)...")
+        if force:
+            self._access_redhat_logged_in = False
+            self.logger("Re-authenticating to access.redhat.com (session may have expired)...")
+        else:
+            self.logger("Logging into access.redhat.com (for authenticated link checking)...")
         
         try:
             # Navigate to a page on access.redhat.com that requires login
@@ -331,27 +388,7 @@ class LinkChecker(LabManager):
         sanitized = re.sub(r'\s+', '_', sanitized)
         return sanitized[:100]  # Limit length
     
-    def _take_screenshot(self, name: str, subdir: str = None) -> Optional[str]:
-        """Take a screenshot and save it to the screenshots directory."""
-        try:
-            if subdir:
-                screenshot_dir = self.current_screenshots_dir / subdir
-            else:
-                screenshot_dir = self.current_screenshots_dir
-            
-            screenshot_dir.mkdir(parents=True, exist_ok=True)
-            
-            timestamp = datetime.now().strftime("%H%M%S")
-            filename = f"{timestamp}_{self._sanitize_filename(name)}.png"
-            filepath = screenshot_dir / filename
-            
-            self.driver.save_screenshot(str(filepath))
-            self.logger(f"    📸 Screenshot saved: {filepath.name}")
-            
-            return str(filepath)
-        except Exception as e:
-            self.logger(f"    ⚠ Failed to take screenshot: {e}")
-            return None
+
     
     def _parse_section_title(self, title: str) -> tuple[str, str, str]:
         """
@@ -437,6 +474,9 @@ class LinkChecker(LabManager):
         """
         Validate a single link by making an HTTP HEAD request.
         Optionally navigate to the link and take a screenshot for human review.
+        
+        For access.redhat.com URLs that return 403, attempts to re-login and 
+        validate using the browser's authenticated session.
         """
         result = LinkCheckResult(
             url=url,
@@ -462,6 +502,23 @@ class LinkChecker(LabManager):
             
             if not result.is_valid:
                 result.error_message = self._get_http_status_description(response.status_code)
+                
+                # Special handling for access.redhat.com 403 errors (session may have expired)
+                if result.status_code == 403 and self._is_access_redhat_url(url):
+                    logging.getLogger(__name__).debug(
+                        f"Got 403 from access.redhat.com, attempting re-login and browser validation..."
+                    )
+                    # Re-login to access.redhat.com (force re-authentication)
+                    if self.login_access_redhat(force=True):
+                        # Retry validation using the browser
+                        browser_status, browser_valid = self._validate_url_with_browser(url)
+                        if browser_valid:
+                            result.status_code = browser_status
+                            result.is_valid = True
+                            result.error_message = None
+                            logging.getLogger(__name__).debug(
+                                f"✓ access.redhat.com link validated successfully after re-login"
+                            )
                 
         except requests.exceptions.Timeout:
             result.is_valid = False
@@ -613,37 +670,25 @@ class LinkChecker(LabManager):
             result.is_valid = False
             result.error_message = f"Linkchecker error: {str(e)[:200]}"
         
+        # Special handling for access.redhat.com 403 errors (session may have expired)
+        if not result.is_valid and result.status_code == 403 and self._is_access_redhat_url(url):
+            logging.getLogger(__name__).debug(
+                f"Got 403 from access.redhat.com via linkchecker, attempting re-login and browser validation..."
+            )
+            # Re-login to access.redhat.com (force re-authentication)
+            if self.login_access_redhat(force=True):
+                # Retry validation using the browser
+                browser_status, browser_valid = self._validate_url_with_browser(url)
+                if browser_valid:
+                    result.status_code = browser_status
+                    result.is_valid = True
+                    result.error_message = None
+                    logging.getLogger(__name__).debug(
+                        f"✓ access.redhat.com link validated successfully after re-login"
+                    )
+        
         return result
     
-    def _parse_sql_values(self, values_str: str) -> list[str]:
-        """
-        Parse comma-separated SQL values, respecting quoted strings.
-        Handles: 'value',NULL,123,'string with, comma'
-        """
-        values = []
-        current = ""
-        in_quotes = False
-        quote_char = None
-        
-        for char in values_str:
-            if char in ("'", '"') and (not in_quotes or char == quote_char):
-                if in_quotes and char == quote_char:
-                    in_quotes = False
-                    quote_char = None
-                else:
-                    in_quotes = True
-                    quote_char = char
-                current += char
-            elif char == ',' and not in_quotes:
-                values.append(current.strip())
-                current = ""
-            else:
-                current += char
-        
-        if current.strip():
-            values.append(current.strip())
-        
-        return values
     
     def _screenshot_external_link(self, url: str, link_text: str, source_page: str, max_retries: int = 3) -> Optional[str]:
         """
@@ -682,6 +727,221 @@ class LinkChecker(LabManager):
                     return None
         
         return None
+    
+    def _screenshot_section_parallel(self, links: list[dict], screenshots_dir: Path, 
+                                       section_id: str) -> list[LinkCheckResult]:
+        """
+        Screenshot a section's links in a separate browser window.
+        Called in parallel threads - each section gets its own browser.
+        """
+        from selenium import webdriver
+        from selenium.webdriver.remote.remote_connection import RemoteConnection
+        
+        # Reduce default timeout for Selenium commands (default is 120s with 3 retries)
+        RemoteConnection.set_timeout(30)
+        
+        results = []
+        if not links:
+            return results
+        
+        driver = None
+        try:
+            # Create browser for this section
+            if self.selenium_driver.browser_name == "chrome":
+                options = webdriver.ChromeOptions()
+                options.add_argument('--ignore-certificate-errors')
+                options.add_argument("--window-size=1600,1200")
+                if self.selenium_driver.is_headless:
+                    options.add_argument("--headless")
+                driver = webdriver.Chrome(options=options)
+            else:
+                options = webdriver.FirefoxOptions()
+                if self.selenium_driver.is_headless:
+                    options.add_argument("-headless")
+                driver = webdriver.Firefox(options=options)
+            
+            # Reduce command timeout (avoid long waits on stuck tabs)
+            try:
+                driver.command_executor._conn.timeout = 30
+            except Exception:
+                pass
+            driver.set_page_load_timeout(self.PAGE_LOAD_TIMEOUT)
+            original_window = driver.current_window_handle
+            
+            # Process in batches of MAX_PARALLEL_TABS
+            for batch_start in range(0, len(links), self.MAX_PARALLEL_TABS):
+                batch = links[batch_start:batch_start + self.MAX_PARALLEL_TABS]
+                tab_map = {}
+                
+                # Open tabs and navigate
+                for i, link in enumerate(batch):
+                    try:
+                        if i == 0:
+                            handle = original_window
+                        else:
+                            driver.execute_script("window.open('about:blank');")
+                            handle = driver.window_handles[-1]
+                        
+                        driver.switch_to.window(handle)
+                        tab_map[handle] = link
+                        
+                        try:
+                            driver.get(link['url'])
+                        except TimeoutException:
+                            pass  # Continue with partial load
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                
+                time.sleep(5)  # Let pages settle
+                
+                # Take screenshots
+                for handle, link in tab_map.items():
+                    try:
+                        driver.switch_to.window(handle)
+                        
+                        # HTTP validation
+                        result = self._validate_link_http_only(
+                            link['url'], link['source_page'], link['source_section'],
+                            link['link_text'], link['chapter'], link['section_number']
+                        )
+                        
+                        # Screenshot
+                        try:
+                            section_dir = screenshots_dir / self._sanitize_filename(link['source_page'])
+                            section_dir.mkdir(parents=True, exist_ok=True)
+                            filepath = section_dir / f"{datetime.now().strftime('%H%M%S%f')[:9]}_{self._sanitize_filename(link['link_text'])[:50]}.png"
+                            driver.save_screenshot(str(filepath))
+                            result.screenshot_path = str(filepath)
+                        except Exception:
+                            pass
+                        
+                        results.append(result)
+                        status = result.status_code or 'ERR'
+                        print(f"      {'✓' if result.is_valid else '✗'} [{status}] [{section_id}] {link['url']}")
+                        
+                    except Exception as e:
+                        results.append(LinkCheckResult(
+                            url=link['url'], source_page=link['source_page'],
+                            source_section=link['source_section'], link_text=link['link_text'],
+                            chapter=link['chapter'], section_number=link['section_number'],
+                            is_valid=False, error_message=str(e)[:100]
+                        ))
+                
+                # Close extra tabs
+                for h in driver.window_handles:
+                    if h != original_window:
+                        try:
+                            driver.switch_to.window(h)
+                            driver.close()
+                        except Exception:
+                            pass
+                driver.switch_to.window(original_window)
+                
+        except Exception as e:
+            logging.error(f"Screenshot section error [{section_id}]: {e}")
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+        
+        return results
+    
+    def _submit_screenshot_section(self, links: list[dict], section_title: str):
+        """Submit a section for parallel screenshot processing."""
+        if not links:
+            return
+        
+        if self._screenshot_executor is None:
+            self._screenshot_executor = ThreadPoolExecutor(max_workers=10)
+            self._screenshot_futures = []
+        
+        future = self._screenshot_executor.submit(
+            self._screenshot_section_parallel,
+            links.copy(),
+            self.current_screenshots_dir,
+            section_title[:25]
+        )
+        self._screenshot_futures.append(future)
+        print(f"      📤 Submitted {len(links)} URLs [{section_title}]")
+    
+    def _collect_screenshot_results(self, report: CourseCheckReport):
+        """Collect results from all parallel screenshot tasks."""
+        if not self._screenshot_futures:
+            return 0
+        
+        print(f"\n      ⏳ Waiting for {len(self._screenshot_futures)} section(s)...")
+        
+        total = 0
+        for future in as_completed(self._screenshot_futures):
+            try:
+                results = future.result(timeout=600)  # 10 min max per section
+                for r in results:
+                    report.results.append(r)
+                    if r.is_valid:
+                        report.valid_links += 1
+                    else:
+                        report.broken_links += 1
+                total += len(results)
+            except Exception as e:
+                logging.error(f"Screenshot future error: {e}")
+        
+        self._screenshot_futures.clear()
+        if self._screenshot_executor:
+            self._screenshot_executor.shutdown(wait=False)
+            self._screenshot_executor = None
+        
+        print(f"      ✅ Collected {total} results")
+        return total
+    
+    def _validate_link_http_only(self, url: str, source_page: str, source_section: str,
+                                  link_text: str, chapter: str = "", section_number: str = "") -> LinkCheckResult:
+        """
+        Validate a link using HTTP requests only (no screenshots).
+        This is a simplified version of _validate_link for use with parallel screenshot taking.
+        """
+        result = LinkCheckResult(
+            url=url,
+            source_page=source_page,
+            source_section=source_section,
+            link_text=link_text,
+            chapter=chapter,
+            section_number=section_number
+        )
+        
+        try:
+            start_time = time.time()
+            # Use HEAD request first for efficiency
+            response = self.session.head(url, timeout=self.REQUEST_TIMEOUT, allow_redirects=True)
+            
+            # Some servers don't support HEAD, fall back to GET
+            if response.status_code == 405:
+                response = self.session.get(url, timeout=self.REQUEST_TIMEOUT, allow_redirects=True, stream=True)
+            
+            result.response_time_ms = (time.time() - start_time) * 1000
+            result.status_code = response.status_code
+            result.is_valid = response.status_code < 400
+            
+            if not result.is_valid:
+                result.error_message = self._get_http_status_description(response.status_code)
+                
+        except requests.exceptions.Timeout:
+            result.is_valid = False
+            result.error_message = "Request Timeout"
+        except requests.exceptions.ConnectionError as e:
+            result.is_valid = False
+            result.error_message = f"Connection Error: {str(e)[:100]}"
+        except requests.exceptions.RequestException as e:
+            result.is_valid = False
+            result.error_message = f"Request Error: {str(e)[:100]}"
+        except Exception as e:
+            result.is_valid = False
+            result.error_message = f"Unexpected Error: {str(e)[:100]}"
+        
+        return result
     
     def go_to_catalog(self, environment: str):
         """Navigate to the ROL catalog page."""
@@ -1297,7 +1557,7 @@ class LinkChecker(LabManager):
         if use_linkchecker:
             self.logger("  Using linkchecker container for fast validation (no screenshots)")
         elif take_screenshots:
-            self.logger("  Using Selenium for validation with screenshots")
+            self.logger(f"  Using parallel screenshots (1 browser window per section, {self.MAX_PARALLEL_TABS} tabs each)")
         else:
             self.logger("  Using HTTP requests for validation (container not available)")
         
@@ -1405,8 +1665,11 @@ class LinkChecker(LabManager):
                             else:
                                 report.broken_links += 1
                                 print(f"      ✗ [{status_code}] {link['url']} - {result.error_message}")
+                elif take_screenshots and links_to_check:
+                    # Submit section for parallel screenshot (each section gets its own browser window)
+                    self._submit_screenshot_section(links_to_check, section_title)
                 else:
-                    # Sequential checking (with Selenium for screenshots)
+                    # Sequential checking without screenshots (fallback when no container available)
                     for link in links_to_check:
                         result = self._validate_link(
                             url=link['url'],
@@ -1415,7 +1678,7 @@ class LinkChecker(LabManager):
                             link_text=link['link_text'],
                             chapter=link['chapter'],
                             section_number=link['section_number'],
-                            take_screenshot=take_screenshots
+                            take_screenshot=False
                         )
                         
                         report.results.append(result)
@@ -1428,8 +1691,17 @@ class LinkChecker(LabManager):
                             report.broken_links += 1
                             print(f"      ✗ [{status_code}] {link['url']} - {result.error_message}")
             
+            # Collect results from all parallel screenshot sections
+            if take_screenshots and self._screenshot_futures:
+                self._collect_screenshot_results(report)
+            
         except Exception as e:
             self.logger(f"Error checking course {course_id}: {e}")
+            # Clean up executor on error
+            if self._screenshot_executor:
+                self._screenshot_executor.shutdown(wait=False)
+                self._screenshot_executor = None
+                self._screenshot_futures.clear()
         
         report.check_completed = datetime.now()
         self.reports.append(report)
@@ -1804,9 +2076,7 @@ class LinkChecker(LabManager):
                 logging.debug(f"Failed to set priority: {e}")
 
             
-            print(f"\n  📝 Jira ticket prefilled in new tab")
-            print(f"     Summary: {summary}")
-            print(f"     Broken links: {len(broken_results)}")
+            print(f"\n  📝 Jira ticket prefilled: {summary}")
             if attached_files:
                 print(f"     📎 Attached: {', '.join(attached_files)}")
             else:
@@ -1814,7 +2084,6 @@ class LinkChecker(LabManager):
                     print(f"     📎 Please attach manually: {pdf_file}")
                 if json_file:
                     print(f"     📎 Please attach manually: {json_file}")
-            print(f"     ⚠️  Review and submit manually")
             
             return True
             
