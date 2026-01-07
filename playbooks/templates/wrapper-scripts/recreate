@@ -1,0 +1,50 @@
+#!/bin/bash
+# LX Toolbox Wrapper - Recreate Lab
+# Usage: recreate <course> [environment]
+# Example: recreate 199
+#          recreate do180 rol-stage
+
+set -e
+
+# Auto-detect lx-tool location
+if command -v lx-tool &> /dev/null; then
+    LX_TOOL="lx-tool"
+elif [[ -n "${LX_TOOLBOX_DIR}" ]] && [[ -x "${LX_TOOLBOX_DIR}/scripts/lx-tool" ]]; then
+    LX_TOOL="${LX_TOOLBOX_DIR}/scripts/lx-tool"
+elif [[ -x "/opt/lx-toolbox/scripts/lx-tool" ]]; then
+    LX_TOOL="/opt/lx-toolbox/scripts/lx-tool"
+else
+    echo "Error: lx-tool not found. Please install lx-toolbox or set LX_TOOLBOX_DIR environment variable." >&2
+    exit 1
+fi
+
+show_help() {
+    echo "Usage: recreate <course> [environment]"
+    echo ""
+    echo "Recreate (delete and create) a lab for the specified course."
+    echo ""
+    echo "Arguments:"
+    echo "  course       Course ID or short name (e.g., '199', 'do180', 'rh124-9.3')"
+    echo "  environment  Optional: rol (default), rol-stage, china"
+    echo ""
+    echo "Examples:"
+    echo "  recreate 199              # Recreate rh199 lab on ROL production"
+    echo "  recreate do180            # Recreate do180 lab"
+    echo "  recreate do180 rol-stage  # Recreate on ROL staging"
+}
+
+if [[ $# -eq 0 ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+    show_help
+    exit 0
+fi
+
+COURSE="$1"
+ENV="${2:-rol}"
+
+echo ""
+echo "Recreating course: $COURSE"
+echo "Environment: $ENV"
+echo ""
+
+exec $LX_TOOL lab recreate "$COURSE" --env "$ENV"
+

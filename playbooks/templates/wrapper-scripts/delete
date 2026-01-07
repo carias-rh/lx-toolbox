@@ -1,0 +1,50 @@
+#!/bin/bash
+# LX Toolbox Wrapper - Delete Lab
+# Usage: delete <course> [environment]
+# Example: delete 199
+#          delete do180 rol-stage
+
+set -e
+
+# Auto-detect lx-tool location
+if command -v lx-tool &> /dev/null; then
+    LX_TOOL="lx-tool"
+elif [[ -n "${LX_TOOLBOX_DIR}" ]] && [[ -x "${LX_TOOLBOX_DIR}/scripts/lx-tool" ]]; then
+    LX_TOOL="${LX_TOOLBOX_DIR}/scripts/lx-tool"
+elif [[ -x "/opt/lx-toolbox/scripts/lx-tool" ]]; then
+    LX_TOOL="/opt/lx-toolbox/scripts/lx-tool"
+else
+    echo "Error: lx-tool not found. Please install lx-toolbox or set LX_TOOLBOX_DIR environment variable." >&2
+    exit 1
+fi
+
+show_help() {
+    echo "Usage: delete <course> [environment]"
+    echo ""
+    echo "Delete a lab for the specified course."
+    echo ""
+    echo "Arguments:"
+    echo "  course       Course ID or short name (e.g., '199', 'do180', 'rh124-9.3')"
+    echo "  environment  Optional: rol (default), rol-stage, china"
+    echo ""
+    echo "Examples:"
+    echo "  delete 199              # Delete rh199 lab on ROL production"
+    echo "  delete do180            # Delete do180 lab"
+    echo "  delete do180 rol-stage  # Delete on ROL staging"
+}
+
+if [[ $# -eq 0 ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+    show_help
+    exit 0
+fi
+
+COURSE="$1"
+ENV="${2:-rol}"
+
+echo ""
+echo "Deleting course: $COURSE"
+echo "Environment: $ENV"
+echo ""
+
+exec $LX_TOOL lab delete "$COURSE" --env "$ENV"
+

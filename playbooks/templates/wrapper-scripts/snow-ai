@@ -1,0 +1,48 @@
+#!/bin/bash
+# LX Toolbox Wrapper - ServiceNow AI Processor
+# Usage: snow-ai [--ticket NUMBER] [--env ENVIRONMENT]
+# Example: snow-ai
+#          snow-ai --ticket INC12345678
+
+set -e
+
+# Auto-detect lx-tool location
+if command -v lx-tool &> /dev/null; then
+    LX_TOOL="lx-tool"
+elif [[ -n "${LX_TOOLBOX_DIR}" ]] && [[ -x "${LX_TOOLBOX_DIR}/scripts/lx-tool" ]]; then
+    LX_TOOL="${LX_TOOLBOX_DIR}/scripts/lx-tool"
+elif [[ -x "/opt/lx-toolbox/scripts/lx-tool" ]]; then
+    LX_TOOL="/opt/lx-toolbox/scripts/lx-tool"
+else
+    echo "Error: lx-tool not found. Please install lx-toolbox or set LX_TOOLBOX_DIR environment variable." >&2
+    exit 1
+fi
+
+show_help() {
+    echo "Usage: snow-ai [options]"
+    echo ""
+    echo "Process ServiceNow tickets with LLM analysis."
+    echo "Opens one window per ticket with tabs for SNOW, ROL, Jira search, and Jira create."
+    echo ""
+    echo "Options:"
+    echo "  -t, --ticket NUM   SNOW ticket number (can be repeated)"
+    echo "  --env ENV          Lab environment (rol, rol-stage, china)"
+    echo "  --browser BROWSER  Browser to use (firefox, chrome)"
+    echo "  --headless         Run browser in headless mode"
+    echo ""
+    echo "If no ticket is specified, uses the user's queue."
+    echo ""
+    echo "Examples:"
+    echo "  snow-ai                              # Process tickets from user queue"
+    echo "  snow-ai --ticket INC12345678         # Process specific ticket"
+    echo "  snow-ai -t INC111 -t INC222          # Process multiple tickets"
+    echo "  snow-ai --env rol-stage              # Use ROL staging"
+}
+
+if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+    show_help
+    exit 0
+fi
+
+exec $LX_TOOL snowai "$@"
+

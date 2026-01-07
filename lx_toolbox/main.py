@@ -131,17 +131,6 @@ def start(ctx, course_id, env, browser, headless):
             lab_mgr.start_lab(course_id=course_id)
         elif secondary_status in ["STOP", "STOPPING"]:
             click.echo(f"Lab {course_id} is already running or stopping.")
-        
-
-        primary_status, secondary_status = lab_mgr.check_lab_status()
-        # Wait until secondary status is not "STARTING"
-        if secondary_status == "STARTING":
-            time.sleep(15)
-        # Wait until lab has been created and is running        
-        if primary_status == "CREATING":
-            time.sleep(30)
-            primary_status, secondary_status = lab_mgr.check_lab_status()
-
 
         # Increase autostop and lifespan
         lab_mgr.increase_autostop(course_id=course_id)
@@ -214,6 +203,7 @@ def create(ctx, course_id, env, browser, headless):
         lab_mgr.create_lab(course_id=course_id)
         
         # Increase lifespan for newly created lab
+        lab_mgr.increase_autostop(course_id=course_id)
         lab_mgr.increase_lifespan(course_id=course_id)
         
         click.echo(f"✓ Lab {course_id} created successfully in {environment}.")

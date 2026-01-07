@@ -488,13 +488,8 @@ class LabManager:
             # Wait until lab is in a state where adjustments can be made (e.g., running)
             # The original script checked for "CREATING" or "STARTING" states before clicking.
             # This implies we should wait until those are done.
-            WebDriverWait(self.driver, 300).until(
-                lambda d: self._get_lab_action_button(["Starting", "Stop"])[0] is not None or \
-                            self._get_lab_action_button(["Bastion"])[0] is not None, # Assuming Workstation button means lab is ready
-                message="Lab not in a state to adjust autostop/lifespan (e.g. not running)."
-            )
+            WebDriverWait(self.driver, 300).until(EC.presence_of_element_located((By.XPATH, '//button[text()="Open Console"]')))
             
-
             # Scroll to bottom of the lab environment tab to ensure all controls/buttons are visible
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(0.3)

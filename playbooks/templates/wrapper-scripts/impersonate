@@ -1,0 +1,51 @@
+#!/bin/bash
+# LX Toolbox Wrapper - Impersonate User
+# Usage: impersonate <course> <username> [environment]
+# Example: impersonate 199 jsmith
+#          impersonate do180 jsmith rol-stage
+
+set -e
+
+# Auto-detect lx-tool location
+if command -v lx-tool &> /dev/null; then
+    LX_TOOL="lx-tool"
+elif [[ -n "${LX_TOOLBOX_DIR}" ]] && [[ -x "${LX_TOOLBOX_DIR}/scripts/lx-tool" ]]; then
+    LX_TOOL="${LX_TOOLBOX_DIR}/scripts/lx-tool"
+elif [[ -x "/opt/lx-toolbox/scripts/lx-tool" ]]; then
+    LX_TOOL="/opt/lx-toolbox/scripts/lx-tool"
+else
+    echo "Error: lx-tool not found. Please install lx-toolbox or set LX_TOOLBOX_DIR environment variable." >&2
+    exit 1
+fi
+
+show_help() {
+    echo "Usage: impersonate <course> <username> [environment]"
+    echo ""
+    echo "Impersonate a user for the specified course."
+    echo ""
+    echo "Arguments:"
+    echo "  course       Course ID or short name (e.g., '199', 'do180', 'rh124-9.3')"
+    echo "  username     Username to impersonate"
+    echo ""
+    echo "Examples:"
+    echo "  impersonate 199 jsmith              # Impersonate jsmith on rh199"
+    echo "  impersonate do180-4.14 jsmith            # Impersonate on do180"
+}
+
+if [[ $# -lt 2 ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+    show_help
+    [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]] && exit 0
+    exit 1
+fi
+
+COURSE="$1"
+USERNAME="$2"
+ENV="${3:-rol}"
+
+echo ""
+echo "Impersonating user: $USERNAME"
+echo "Course: $COURSE"
+echo ""
+
+exec $LX_TOOL lab impersonate "$COURSE" "$USERNAME" 
+
