@@ -1,43 +1,91 @@
-- name: ROL labs installer
+- name: LX Toolbox installer
   hosts: localhost
   become: true
+  vars:
+    lx_toolbox_dir: "{{ playbook_dir | dirname }}"
+    wrapper_scripts:
+      - start
+      - stop
+      - delete
+      - recreate
+      - impersonate
+      - qa
+      - snow-ai
+      - check-links
 
   tasks:
-    - name: Ensure dependencies are installed.
+    - name: Ensure system dependencies are installed
       ansible.builtin.package:
         name:
           - python3-pip
-          - firefox.x86_64
-          - chromium.x86_64
-          - chromedriver.x86_64
+          - firefox
+          - chromium
+          - chromedriver
         state: present
       tags: install
-  
-    - name: Install Selenium with pip
+
+    - name: Install Python dependencies with pip
       ansible.builtin.pip:
-        name: selenium
+        name:
+          - selenium
+          #- click
+          #- python-dotenv
+          #- requests
         executable: pip3
       tags: install
-      
-    - name: Download selenium drivers
+
+    - name: Download geckodriver
       ansible.builtin.get_url:
-        url: "{{ item }}"
-        dest: "/tmp/{{ item | split('/')| last }}"
-      loop:
-        - "https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz"
+        url: "https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz"
+        dest: "/tmp/geckodriver-v0.36.0-linux64.tar.gz"
       tags: drivers
 
-    - name: Extract selenium drivers into /usr/bin/
+    - name: Extract geckodriver into /usr/bin/
       ansible.builtin.unarchive:
-        src: "/tmp/{{ item }}"
+        src: "/tmp/geckodriver-v0.36.0-linux64.tar.gz"
         dest: "/usr/bin/"
-      loop:
-        - geckodriver-v0.36.0-linux64.tar.gz
       tags: drivers
 
-    - name: Install Ollama
+    - name: Install Ollama (for AI features)
       ansible.builtin.shell: curl -fsSL https://ollama.com/install.sh | sh
       args:
         creates: /usr/bin/ollama
       tags: install
-      
+
+    # LX Toolbox symlinks (use repo directly, no /opt copy)
+    - name: Create symlink for lx-tool in /usr/bin/
+      ansible.builtin.file:
+        src: "{{ lx_toolbox_dir }}/scripts/lx-tool"
+        dest: "/usr/bin/lx-tool"
+        state: link
+        force: yes
+      tags: scripts
+
+    - name: Create symlinks for wrapper scripts in /usr/bin/
+      ansible.builtin.file:
+        src: "{{ lx_toolbox_dir }}/playbooks/templates/wrapper-scripts/{{ item }}"
+        dest: "/usr/bin/{{ item }}"
+        state: link
+        force: yes
+      loop: "{{ wrapper_scripts }}"
+      tags: scripts
+
+    - name: Set LX_TOOLBOX_DIR in /etc/environment
+      ansible.builtin.lineinfile:
+        path: /etc/environment
+        regexp: '^LX_TOOLBOX_DIR='
+        line: 'LX_TOOLBOX_DIR={{ lx_toolbox_dir }}'
+        create: yes
+      tags: scripts
+
+    - name: Display post-installation message
+      ansible.builtin.debug:
+        msg:
+          - "LX Toolbox Installation Complete!"
+          - ""
+          - "Installed from: {{ lx_toolbox_dir }}"
+          - ""
+          - "Available commands: lx-tool, start, stop, delete, recreate, impersonate, qa, check-links, snow-ai"
+          - ""
+          - "To update: git pull"
+      tags: always

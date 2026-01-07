@@ -2,7 +2,7 @@
 default_selenium_driver = firefox
 default_lab_environment = rol
 debug_mode = false
-default_assignee = your_default_assignee
+default_assignee = your_name # for ServiceNow ticket autoassign
 
 [LabEnvironments]
 rol_base_url = https://rol.redhat.com/rol/app/courses/

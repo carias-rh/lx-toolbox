@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .utils.config_manager import ConfigManager
 from .utils.helpers import reset_step_counter
+from .utils.course_resolver import resolve_course, resolve_course_safe, list_course_versions
 from .core.lab_manager import LabManager
 from .core.link_checker import LinkChecker
 from .core.servicenow_autoassign import ServiceNowAutoAssign
@@ -38,6 +39,27 @@ def get_config():
         config_file_path=str(config_path),
         env_file_path=str(env_path)
     )
+
+
+def resolve_course_id(short_name: str) -> str:
+    """
+    Resolve a short course name to full course ID.
+    
+    Examples:
+        "199" → "rh199-9.3"
+        "do180" → "do180-4.18"
+        "do180-4.14" → "do180-4.14" (exact match)
+    """
+    resolved, error = resolve_course_safe(short_name)
+    if error:
+        # If resolution failed, return original (might be exact match or user error)
+        click.echo(f"Note: Could not resolve '{short_name}' ({error}). Using as-is.", err=True)
+        return short_name
+    
+    if resolved != short_name:
+        click.echo(f"→ Resolved '{short_name}' to '{resolved}'")
+    
+    return resolved
 
 def _setup_logging(log_level: str | None = None):
     """Initialize logging using CLI option or environment variable.
@@ -79,9 +101,14 @@ def lab(ctx):
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
 def start(ctx, course_id, env, browser, headless):
-    """Start a lab for the specified course."""
+    """Start a lab for the specified course.
+    
+    COURSE_ID can be a short name (e.g., '199', 'do180') or full ID (e.g., 'rh199-9.3').
+    Short names are automatically resolved to the latest non-EA version.
+    """
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
+    course_id = resolve_course_id(course_id)
     
     try:
         lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
@@ -134,9 +161,13 @@ def start(ctx, course_id, env, browser, headless):
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
 def stop(ctx, course_id, env, browser, headless):
-    """Stop a lab for the specified course."""
+    """Stop a lab for the specified course.
+    
+    COURSE_ID can be a short name (e.g., '199', 'do180') or full ID.
+    """
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
+    course_id = resolve_course_id(course_id)
     
     try:
         lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
@@ -163,9 +194,13 @@ def stop(ctx, course_id, env, browser, headless):
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
 def create(ctx, course_id, env, browser, headless):
-    """Create a lab for the specified course."""
+    """Create a lab for the specified course.
+    
+    COURSE_ID can be a short name (e.g., '199', 'do180') or full ID.
+    """
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
+    course_id = resolve_course_id(course_id)
     
     try:
         lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
@@ -195,9 +230,13 @@ def create(ctx, course_id, env, browser, headless):
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
 def delete(ctx, course_id, env, browser, headless):
-    """Delete a lab for the specified course."""
+    """Delete a lab for the specified course.
+    
+    COURSE_ID can be a short name (e.g., '199', 'do180') or full ID.
+    """
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
+    course_id = resolve_course_id(course_id)
     
     try:
         lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
@@ -224,9 +263,13 @@ def delete(ctx, course_id, env, browser, headless):
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
 def recreate(ctx, course_id, env, browser, headless):
-    """Recreate (delete and create) a lab for the specified course."""
+    """Recreate (delete and create) a lab for the specified course.
+    
+    COURSE_ID can be a short name (e.g., '199', 'do180') or full ID.
+    """
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
+    course_id = resolve_course_id(course_id)
     
     try:
         lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
@@ -253,9 +296,13 @@ def recreate(ctx, course_id, env, browser, headless):
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
 def impersonate(ctx, course_id, username, env, browser, headless):
-    """Impersonate a user for the specified course."""
+    """Impersonate a user for the specified course.
+    
+    COURSE_ID can be a short name (e.g., '199', 'do180') or full ID.
+    """
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
+    course_id = resolve_course_id(course_id)
     
     try:
         lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
@@ -279,6 +326,30 @@ def impersonate(ctx, course_id, username, env, browser, headless):
         sys.exit(1)
 
 @lab.command()
+@click.argument('course_name')
+@click.pass_context
+def versions(ctx, course_name):
+    """List all available versions of a course.
+    
+    Examples:
+        lx-tool lab versions do180
+        lx-tool lab versions 199
+    """
+    try:
+        versions_list = list_course_versions(course_name)
+        if not versions_list:
+            click.echo(f"No versions found for course '{course_name}'")
+            return
+        
+        click.echo(f"Available versions for '{course_name}':")
+        for v in versions_list:
+            click.echo(f"  {v}")
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@lab.command()
 @click.argument('course_id')
 @click.argument('chapter_section')
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
@@ -288,9 +359,13 @@ def impersonate(ctx, course_id, username, env, browser, headless):
 @click.option('--commands-file', '-f', default=None, help='File containing commands to execute')
 @click.pass_context
 def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, commands_file):
-    """Run QA automation for a specific course chapter/section."""
+    """Run QA automation for a specific course chapter/section.
+    
+    COURSE_ID can be a short name (e.g., '199', 'do180') or full ID.
+    """
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
+    course_id = resolve_course_id(course_id)
     
     try:
         lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
