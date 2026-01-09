@@ -133,6 +133,24 @@ class SnowAIProcessor:
         logging.getLogger(__name__).debug(f"LLM request via provider={provider}")
         return self._ask_ollama(prompt)
 
+    @staticmethod
+    def _normalize_suggested_correction(value) -> str:
+        """Convert suggested_correction to string if LLM returns a dict instead of string."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            parts = []
+            if value.get("remove"):
+                parts.append("Remove: " + ", ".join(value["remove"]))
+            if value.get("add"):
+                parts.append("Add: " + ", ".join(value["add"]))
+            if value.get("remove_flag"):
+                parts.append("Remove flag: " + ", ".join(value["remove_flag"]))
+            return "\n".join(parts) if parts else str(value)
+        return str(value)
+
     # --------------------------
     # ROL helpers (via LabManager)
     # --------------------------
@@ -158,6 +176,9 @@ class SnowAIProcessor:
         """Open course page, expand solutions, and return course content wrapper text."""
         self.logger("Fetching guide text from website")
         self.lab_mgr.select_lab_environment_tab("course")
+
+        self.lab_mgr.disable_video_player()
+        self.lab_mgr.dismiss_active_alerts()
 
         try:
             while True:
@@ -399,7 +420,7 @@ For example:
     Analysis Results:
     - Issue Summary: {analysis_response_json.get('summary', '')}
     - Is Valid Issue: {analysis_response_json.get('is_valid_issue', False)}
-    - Suggested Correction: {analysis_response_json.get('suggested_correction', '')}
+    - Suggested Correction: {self._normalize_suggested_correction(analysis_response_json.get('suggested_correction', ''))}
     - Analysis: {analysis_response_json.get('analysis', '')}
 
     Craft a professional, helpful response to the student based on the analysis results that:
@@ -623,7 +644,7 @@ Translate the following text from {language} to english:
                 f"|*Language*:| English |\n\n"
                 "*Issue description*\n\n" + translated + "\n\n"
                 "*Steps to reproduce:*\n\n"
-                "*Workaround:*\n" + analysis.get('suggested_correction', '') + "\n\n"
+                "*Workaround:*\n" + self._normalize_suggested_correction(analysis.get('suggested_correction', '')) + "\n\n"
                 "*Expected result:*"
             )
 
