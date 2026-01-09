@@ -458,8 +458,8 @@ For example:
             self.switch_to_iframe()
 
             # Add work note with summary of analysis
-            work_note = f"""Summary of the analysis:\n{analysis_response_json.get('summary', 'No summary available')}\n
-                        "Analysis: {analysis_response_json.get('analysis', '')}\n"""
+            work_note = f"""Summary:\n{analysis_response_json.get('summary', 'No summary available')}\n
+LLM Analysis: {analysis_response_json.get('analysis', '')}\n"""
             try:
                 WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(work_note)
             except Exception:
