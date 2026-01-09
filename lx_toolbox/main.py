@@ -760,7 +760,7 @@ def snowai(ctx, tickets, env, browser, headless):
     try:
         processor = SnowAIProcessor(config=config, browser_name=browser, is_headless=headless)
         reset_step_counter()
-        processor.run_windowed(list(tickets) if tickets else None, environment=env)
+        processor.run(list(tickets) if tickets else None, environment=env)
         click.echo("✓ Opened windows/tabs. You can now work each ticket in its own window.")
     except Exception as e:
         click.echo(f"✗ Error running SNOW AI processor: {e}", err=True)

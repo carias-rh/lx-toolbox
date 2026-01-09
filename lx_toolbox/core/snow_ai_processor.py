@@ -4,6 +4,7 @@ import json
 import time
 import subprocess
 import logging
+import traceback
 from urllib.parse import quote
 
 import requests
@@ -53,7 +54,7 @@ class SnowAIProcessor:
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:12b")
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
@@ -153,11 +154,9 @@ class SnowAIProcessor:
             logging.getLogger(__name__).error(f"Could not retrieve section title from {course_url}: {e}")
             return ""
 
-    def fetch_guide_text_from_website(self, course_url: str) -> str:
+    def fetch_guide_text_from_website(self) -> str:
         """Open course page, expand solutions, and return course content wrapper text."""
         self.logger("Fetching guide text from website")
-        self.lab_mgr.selenium_driver.go_to_url(course_url)
-        time.sleep(2)
         self.lab_mgr.select_lab_environment_tab("course")
 
         try:
@@ -273,7 +272,7 @@ For example:
 {json_example}
 """
         response = self.ask_llm(prompt)
-        logging.getLogger(__name__).info(f"Classification LLM output: {response}")
+        logging.getLogger(__name__).info(f"LLM Triaging response: {response}")
         try:
             return json.loads(response)
         except Exception:
@@ -305,9 +304,9 @@ For example:
             f"\n        {excerpt_spec}" +
             "\n        \"analysis\": \"think step by step, first try to understand student_feedback, then explain what the student is trying to communicate, then comprehend the the guide_text excerpt, then compare to see if the student's claims are correct regarding the guide_text excerpt. Detail the analysis as much as possible. Substitute double quotes in this field with single quotes.\"," +
             "\n        \"is_valid_issue\": true," +
-            "\n        \"suggested_correction\": \"If the issue is valid, indicate what words' lines or commands should be changed in the guide_text to fix the issue. If the issue is valid but there is not enough information it could be possible that a deeper investigation within the lab environment is required. Do not include any explanations or markdown formatting outside the JSON object.\"," +
+            "\n        \"suggested_correction\": \"If the issue is valid, indicate what words, lines, or commands that should be changed in the guide_text to fix the issue. If the issue is valid but there is not enough information it could be possible that a deeper investigation within the lab environment is required. Do not include any explanations or markdown formatting outside the JSON object.\"," +
             "\n        \"summary\": \"a short/medium summary of the 'analysis' field\"," +
-            "\n        \"jira-title\": \"a short and precise title of the issue, all characters in lowercase separated by spaces, no dashes\"\n        }"
+            "\n        \"jira_title\": \"a short and precise title of the issue at hand\"\n        }"
         )
 
         prompt_text = f"""
@@ -327,18 +326,18 @@ For example:
         {json_example}
         </json_example>
 
-        Do not include any explanations, xml or markdown formatting outside the JSON object.
+        Do not include any explanations, xml or markdown formatting outside the JSON object. No dictionaries in the value fields
         Substitute double quote (") for single quote (') in all fields to avoid errors in the JSON object, and remove any special characters such as '\n', '\t', '\r', etc, as well as XML markers.
         """
         response = self.ask_llm(prompt_text)
-        logging.getLogger(__name__).info(f"Content analysis LLM output: {response}")
+        logging.getLogger(__name__).info(f"LLM Content analysis response: {response}")
         try:
             return json.loads(response)
         except Exception:
-            return {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira-title": ""}
+            return {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
 
     def analyze_environment_issue(self, user_issue: str) -> dict:
-        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "jira-title": "a short title for the Jira ticket, all characters in lowercase separated by spaces, no dashes"}'
+        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "jira_title": "a short title for the Jira ticket, all characters in lowercase separated by spaces, no dashes"}'
         prompt_text = f"""
         We have a student who reported an issue within the lab environment. The student's feedback is:
         <student_feedback>
@@ -348,15 +347,15 @@ For example:
         Return your analysis in exactly the following JSON format without any extra text:
         {json_example}
 
-        Do not include any explanations, xml or markdown formatting outside the JSON object.
+        Do not include any explanations, xml or markdown formatting outside the JSON object. No dictionaries in the value fields
         Substitute double quote (") for single quote (') in all fields to avoid errors in the JSON object, and remove any special characters such as '\n', '\t', '\r', etc, as well as XML markers.
         """
         response = self.ask_llm(prompt_text)
-        logging.getLogger(__name__).info(f"Environment analysis LLM output: {response}")
+        logging.getLogger(__name__).info(f"LLM Environment analysis response: {response}")
         try:
             return json.loads(response)
         except Exception:
-            return {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira-title": ""}
+            return {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
 
     def is_openshift_lab_first_boot(self, snow_info: dict, analysis_response_json: dict) -> bool:
         course = snow_info.get("Course", "")
@@ -378,7 +377,7 @@ For example:
         return False
 
     def craft_llm_response(self, snow_info: dict, analysis_response_json: dict) -> dict:
-        self.logger("Crafting LLM response")
+        self.logger("LLM Crafting reply to student")
         student_name = snow_info.get("full_name", "").split(" ")[0]
         course = snow_info.get("Course", "")
         chapter = snow_info.get("Chapter", "")
@@ -406,6 +405,7 @@ For example:
     Craft a professional, helpful response to the student based on the analysis results that:
     1. Addresses them by their first name
     2. Acknowledges their feedback if the analysis is valid, otherwise ask for more information.
+    3. Don't add a signature nor final salutation to the response.
 
 
     Keep the response concise but informative. 
@@ -416,13 +416,12 @@ For example:
 
     Format the response as a JSON object with the following fields:
     - response: the response to the student
-    - signature: the signature of the response
 
     Reply in JSON only, no extra text, such as:
     {json_example}
     """
         response = self.ask_llm(prompt_text)
-        logging.getLogger(__name__).info(f"Student reply LLM output: {response}")
+        logging.getLogger(__name__).info(f"LLM Student reply output: {response}")
         try:
             return json.loads(response)
         except Exception:
@@ -438,7 +437,8 @@ For example:
             self.switch_to_iframe()
 
             # Add work note with summary of analysis
-            work_note = f"Summary of the analysis:\n{analysis_response_json.get('summary', 'No summary available')}\n"
+            work_note = f"""Summary of the analysis:\n{analysis_response_json.get('summary', 'No summary available')}\n
+                        "Analysis: {analysis_response_json.get('analysis', '')}\n"""
             try:
                 WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(work_note)
             except Exception:
@@ -456,7 +456,7 @@ For example:
                 )
                 try:
                     WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\n Default Jira response:")
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\nDEFAULT RESPONSE:")
                     WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(default_jira_reply + signature)
                 except Exception:
                     pass
@@ -490,7 +490,7 @@ Translate the following text from {language} to english:
 </text>
 """
         translated_text = self.ask_llm(prompt_text)
-        logging.getLogger(__name__).info(f"Translation LLM output: {translated_text}")
+        logging.getLogger(__name__).info(f"LLM Feedback translation response: {translated_text}")
         if translated_text.strip().startswith('{') and translated_text.strip().endswith('}'):
             try:
                 json_response = json.loads(translated_text)
@@ -507,8 +507,8 @@ Translate the following text from {language} to english:
     # --------------------------
     # High-level helpers
     # --------------------------
-    def start_lab_for_course(self, course_id: str, environment: str = "rol"):
-        self.lab_mgr.go_to_course(course_id=course_id, environment=environment)
+    def start_lab_for_course(self, course_id: str, chapter_section: str = "pr01", environment: str = "rol"):
+        self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
         primary_status, secondary_status = self.lab_mgr.check_lab_status()
         if primary_status == "CREATE":
             self.lab_mgr.create_lab(course_id=course_id)
@@ -517,75 +517,7 @@ Translate the following text from {language} to english:
             self.lab_mgr.start_lab(course_id=course_id)
 
 
-    def fetch_section_and_guide_text(self, course_url: str) -> tuple[str, str]:
-        section = self.get_section_info(course_url)
-        guide_text = self.fetch_guide_text_from_website(course_url)
-        return section, guide_text
 
-    def close(self):
-        self.lab_mgr.close_browser()
-
-    # --------------------------
-    # Orchestration
-    # --------------------------
-    def handle_ticket(self, snow_id: str, environment: str = "rol") -> dict:
-        """Process a single SNOW ticket: classify, translate, fetch guide, analyze. Returns result dict."""
-        snow_info = self.get_snow_info(snow_id)
-        classification = self.classify_ticket_llm(snow_info["Description"])
-        if classification.get("language") == "en":
-            translated = snow_info["Description"]
-        else:
-            translated = self.translate_text(snow_info["Description"], classification.get("language", "en"))
-        classification["translated_student_feedback"] = translated
-
-        section = ""
-        guide_text = ""
-        if snow_info.get("URL"):
-            # Ensure ROL session and lab readiness for navigation
-            try:
-                course_id = snow_info["Course"].lower() + "-" + snow_info["Version"]
-                self.start_lab_for_course(course_id=course_id, environment=environment)
-            except Exception:
-                # Non-blocking: continue with web content fetch even if lab prep fails
-                pass
-            section, guide_text = self.fetch_section_and_guide_text(snow_info["URL"]) or ("", "")
-
-        analysis = {}
-        if classification.get("is_content_issue_ticket"):
-            analysis = self.analyze_content_issue(snow_info["Description"], guide_text)
-        elif classification.get("is_environment_issue"):
-            analysis = self.analyze_environment_issue(snow_info["Description"]) 
-
-        return {
-            "snow": snow_info,
-            "classification": classification,
-            "section": section,
-            "guide_text_len": len(guide_text or ""),
-            "analysis": analysis,
-        }
-
-    def run(self, tickets: list[str] | None = None, environment: str = "rol") -> list[dict]:
-        """Run processing for provided tickets; if none, open user's queue and process listed tickets."""
-        results = []
-        # Open queue and login if needed
-        self.driver.get(self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL)
-        # Attempt login if redirected to SSO
-        try:
-            # Presence of username field indicates SSO page
-            WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[@id="username"]')))
-            self.login_snow()
-        except Exception:
-            pass
-
-        if not tickets:
-            tickets = self.get_ticket_ids_from_queue()
-
-        for snow_id in tickets:
-            try:
-                results.append(self.handle_ticket(snow_id, environment=environment))
-            except Exception as e:
-                logging.getLogger(__name__).error(f"Failed processing ticket {snow_id}: {e}")
-        return results
 
     # --------------------------
     # Window/Tab Orchestration
@@ -639,10 +571,10 @@ Translate the following text from {language} to english:
     def extract_jira_keyword(self, snow_info: dict) -> str:
         prompt = (
             "You are an expert technical keyword extractor. "
-            "From this information, identify ONE defining technical term for search. "
-            "Output JSON: {\"keyword\": "
-            "\"value\"}\n"
+            "From the folowing feedback information, identify ONE single defining technical term that will be used to search into a database of tickets. "
             f"<feedback> {snow_info.get('Description','')} </feedback>"
+            "Output JSON example: {\"keyword\": \"PosgreSQL\"}\n"
+            "Reply in JSON only, no extra text."
         )
         llm_response = self.ask_llm(prompt)
         try:
@@ -662,7 +594,7 @@ Translate the following text from {language} to english:
             component_clause = 'component in (RH134, RH199, RH124)'
         else:
             component_clause = f'component = "{course}"'
-        term = keyword or course
+        term = (keyword or course).replace('"', '').replace("'", "")
         jql = f'project = PTL AND resolution = Unresolved AND description ~ {chapter_and_section} AND {component_clause} AND text ~ "{term}" ORDER BY priority DESC, updated DESC'
         return f"https://issues.redhat.com/issues/?jql={quote(jql)}"
 
@@ -679,7 +611,7 @@ Translate the following text from {language} to english:
             WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[2]/button'))).click()
 
             # Fill in Summary
-            summary_value = f"{snow_info.get('Course','')}: ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} - {analysis.get('jira-title', '')} - {snow_info.get('snow_id','')}"
+            summary_value = f"{snow_info.get('Course','')}: ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} - {analysis.get('jira_title', '')} - {snow_info.get('snow_id','')}"
             WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))).send_keys(summary_value)
 
             # Add Description
@@ -746,7 +678,7 @@ Translate the following text from {language} to english:
         except Exception:
             pass
 
-    def run_windowed(self, tickets: list[str] | None = None, environment: str = "rol"):
+    def run(self, tickets: list[str] | None = None, environment: str = "rol"):
         # Pre-login services in base window
         self.prelogin_all(environment=environment)
 
@@ -778,7 +710,7 @@ Translate the following text from {language} to english:
                 else:
                     translated = self.translate_text(snow_info["Description"], classification.get("language", "en"))
                 classification["translated_student_feedback"] = translated
-                analysis = {"summary": "", "suggested_correction": "", "jira-title": "", "is_valid_issue": False}
+                analysis = {"summary": "", "suggested_correction": "", "jira_title": "", "is_valid_issue": False}
 
                 # Tab 2: ROL chapter/section, ensure lab started
                 self.driver.switch_to.window(ticket_window)
@@ -787,7 +719,8 @@ Translate the following text from {language} to english:
                 try:
                     self.driver.switch_to.window(tab_rol)
                     course_id = snow_info["Course"].lower() + "-" + snow_info["Version"]
-                    self.start_lab_for_course(course_id=course_id, environment=environment)
+                    chapter_section=f"ch{ snow_info.get("Chapter", "01") }s{ snow_info.get("Section", "01") }"
+                    self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
                     time.sleep(2)
                     try:
                         self.lab_mgr.select_lab_environment_tab("course")
@@ -796,7 +729,7 @@ Translate the following text from {language} to english:
                     # Fetch guide text from website for content analysis
                     guide_text = ""
                     try:
-                        guide_text = self.fetch_guide_text_from_website(snow_info.get("URL", ""))
+                        guide_text = self.fetch_guide_text_from_website()
                         self.logger(f"Fetched guide text length: {len(guide_text)}")
                     except Exception as e:
                         logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
@@ -807,7 +740,7 @@ Translate the following text from {language} to english:
                     elif classification.get("is_environment_issue"):
                         analysis = self.analyze_environment_issue(snow_info["Description"]) 
                 except Exception as e:
-                    logging.getLogger(__name__).warning(f"ROL tab setup failed for {snow_id}: {e}")
+                    logging.getLogger(__name__).warning(f"ROL tab setup failed for {snow_id}: {e}\n{traceback.format_exc()}")
 
                 # Add SNOW work notes and student reply in Tab 1 (after analysis)
                 try:
@@ -843,7 +776,7 @@ Translate the following text from {language} to english:
 
                 # Increase autostop and lifespan
                 self.driver.switch_to.window(tab_rol)
-                self.lab_mgr.select_lab_environment_tab("lab")
+                self.lab_mgr.select_lab_environment_tab("lab-environment")
                 self.lab_mgr.increase_autostop(course_id=course_id)
                 self.lab_mgr.increase_lifespan(course_id=course_id)
                 self.driver.switch_to.window(tab_snow)
