@@ -885,19 +885,47 @@ class LabManager:
 
         return commands_list
 
-    def get_guided_exercises_and_labs(self, course_id: str, start_from: str, environment: str) -> list[str]:
+    # Keywords used to identify exercise/lab sections
+    EXERCISE_KEYWORDS = ["Guided Exercise:", "Lab:"]
+    
+    # Keywords used to exclude theory sections (same as link_checker)
+    EXCLUDED_THEORY_KEYWORDS = [
+        "Guided Exercise:",
+        "Lab:",
+        "Quiz:",
+        "Summary",
+        "Review:",
+        "Preface:",
+        "About This Course",
+        "Orientation to the Classroom",
+        "Comprehensive Review",
+        "Course Objectives",
+        "Course Overview"
+    ]
+
+    def get_course_sections(self, course_id: str, environment: str, 
+                           section_type: str = "exercises") -> list[dict]:
         """
-        Gets the list of Guided Exercises and Labs for a course using the TOC panel.
+        Gets sections from a course's Table of Contents.
         
         Args:
             course_id: The course identifier (e.g., "rh124-9.3")
-            start_from: The chapter_section to navigate to initially
             environment: The target environment
+            section_type: Type of sections to fetch:
+                - "exercises": Only Guided Exercises and Labs
+                - "theory": Only theory sections (excludes exercises, summaries, etc.)
+                - "all": All sections
             
         Returns:
-            List of chapter_section identifiers (e.g., ["ch01s02", "ch01s03", ...])
+            List of dicts with 'title', 'url', 'chapter_section' keys
         """
-        self.logger("Getting the list of Guided Exercises and Labs")
+        type_desc = {
+            "exercises": "Guided Exercises and Labs",
+            "theory": "Theory sections",
+            "all": "All sections"
+        }.get(section_type, section_type)
+        
+        self.logger(f"Getting {type_desc} for course {course_id}")
         
         # Ensure we're on the course tab (not the console tab)
         self.switch_to_course_tab()
@@ -910,7 +938,7 @@ class LabManager:
             self.selenium_driver.go_to_url(course_url)
             time.sleep(3)
 
-        chapter_and_section_list = []
+        sections = []
 
         try:
             # Wait for any backdrop/modal overlay to disappear
@@ -1010,35 +1038,74 @@ class LabManager:
                     '//a[contains(@href, "/pages/")]'
                 )
             
-            # Filter for Guided Exercises and Labs only
+            # Process and filter sections based on section_type
+            seen_sections = set()
             for link in section_links:
                 try:
                     url = link.get_attribute('href')
                     title = link.text.strip()
                     
-                    if url and title and '/pages/' in url:
-                        # Only include Guided Exercises and Labs
-                        if "Guided Exercise:" in title or "Lab:" in title:
-                            try:
-                                chapter_and_section = str(re.findall(r"ch[0-9]*s[0-9]*", url)[0])
-                                # Avoid duplicates
-                                if chapter_and_section not in chapter_and_section_list:
-                                    print(title)
-                                    print(f"Section: {chapter_and_section}")
-                                    chapter_and_section_list.append(chapter_and_section)
-                            except (IndexError, TypeError):
-                                pass
+                    if not url or not title or '/pages/' not in url:
+                        continue
+                    
+                    # Extract chapter_section from URL
+                    try:
+                        chapter_section = str(re.findall(r"ch[0-9]*s[0-9]*", url)[0])
+                    except (IndexError, TypeError):
+                        continue
+                    
+                    # Skip duplicates
+                    if chapter_section in seen_sections:
+                        continue
+                    
+                    # Filter based on section_type
+                    is_exercise = any(kw in title for kw in self.EXERCISE_KEYWORDS)
+                    is_excluded_theory = any(kw in title for kw in self.EXCLUDED_THEORY_KEYWORDS)
+                    
+                    include = False
+                    if section_type == "exercises":
+                        include = is_exercise
+                    elif section_type == "theory":
+                        include = not is_excluded_theory
+                    elif section_type == "all":
+                        include = True
+                    
+                    if include:
+                        seen_sections.add(chapter_section)
+                        sections.append({
+                            'title': title,
+                            'url': url,
+                            'chapter_section': chapter_section
+                        })
+                        print(f"{title} -> {chapter_section}")
+                        
                 except:
                     continue
             
-            self.logger(f"Found {len(chapter_and_section_list)} Guided Exercises and Labs")
+            self.logger(f"Found {len(sections)} {type_desc}")
             
         except TimeoutException:
             self.logger(f"Timeout waiting for TOC in course {course_id}")
         except Exception as e:
-            self.logger(f"Error getting guided exercises and labs: {e}")
+            self.logger(f"Error getting course sections: {e}")
 
-        return chapter_and_section_list
+        return sections
+
+    def get_guided_exercises_and_labs(self, course_id: str, start_from: str, environment: str) -> list[str]:
+        """
+        Gets the list of Guided Exercises and Labs for a course.
+        Convenience wrapper around get_course_sections that returns just chapter_section identifiers.
+        
+        Args:
+            course_id: The course identifier (e.g., "rh124-9.3")
+            start_from: The chapter_section to start from (unused, kept for API compatibility)
+            environment: The target environment
+            
+        Returns:
+            List of chapter_section identifiers (e.g., ["ch01s02", "ch01s03", ...])
+        """
+        sections = self.get_course_sections(course_id, environment, section_type="exercises")
+        return [s['chapter_section'] for s in sections]
 
     def _multiline_command(self, command: str) -> bool:
         """
