@@ -16,9 +16,14 @@ class LabManager:
     # External service verification field IDs (from third-party login pages)
     _GITHUB_VERIFY_FIELD = "app_totp"
     
+    # Interface type constants
+    INTERFACE_OLD = "old"
+    INTERFACE_NEW = "new"  # PF5 interface
+    
     def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None):
         self.config = config
         self.logger = step_logger # Alias for convenience
+        self._interface_type = None  # Will be detected on first use
 
         _browser_name = browser_name if browser_name else self.config.get("General", "default_selenium_driver", "firefox")
         _is_headless = is_headless if is_headless is not None else self.config.get("General", "debug_mode", False) == False # Assuming debug_mode=True means not headless for lab ops
@@ -30,6 +35,42 @@ class LabManager:
         )
         self.driver = self.selenium_driver.get_driver()
         self.wait = self.selenium_driver.wait # Convenience
+
+    def _detect_interface_type(self) -> str:
+        """
+        Detect whether the current page uses the old or new (PF5) interface.
+        Caches the result for subsequent calls.
+        
+        Returns:
+            'old' or 'new'
+        """
+        if self._interface_type:
+            return self._interface_type
+        
+        # Try to detect new PF5 interface elements
+        try:
+            # New interface has TOC toggle button with specific aria-label
+            self.driver.find_element(By.XPATH, 
+                '//button[contains(@aria-label, "Table of Contents") or contains(@aria-label, "Toggle Table of Contents")]'
+            )
+            self._interface_type = self.INTERFACE_NEW
+            self.logger(f"Detected interface type: NEW (PF5)")
+        except:
+            # Check for old interface elements
+            try:
+                self.driver.find_element(By.XPATH, '//*[@id="course-tabs-tab-1"]')
+                self._interface_type = self.INTERFACE_OLD
+                self.logger(f"Detected interface type: OLD")
+            except:
+                # Default to new if can't determine
+                self._interface_type = self.INTERFACE_NEW
+                self.logger(f"Could not detect interface type, defaulting to NEW")
+        
+        return self._interface_type
+
+    def reset_interface_detection(self):
+        """Reset interface detection to force re-detection on next use."""
+        self._interface_type = None
 
     def _prompt_for_manual_login(self, message: str = None):
         """
@@ -63,7 +104,7 @@ class LabManager:
             password = self.config.get("Credentials", "RH_PASSWORD")
             auth_helper = self.config.get("Credentials", "RH_AUTH_HELPER")
             return username, password, auth_helper
-        elif environment == "rol-stage":
+        elif environment == "factory":
             username = self.config.get("Credentials", "GITHUB_USERNAME")
             password = self.config.get("Credentials", "GITHUB_PASSWORD")
             auth_helper = self.config.get("Credentials", "GITHUB_AUTH_HELPER")
@@ -94,7 +135,7 @@ class LabManager:
         authentication manually in the browser.
         
         Args:
-            environment: The target environment (rol, rol-stage, china)
+            environment: The target environment (rol, factory, china)
         """
         self.logger(f"Login into '{environment}' environment")
         base_url = self.config.get_lab_base_url(environment)
@@ -133,7 +174,7 @@ class LabManager:
                         "Credentials not configured. Please complete the login manually."
                     )
 
-            elif environment == "rol-stage":
+            elif environment == "factory":
                 self.selenium_driver.accept_trustarc_cookies(timeout=1)
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click()
                 
@@ -201,32 +242,75 @@ class LabManager:
         except Exception as e:
             pass
 
-    def wait_for_site_to_be_ready(self, environment: str, timeout: int = 5):
+    def wait_for_site_to_be_ready(self, environment: str, timeout: int = 10):
+        """
+        Wait for the site to be ready after login or navigation.
+        Checks for environment-specific elements that indicate the page is loaded.
+        """
         self.driver.execute_script("document.body.style.zoom = '0.70'")
         self.driver.execute_script("window.scrollTo(0, 0);")
         self.logger("Waiting for site to be ready...")
+        
+        # Define expected elements per environment
+        ready_indicators = {
+            "rol": {
+                "xpath": '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]',
+                "description": "header navigation button"
+            },
+            "china": {
+                "xpath": '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]',
+                "description": "header navigation button"
+            },
+            "factory": {
+                "xpath": '//div[@class="avatar sb-avatar sb-avatar--text"]',
+                "description": "user avatar element"
+            }
+        }
+        
+        indicator = ready_indicators.get(environment, ready_indicators["rol"])
+        xpath = indicator["xpath"]
+        desc = indicator["description"]
+        
+        current_url = self.driver.current_url
+        
         try:
-            self.selenium_driver.accept_trustarc_cookies() # Try again in case it reappeared
-            if environment == "rol" or environment == "china":
-                # Example element, this should be a reliable element indicating logged-in state
-                self.wait.until(EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))) 
-            elif environment == "rol-stage":
-                 # Example element for ROL stage (e.g., avatar)
-                self.wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="avatar"]')))
+            self.selenium_driver.accept_trustarc_cookies()
+            WebDriverWait(self.driver, timeout).until(
+                EC.presence_of_element_located((By.XPATH, xpath))
+            )
+            
         except TimeoutException:
-            # self.selenium_driver.driver.save_screenshot(f"{environment}_site_not_ready.png")
-            time.sleep(0.5) # Short pause from original script
+            self.logger(f"  ⚠ First attempt timed out after {timeout}s, retrying...")
+            time.sleep(0.5)
+            
             try:
                 self.selenium_driver.accept_trustarc_cookies()
-                # Re-attempt the original wait, could make this recursive with a depth limit
-                if environment == "rol" or environment == "china":
-                    self.wait.until(EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
-                elif environment == "rol-stage":
-                    self.wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="avatar"]')))
+                WebDriverWait(self.driver, timeout).until(
+                    EC.presence_of_element_located((By.XPATH, xpath))
+                )
+                self.logger(f"  ✓ Site ready on retry - found {desc}")
+                
+            except TimeoutException as retry_err:
+                current_url = self.driver.current_url
+                page_title = self.driver.title
+                logging.getLogger(__name__).warning(
+                    f"Site ready check FAILED for {environment}:\n"
+                    f"  - Expected element: {desc}\n"
+                    f"  - XPath: {xpath}\n"
+                    f"  - Current URL: {current_url}\n"
+                    f"  - Page title: {page_title}\n"
+                    f"  - Timeout: {timeout}s\n"
+                    f"  - This may indicate: login failed, wrong page, or page still loading"
+                )
             except Exception as retry_err:
-                logging.getLogger(__name__).warning(f"Site ready check retry failed for {environment}: {retry_err}")
+                logging.getLogger(__name__).warning(
+                    f"Site ready check retry error for {environment}: {type(retry_err).__name__}: {retry_err}"
+                )
+                
         except Exception as e:
-            logging.getLogger(__name__).warning(f"Site ready check failed for {environment}: {e}")
+            logging.getLogger(__name__).warning(
+                f"Site ready check error for {environment}: {type(e).__name__}: {e}"
+            )
 
     def go_to_course(self, course_id: str, chapter_section: str = "pr01", environment: str = "rol"):
         self.logger(f"Navigating to course: {course_id} {chapter_section} in {environment}")
@@ -259,85 +343,73 @@ class LabManager:
             pass
 
     def select_lab_environment_tab(self, tab_name: str):
-        """Selects a tab like 'index', 'course', or 'lab'."""
-        
+        """
+        Selects a tab like 'index', 'course', or 'lab'.
+        Uses detected interface type to select the appropriate method.
+        """
         # Map tab names to both old and new interface selectors
         tab_selectors = {
-            "index": {
-                "old": "1",
-                "new": "Course"  # Based on the HTML you provided
-            },
-            "course": {
-                "old": "2", 
-                "new": "Course"
-            },
-            "lab-environment": {
-                "old": "8",
-                "new": "Lab Environment"
-            }
+            "index": {"old": "1", "new": "Course"},
+            "course": {"old": "2", "new": "Course"},
+            "lab-environment": {"old": "8", "new": "Lab Environment"}
         }
         
         tab_config = tab_selectors.get(tab_name.lower())
         if not tab_config:
             raise ValueError(f"Invalid tab name: {tab_name}. Expected one of {list(tab_selectors.keys())}")
 
-        # Try new PF5 interface first, then fall back to old interface
-        success = False
+        self.driver.execute_script("document.body.style.zoom = '0.70'")
+        self.driver.execute_script("window.scrollTo(0, 0);")
         
-        # Method 1: Try new PF5 interface (by text content)
-        try:
-            self.driver.execute_script("document.body.style.zoom = '0.70'")
-            self.driver.execute_script("window.scrollTo(0, 0);")
+        interface = self._detect_interface_type()
+        
+        if interface == self.INTERFACE_NEW:
+            self._select_tab_new_interface(tab_config["new"], tab_name)
+        else:
+            self._select_tab_old_interface(tab_config["old"], tab_name)
 
-            new_tab_xpath = f'//button[@role="tab" and .//span[contains(text(), "{tab_config["new"]}")]]'
-            tab_element = WebDriverWait(self.driver, 20).until(EC.element_to_be_clickable((By.XPATH, new_tab_xpath)))
+    def _select_tab_new_interface(self, tab_text: str, tab_name: str):
+        """Select tab using new PF5 interface."""
+        try:
+            tab_xpath = f'//button[@role="tab" and .//span[contains(text(), "{tab_text}")]]'
+            tab_element = WebDriverWait(self.driver, 20).until(
+                EC.element_to_be_clickable((By.XPATH, tab_xpath))
+            )
             tab_element.click()
             
-            # Verify tab is selected in new interface
             WebDriverWait(self.driver, 20).until(
-                lambda d: d.find_element(By.XPATH, new_tab_xpath).get_attribute("aria-selected") == "true",
-                message=f"Tab {tab_name} did not become selected in new interface."
+                lambda d: d.find_element(By.XPATH, tab_xpath).get_attribute("aria-selected") == "true",
+                message=f"Tab {tab_name} did not become selected."
             )
             time.sleep(0.2)
-            success = True
-            
         except TimeoutException:
-            self.logger(f"New PF5 interface not found for tab {tab_name}, trying old interface...")
-        
-        # Method 2: Try old interface if new one failed
-        if not success:
+            raise Exception(f"Could not select tab '{tab_name}' in new interface")
+
+    def _select_tab_old_interface(self, tab_id: str, tab_name: str):
+        """Select tab using old interface."""
+        try:
+            tab_xpath = f'//*[@id="course-tabs-tab-{tab_id}"]'
+            tab_element = self.wait.until(EC.element_to_be_clickable((By.XPATH, tab_xpath)))
+            tab_element.click()
+            
+            WebDriverWait(self.driver, 10).until(
+                lambda d: d.find_element(By.XPATH, tab_xpath).get_attribute("aria-selected") == "true",
+                message=f"Tab {tab_name} did not become selected."
+            )
+            time.sleep(0.2)
+        except TimeoutException:
+            # Try recovery
+            self.selenium_driver.accept_trustarc_cookies()
+            time.sleep(1)
             try:
-                old_tab_xpath = f'//*[@id="course-tabs-tab-{tab_config["old"]}"]'
-                tab_element = self.wait.until(EC.element_to_be_clickable((By.XPATH, old_tab_xpath)))
+                tab_xpath = f'//*[@id="course-tabs-tab-{tab_id}"]'
+                tab_element = self.wait.until(EC.element_to_be_clickable((By.XPATH, tab_xpath)))
                 tab_element.click()
-                
-                # Verify tab is selected
                 WebDriverWait(self.driver, 10).until(
-                    lambda d: d.find_element(By.XPATH, old_tab_xpath).get_attribute("aria-selected") == "true",
-                    message=f"Tab {tab_name} did not become selected in old interface."
+                    lambda d: d.find_element(By.XPATH, tab_xpath).get_attribute("aria-selected") == "true"
                 )
-                time.sleep(0.2)
-                success = True
-                
-            except TimeoutException:
-                # Common recovery step
-                self.selenium_driver.accept_trustarc_cookies()
-                time.sleep(1)
-                
-                # Retry old interface
-                try:
-                    tab_element = self.wait.until(EC.element_to_be_clickable((By.XPATH, old_tab_xpath)))
-                    tab_element.click()
-                    WebDriverWait(self.driver, 10).until(
-                        lambda d: d.find_element(By.XPATH, old_tab_xpath).get_attribute("aria-selected") == "true"
-                    )
-                    success = True
-                except Exception as e:
-                    self.logger(f"Failed to select tab {tab_name} after retry: {e}")
-                    raise
-        
-        if not success:
-            raise Exception(f"Could not select tab '{tab_name}' in either new or old interface")
+            except Exception as e:
+                raise Exception(f"Could not select tab '{tab_name}' in old interface: {e}")
             
     def _get_lab_action_button(self, action_texts: list[str], timeout: int = 1):
         """Helper to find a lab action button (Create, Start, Stop, Delete)."""
@@ -907,6 +979,7 @@ class LabManager:
                            section_type: str = "exercises") -> list[dict]:
         """
         Gets sections from a course's Table of Contents.
+        Automatically uses old or new interface based on detection.
         
         Args:
             course_id: The course identifier (e.g., "rh124-9.3")
@@ -938,8 +1011,80 @@ class LabManager:
             self.selenium_driver.go_to_url(course_url)
             time.sleep(3)
 
-        sections = []
+        # Detect interface and use appropriate method
+        interface = self._detect_interface_type()
+        
+        if interface == self.INTERFACE_NEW:
+            sections = self._get_course_sections_new_interface(section_type)
+        else:
+            sections = self._get_course_sections_old_interface(section_type)
+        
+        self.logger(f"Found {len(sections)} {type_desc}")
+        return sections
 
+    def _get_course_sections_old_interface(self, section_type: str) -> list[dict]:
+        """
+        Get course sections using the old interface (table-based TOC).
+        """
+        sections = []
+        
+        time.sleep(2)
+        self.select_lab_environment_tab("index")
+        
+        try:
+            num_rows = len(self.driver.find_elements(By.XPATH, '//*[@id="tab-course-toc"]/tbody/tr'))
+            
+            for t_row in range(1, num_rows + 1):
+                try:
+                    title = self.driver.find_element(
+                        By.XPATH, f'//*[@id="tab-course-toc"]/tbody/tr[{t_row}]/td'
+                    ).text
+                    title_href = self.driver.find_element(
+                        By.XPATH, f'//*[@id="tab-course-toc"]/tbody/tr[{t_row}]/td/div/a'
+                    ).get_attribute("href")
+                    
+                    if not title or not title_href:
+                        continue
+                    
+                    # Extract chapter_section from URL
+                    try:
+                        chapter_section = str(re.findall(r"ch[0-9]*s[0-9]*", title_href)[0])
+                    except (IndexError, TypeError):
+                        continue
+                    
+                    # Filter based on section_type
+                    is_exercise = any(kw in title for kw in self.EXERCISE_KEYWORDS)
+                    is_excluded_theory = any(kw in title for kw in self.EXCLUDED_THEORY_KEYWORDS)
+                    
+                    include = False
+                    if section_type == "exercises":
+                        include = is_exercise
+                    elif section_type == "theory":
+                        include = not is_excluded_theory
+                    elif section_type == "all":
+                        include = True
+                    
+                    if include:
+                        print(f"{title} -> {chapter_section}")
+                        sections.append({
+                            'title': title,
+                            'url': title_href,
+                            'chapter_section': chapter_section
+                        })
+                except:
+                    continue
+                    
+        except Exception as e:
+            self.logger(f"Error getting sections from old interface: {e}")
+        
+        return sections
+
+    def _get_course_sections_new_interface(self, section_type: str) -> list[dict]:
+        """
+        Get course sections using the new PF5 interface (TOC panel with accordion).
+        """
+        sections = []
+        
         try:
             # Wait for any backdrop/modal overlay to disappear
             try:
@@ -1082,12 +1227,10 @@ class LabManager:
                 except:
                     continue
             
-            self.logger(f"Found {len(sections)} {type_desc}")
-            
         except TimeoutException:
-            self.logger(f"Timeout waiting for TOC in course {course_id}")
+            self.logger(f"Timeout waiting for TOC in new interface")
         except Exception as e:
-            self.logger(f"Error getting course sections: {e}")
+            self.logger(f"Error getting course sections from new interface: {e}")
 
         return sections
 
