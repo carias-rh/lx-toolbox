@@ -6,7 +6,7 @@ default_assignee = your_name # for ServiceNow ticket autoassign
 
 [LabEnvironments]
 rol_base_url = https://rol.redhat.com/rol/app/courses/
-rol_stage_base_url = https://rol-factory-prod.ole.redhat.com/rol/app/courses/
+factory_base_url = https://rol-factory-prod.ole.redhat.com/rol/app/courses/
 china_base_url = https://rol-cn.ole.redhat.com/rol/app/courses/
 
 [ServiceNow]
