@@ -2,7 +2,7 @@
 # LX Toolbox Wrapper - Start Lab
 # Usage: start <course> [environment]
 # Example: start 199
-#          start do180 rol-stage
+#          start do180 factory
 
 set -e
 
@@ -25,12 +25,12 @@ show_help() {
     echo ""
     echo "Arguments:"
     echo "  course       Course ID or short name (e.g., '199', 'do180', 'rh124-9.3')"
-    echo "  environment  Optional: rol (default), rol-stage, china"
+    echo "  environment  Optional: rol (default), factory, china"
     echo ""
     echo "Examples:"
     echo "  start 199              # Start rh199 (latest version) on ROL production"
     echo "  start do180            # Start do180 (latest version)"
-    echo "  start do180 rol-stage  # Start on ROL staging"
+    echo "  start do180 factory   # Start on Factory"
     echo "  start do180-4.14       # Start specific version"
 }
 

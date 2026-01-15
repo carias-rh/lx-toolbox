@@ -97,7 +97,7 @@ class ConfigManager:
 #    print(f"Debug Mode (from env): {cfg.get('General', 'debug_mode')}") # Should be False (bool)
 #    print(f"RH Username (from env): {cfg.get('Credentials', 'rh_username', 'default_user')}") # Direct key
 #    print(f"ROL Base URL: {cfg.get_lab_base_url('rol')}")
-#    print(f"ROL Stage Base URL: {cfg.get_lab_base_url('rol-stage')}")
+#    print(f"Factory Base URL: {cfg.get_lab_base_url('factory')}")
 #    print(f"Non Existent: {cfg.get('General', 'non_existent_key', 'fallback')}")
 #    # Clean up dummy files
 #    # os.remove("config/config.ini")

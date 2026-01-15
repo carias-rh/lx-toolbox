@@ -2,7 +2,7 @@
 # LX Toolbox Wrapper - Impersonate User
 # Usage: impersonate <course> <username> [environment]
 # Example: impersonate 199 jsmith
-#          impersonate do180 jsmith rol-stage
+#          impersonate do180 jsmith factory
 
 set -e
 

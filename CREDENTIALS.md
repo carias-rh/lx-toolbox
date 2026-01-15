@@ -21,7 +21,7 @@ Create a `.env` file in the project root directory (`lx-toolbox/.env`):
 # Lab Credentials for ROL environment
 RH_USERNAME=your_username
 
-# GitHub credentials for ROL-Stage
+# GitHub credentials for factory
 GITHUB_USERNAME=your_github_username
 
 # China environment credentials

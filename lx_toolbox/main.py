@@ -96,7 +96,7 @@ def lab(ctx):
 
 @lab.command()
 @click.argument('course_id')
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
@@ -145,7 +145,7 @@ def start(ctx, course_id, env, browser, headless):
 
 @lab.command()
 @click.argument('course_id')
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
@@ -178,7 +178,7 @@ def stop(ctx, course_id, env, browser, headless):
 
 @lab.command()
 @click.argument('course_id')
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
@@ -215,7 +215,7 @@ def create(ctx, course_id, env, browser, headless):
 
 @lab.command()
 @click.argument('course_id')
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
@@ -248,7 +248,7 @@ def delete(ctx, course_id, env, browser, headless):
 
 @lab.command()
 @click.argument('course_id')
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
@@ -281,7 +281,7 @@ def recreate(ctx, course_id, env, browser, headless):
 @lab.command()
 @click.argument('course_id')
 @click.argument('username')
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
@@ -342,7 +342,7 @@ def versions(ctx, course_name):
 @lab.command()
 @click.argument('course_id')
 @click.argument('chapter_section', required=False, default=None)
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='chrome', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.option('--setup-style', '-s', default=None, help='Environment setup style (e.g., rgdacosta)')
@@ -406,7 +406,7 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style):
 
 @lab.command('check-links')
 @click.option('--course', '-c', default=None, help='Specific course ID to check (e.g., rh124-9.3). Checks all if omitted.')
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='chrome', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless/headfull mode')
 @click.option('--screenshots/--no-screenshots', default=True, help='Take screenshots of each visited external link')
@@ -748,7 +748,7 @@ def jira(ctx):
 
 @cli.command()
 @click.option('-t', '--ticket', 'tickets', multiple=True, help='SNOW ticket number (repeatable). If omitted, uses user queue.')
-@click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.pass_context
@@ -784,7 +784,7 @@ def config(ctx):
     
     # Lab environments
     click.echo("\n[Lab Environments]")
-    for env in ['rol', 'rol-stage', 'china']:
+    for env in ['rol', 'factory', 'china']:
         url = config.get_lab_base_url(env)
         if url:
             click.echo(f"{env}: {url}")

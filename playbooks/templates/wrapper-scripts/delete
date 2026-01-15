@@ -2,7 +2,7 @@
 # LX Toolbox Wrapper - Delete Lab
 # Usage: delete <course> [environment]
 # Example: delete 199
-#          delete do180 rol-stage
+#          delete do180 factory
 
 set -e
 
@@ -25,12 +25,12 @@ show_help() {
     echo ""
     echo "Arguments:"
     echo "  course       Course ID or short name (e.g., '199', 'do180', 'rh124-9.3')"
-    echo "  environment  Optional: rol (default), rol-stage, china"
+    echo "  environment  Optional: rol (default), factory, china"
     echo ""
     echo "Examples:"
     echo "  delete 199              # Delete rh199 lab on ROL production"
     echo "  delete do180            # Delete do180 lab"
-    echo "  delete do180 rol-stage  # Delete on ROL staging"
+    echo "  delete do180 factory    # Delete on Factory"
 }
 
 if [[ $# -eq 0 ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then

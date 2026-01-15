@@ -7,7 +7,7 @@ Automation tools for various work tasks including lab operations, ServiceNow, an
 - **Lab Operations**: Create, start, stop, delete, and manage labs
 - **QA Automation**: Run automated QA tests on lab exercises
 - **User Impersonation**: Switch to different users for testing
-- **Multi-Environment Support**: Works with ROL, ROL-Stage, and China environments
+- **Multi-Environment Support**: Works with ROL, Factory, and China environments
 - **ServiceNow Auto-Assignment**: Automated ticket assignment with team-specific configurations
 - **LMS Integration**: User name lookups via LMS API
 - **SNOW AI Processor**: LLM-powered ticket classification, analysis, and Jira ticket preparation using Ollama
@@ -139,7 +139,7 @@ The Link Checker validates all external links in course content (References sect
 **Command Options:**
 
 - `--course, -c`: Specific course ID to check (e.g., `rh124-9.3`). Checks all courses if omitted
-- `--env, -e`: Environment (rol, rol-stage, china). Default: rol
+- `--env, -e`: Environment (rol, factory, china). Default: rol
 - `--browser, -b`: Browser to use (firefox, chrome). Default: firefox
 - `--headless/--no-headless`: Run browser in headless mode. Default: no-headless
 - `--output-dir, -d`: Directory to save reports. Default: current directory
@@ -215,7 +215,7 @@ The following section types are automatically excluded from checking:
 
 ### Command Options
 
-- `--env, -e` : Specify environment (rol, rol-stage, china)
+- `--env, -e` : Specify environment (rol, factory, china)
 - `--browser, -b` : Choose browser (firefox, chrome)
 - `--headless` : Run in headless mode
 - `--no-headless` : Run with browser visible
@@ -223,8 +223,8 @@ The following section types are automatically excluded from checking:
 ### Examples
 
 ```bash
-# Start lab in ROL-stage with Chrome
-./scripts/lx-tool lab start rh124-9.3 --env rol-stage --browser chrome
+# Start lab in Factory with Chrome
+./scripts/lx-tool lab start rh124-9.3 --env factory --browser chrome
 
 # Delete lab in headless mode
 ./scripts/lx-tool lab delete rh124-9.3 --headless
@@ -334,7 +334,7 @@ SIGNATURE_NAME=Your Name
 ./scripts/lx-tool snowai --browser chrome
 
 # Run in a specific environment
-./scripts/lx-tool snowai --env rol-stage
+./scripts/lx-tool snowai --env factory
 ```
 
 Opens a separate browser window per ticket with organized tabs for efficient processing.
