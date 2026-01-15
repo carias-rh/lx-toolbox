@@ -341,17 +341,18 @@ def versions(ctx, course_name):
 
 @lab.command()
 @click.argument('course_id')
-@click.argument('chapter_section')
+@click.argument('chapter_section', required=False, default=None)
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, rol-stage, china)')
 @click.option('--browser', '-b', default='chrome', help='Browser to use (firefox, chrome)')
-@click.option('--headless/--no-headless', default=True, help='Run browser in headless mode')
+@click.option('--headless/--no-headless', default=False, help='Run browser in headless mode')
 @click.option('--setup-style', '-s', default=None, help='Environment setup style (e.g., rgdacosta)')
-@click.option('--commands-file', '-f', default=None, help='File containing commands to execute')
 @click.pass_context
-def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, commands_file):
-    """Run QA automation for a specific course chapter/section.
+def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style):
+    """Run QA automation for all Guided Exercises and Labs in a course.
     
     COURSE_ID can be a short name (e.g., '199', 'do180') or full ID.
+    CHAPTER_SECTION (optional) specifies where to start from (e.g., 'ch01s02').
+    If not provided, starts from the first guided exercise.
     """
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
@@ -361,6 +362,11 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
         lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
         reset_step_counter()
         
+        if chapter_section:
+            click.echo(f"Running QA for {course_id} starting from {chapter_section}...")
+        else:
+            click.echo(f"Running full course QA for {course_id}...")
+        
         # Login
         lab_mgr.login(environment=environment)
         
@@ -368,38 +374,30 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style, com
         lab_mgr.go_to_course(course_id=course_id, environment=environment)
         
         # Check and ensure lab is running
-        primary_status, _ = lab_mgr.check_lab_status()
+        primary_status, secondary_status = lab_mgr.check_lab_status()
         
         if primary_status == "CREATE":
             lab_mgr.create_lab(course_id=course_id)
-            primary_status, _ = lab_mgr.check_lab_status()
+            primary_status, secondary_status = lab_mgr.check_lab_status()
         
-        if primary_status == "START":
+        if primary_status == "DELETE" or secondary_status == "START":
             lab_mgr.start_lab(course_id=course_id)
         
         # Increase autostop and lifespan
-        lab_mgr.increase_autostop(course_id=course_id)
-        lab_mgr.increase_lifespan(course_id=course_id)
+        lab_mgr.increase_autostop(course_id=course_id, times=5)
+        lab_mgr.increase_lifespan(course_id=course_id, times=5)
         
         # Open workstation console
         lab_mgr.open_workstation_console(course_id=course_id, setup_environment_style=setup_style)
         
-        # Get commands (from file or from course materials)
-        if commands_file:
-            with open(commands_file, 'r') as f:
-                commands = f.read().splitlines()
-            click.echo(f"Loaded {len(commands)} commands from {commands_file}")
-        else:
-            # This would need the get_exercise_commands to be implemented
-            commands = lab_mgr.get_exercise_commands(course_id=course_id, chapter_section=chapter_section)
-            if not commands:
-                click.echo("Warning: No commands found for this exercise. Please provide a commands file with -f option.", err=True)
-                return
+        # Run QA on exercises
+        lab_mgr.run_full_course_qa(
+            course_id=course_id, 
+            environment=environment,
+            start_from=chapter_section
+        )
         
-        # Run QA
-        lab_mgr.run_qa_on_exercise(course_id=course_id, chapter_section=chapter_section, commands=commands)
-        
-        click.echo(f"✓ QA completed for {course_id} - {chapter_section} in {environment}.")
+        click.echo(f"✓ QA completed for {course_id} in {environment}.")
         click.echo("Browser will remain open for interactive use. Close manually when done.")
         
     except Exception as e:

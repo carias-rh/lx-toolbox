@@ -202,6 +202,8 @@ class LabManager:
             pass
 
     def wait_for_site_to_be_ready(self, environment: str, timeout: int = 5):
+        self.driver.execute_script("document.body.style.zoom = '0.70'")
+        self.driver.execute_script("window.scrollTo(0, 0);")
         self.logger("Waiting for site to be ready...")
         try:
             self.selenium_driver.accept_trustarc_cookies() # Try again in case it reappeared
@@ -214,23 +216,47 @@ class LabManager:
         except TimeoutException:
             # self.selenium_driver.driver.save_screenshot(f"{environment}_site_not_ready.png")
             time.sleep(0.5) # Short pause from original script
-            self.selenium_driver.accept_trustarc_cookies()
-            # Re-attempt the original wait, could make this recursive with a depth limit
-            if environment == "rol" or environment == "china":
-                self.wait.until(EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
-            elif environment == "rol-stage":
-                self.wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="avatar"]')))
+            try:
+                self.selenium_driver.accept_trustarc_cookies()
+                # Re-attempt the original wait, could make this recursive with a depth limit
+                if environment == "rol" or environment == "china":
+                    self.wait.until(EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
+                elif environment == "rol-stage":
+                    self.wait.until(EC.presence_of_element_located((By.XPATH, '//*[@id="avatar"]')))
+            except Exception as retry_err:
+                logging.getLogger(__name__).warning(f"Site ready check retry failed for {environment}: {retry_err}")
         except Exception as e:
-            self.logger(f"Error waiting for site: {e}")
-            raise
+            logging.getLogger(__name__).warning(f"Site ready check failed for {environment}: {e}")
 
-    def go_to_course(self, course_id: str, environment: str):
-        self.logger(f"Navigating to course: {course_id} in {environment}")
+    def go_to_course(self, course_id: str, chapter_section: str = "pr01", environment: str = "rol"):
+        self.logger(f"Navigating to course: {course_id} {chapter_section} in {environment}")
         base_url = self.config.get_lab_base_url(environment)
         if not base_url:
             raise ValueError(f"Base URL for environment '{environment}' not configured.")
-        self.selenium_driver.go_to_url(f"{base_url}{course_id}")
+        self.selenium_driver.go_to_url(f"{base_url}{course_id}/pages/{chapter_section}")
         self.wait_for_site_to_be_ready(environment) # Ensure page is loaded after navigation
+
+    def disable_video_player(self):
+        """Disable video player to avoid issues with page interactions."""
+        try:
+            video_btn = self.driver.find_element(By.XPATH, '//button[@id="HUD__dock-item__btn--video-player"]')
+            if video_btn.get_attribute("aria-pressed") == "true":
+                video_btn.click()
+                self.logger("Disabled video player")
+        except Exception:
+            pass
+
+    def dismiss_active_alerts(self):
+        """Dismiss any active PF5 alerts on the page."""
+        try:
+            alert = self.driver.find_element(By.XPATH, '//div[contains(@class, "pf-v5-c-alert") and contains(@class, "labs-alert")]')
+            if alert:
+                dismiss_btn = alert.find_element(By.XPATH, './/button[contains(@class, "pf-m-link") and contains(text(), "Dismiss")]')
+                dismiss_btn.click()
+                self.logger("Dismissed active alert")
+                time.sleep(0.3)
+        except Exception:
+            pass
 
     def select_lab_environment_tab(self, tab_name: str):
         """Selects a tab like 'index', 'course', or 'lab'."""
@@ -260,12 +286,15 @@ class LabManager:
         
         # Method 1: Try new PF5 interface (by text content)
         try:
+            self.driver.execute_script("document.body.style.zoom = '0.70'")
+            self.driver.execute_script("window.scrollTo(0, 0);")
+
             new_tab_xpath = f'//button[@role="tab" and .//span[contains(text(), "{tab_config["new"]}")]]'
-            tab_element = WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH, new_tab_xpath)))
+            tab_element = WebDriverWait(self.driver, 20).until(EC.element_to_be_clickable((By.XPATH, new_tab_xpath)))
             tab_element.click()
             
             # Verify tab is selected in new interface
-            WebDriverWait(self.driver, 10).until(
+            WebDriverWait(self.driver, 20).until(
                 lambda d: d.find_element(By.XPATH, new_tab_xpath).get_attribute("aria-selected") == "true",
                 message=f"Tab {tab_name} did not become selected in new interface."
             )
@@ -446,7 +475,7 @@ class LabManager:
             
     def recreate_lab(self, course_id: str, environment: str):
         self.logger(f"Recreating lab for course: {course_id} in {environment}")
-        self.go_to_course(course_id, environment) # Ensure on correct page
+        self.go_to_course(course_id, environment=environment) # Ensure on correct page
         self.select_lab_environment_tab("lab-environment")
         
         primary_status, secondary_status = self.check_lab_status()
@@ -485,6 +514,8 @@ class LabManager:
         self.logger(f"{description} for course {course_id} ({times} times)")
         self.select_lab_environment_tab("lab-environment")
         try:
+
+            self.driver.execute_script("document.body.style.zoom = '0.70'")
             # Wait until lab is in a state where adjustments can be made (e.g., running)
             # The original script checked for "CREATING" or "STARTING" states before clicking.
             # This implies we should wait until those are done.
@@ -495,7 +526,7 @@ class LabManager:
             time.sleep(0.3)
             
             button_xpath = f'//*[@id="tab-course-lab-environment"]/div/table/tr[{button_xpath_part}]/td[2]/button'
-            WebDriverWait(self.driver, 120).until(EC.visibility_of_element_located((By.XPATH, button_xpath)))
+            WebDriverWait(self.driver, 3).until(EC.visibility_of_element_located((By.XPATH, button_xpath)))
             adj_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, button_xpath)))
             for _ in range(times):
                 adj_button.click()
@@ -505,8 +536,7 @@ class LabManager:
             # self.selenium_driver.driver.save_screenshot(f"{description.lower().replace(' ','_')}_timeout_{course_id}.png")
             # Pass for now as in original script
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error during {description} for {course_id}: {e}")
-            # Pass for now
+            pass
 
     def increase_autostop(self, course_id: str, times: int = 4):
         self._click_lab_adjustment_button(course_id, "1", times, "Increasing auto-stop")
@@ -546,7 +576,7 @@ class LabManager:
 
             # Re-navigate to the course after impersonation
             if current_course_id:
-                self.go_to_course(current_course_id, environment)
+                self.go_to_course(current_course_id, environment=environment)
             self.select_lab_environment_tab("lab-environment") # Go to lab tab by default after impersonation
 
         except Exception as e:
@@ -554,188 +584,847 @@ class LabManager:
             # self.selenium_driver.driver.save_screenshot(f"impersonate_error_{impersonate_username}.png")
             # Don't re-raise, allow script to continue if impersonation fails but is not critical path for *all* ops
 
-    # --- Placeholder methods for QA and command execution ---
-    # These are more complex and might need significant refactoring or external tools
+    # --- QA and command execution methods ---
+    
+    # Tab handles for switching between course page and console
+    _course_tab_handle = None
+    _console_tab_handle = None
 
     def open_workstation_console(self, course_id: str, setup_environment_style: str = None):
+        """
+        Opens the workstation console for a course and optionally sets up the environment.
+        
+        Args:
+            course_id: The course identifier
+            setup_environment_style: Optional style for environment setup (e.g., "rgdacosta")
+        """
         self.logger(f"Opening workstation console for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
         
-        # Wait for workstation button to be clickable
-        # Original: //*[text()='workstation']/../td[3]/button
-        workstation_button = self.wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//td[normalize-space(.)='workstation']/following-sibling::td/button[contains(@class, 'pf-m-primary') or contains(normalize-space(.), 'Open') or contains(normalize-space(.), 'Console')]")
-        )) # More robust XPath
-        workstation_button.click()
+        # Store the course tab handle before opening console
+        self._course_tab_handle = self.driver.current_window_handle
+                
+        # Scroll to top and zoom out to ensure button is visible
+        self.driver.execute_script("document.body.style.zoom = '0.70'")
+        self.driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(0.5)
+        
+        # Wait for workstation button using original XPath
+        workstation_button_xpath = "//*[text()='workstation']/../td[3]/button"
+        workstation_button = self.wait.until(
+            EC.presence_of_element_located((By.XPATH, workstation_button_xpath))
+        )
+        
+        # Scroll the button into view and use JavaScript click to avoid interception
+        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", workstation_button)
+        time.sleep(0.3)
+        self.driver.execute_script("arguments[0].click();", workstation_button)
         
         # Wait for new window/tab and switch to it
         WebDriverWait(self.driver, 30).until(EC.number_of_windows_to_be(2))
         handles = self.driver.window_handles
-        self.driver.switch_to.window(handles[1])
+        # Find the new tab (not the course tab)
+        for handle in handles:
+            if handle != self._course_tab_handle:
+                self._console_tab_handle = handle
+                break
+        self.driver.switch_to.window(self._console_tab_handle)
 
         # Open virtual keyboard in the console
         try:
             show_keyboard_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="showKeyboard"]')))
             show_keyboard_button.click()
         except TimeoutException:
-            logging.getLogger(__name__).error("Could not find 'Show Keyboard' button. Console might have changed.")
-            # Proceeding as it might not be critical or UI might be different
+            logging.getLogger(__name__).warning("Could not find 'Show Keyboard' button. Console UI might have changed.")
 
-        # Store send_text_option_button if needed, or handle text input directly
-        # self.send_text_option_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="showSendTextDialog"]')))
+        # Store the send text button reference for reuse
+        try:
+            self._send_text_option_button = self.wait.until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="showSendTextDialog"]'))
+            )
+        except TimeoutException:
+            self._send_text_option_button = None
+            logging.getLogger(__name__).warning("Could not find 'Send Text' button.")
         
         if setup_environment_style == "rgdacosta":
             self._setup_environment_rgdacosta_style()
         elif setup_environment_style:
-            logging.getLogger(__name__).error(f"Unknown environment setup style: {setup_environment_style}")
+            logging.getLogger(__name__).warning(f"Unknown environment setup style: {setup_environment_style}")
+
+    def switch_to_course_tab(self):
+        """Switch to the course page tab."""
+        if self._course_tab_handle:
+            self.driver.switch_to.window(self._course_tab_handle)
+        else:
+            # Fallback: assume first tab is course tab
+            handles = self.driver.window_handles
+            if handles:
+                self.driver.switch_to.window(handles[0])
+                self._course_tab_handle = handles[0]
+
+    def switch_to_console_tab(self):
+        """Switch to the workstation console tab."""
+        if self._console_tab_handle:
+            self.driver.switch_to.window(self._console_tab_handle)
+        else:
+            # Fallback: assume second tab is console tab
+            handles = self.driver.window_handles
+            if len(handles) > 1:
+                self.driver.switch_to.window(handles[1])
+                self._console_tab_handle = handles[1]
+
+    def _click_virtual_keyboard_key(self, key_name: str, timeout: int = 10):
+        """
+        Click a key on the virtual keyboard.
+        
+        Args:
+            key_name: The name of the key (e.g., "Enter", "Tab", "Esc", "Alt", "F2")
+            timeout: Maximum time to wait for the key to be clickable
+        """
+        try:
+            key_xpath = f'//div[@id="keyboard"]//div[text()="{key_name}"]'
+            key_element = WebDriverWait(self.driver, timeout).until(
+                EC.element_to_be_clickable((By.XPATH, key_xpath))
+            )
+            key_element.click()
+            time.sleep(0.3)
+        except TimeoutException:
+            logging.getLogger(__name__).error(f"Could not find virtual keyboard key: {key_name}")
+            raise
 
     def _setup_environment_rgdacosta_style(self):
-        # This method is highly specific and involves many UI interactions.
-        # It needs to be carefully translated, ensuring XPaths are robust.
-        self.logger("Setting up lab environment 'rgdacosta' style!!!")
-        # ... (Implementation would involve many introduce_command calls and waits)
-        # Example: self.introduce_command_to_console("student", auto_enter=True)
-        # For now, this is a placeholder.
-        self.logger("Placeholder: rgdacosta style setup would run here.")
-        pass
+        """
+        Sets up the lab environment in 'rgdacosta' style.
+        This involves logging in as student, opening a terminal, and running setup commands.
+        """
+        self.logger("Setting up lab environment 'rgdacosta' style!")
+        
+        # Wait for the console to fully load
+        time.sleep(60)
+        self.logger("Waiting for console to be ready...")
+        time.sleep(10)
+        
+        # Click enter to select student user
+        self._click_virtual_keyboard_key("Enter")
+        self._click_virtual_keyboard_key("Tab")
+        self._click_virtual_keyboard_key("Enter")
+        
+        # Enter password for student user and press enter
+        self.introduce_command_to_console('student', auto_enter=True)
+        time.sleep(17)
+        
+        # Open a terminal with ALT + F2
+        self._click_virtual_keyboard_key("Esc")
+        self._click_virtual_keyboard_key("Alt")
+        self._click_virtual_keyboard_key("F2")
+        self._click_virtual_keyboard_key("Alt")
+        time.sleep(0.5)
+        
+        self.introduce_command_to_console('gnome-terminal', auto_enter=True)
+        
+        # Clone the rgdacosta repository
+        time.sleep(1.5)
+        self.introduce_command_to_console('git clone https://gitlab.com/rgdacosta/classroom_env.git', auto_enter=True)
+        time.sleep(3)
+        
+        # Run the ansible playbook
+        self.introduce_command_to_console('cd classroom_env; ansible-playbook playbook.yml', auto_enter=True)
+        time.sleep(20)
+        
+        # Open another terminal with ALT + F2
+        self._click_virtual_keyboard_key("Esc")
+        self._click_virtual_keyboard_key("Alt")
+        self._click_virtual_keyboard_key("F2")
+        self._click_virtual_keyboard_key("Alt")
+        
+        self.introduce_command_to_console('gnome-terminal', auto_enter=True)
+        
+        self.logger("Lab environment 'rgdacosta' style setup completed.")
+
+    def _wait_for_command_to_paste(self, command: str):
+        """Wait a proportional time based on the command length for pasting to complete."""
+        time.sleep(len(command) * 0.1)
 
     def introduce_command_to_console(self, command: str, auto_enter: bool = True):
-        self.logger(f"Introducing command to console: '{command[:50]}...' (Enter: {auto_enter})")
-        if not command.strip():
+        """
+        Introduces a command to the console using the text dialog.
+        
+        Args:
+            command: The command to send
+            auto_enter: Whether to press Enter after sending the command
+        """
+        if not command:
             return
 
         try:
-            # Assuming 'showSendTextDialog' button approach from original
-            send_text_dialog_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="showSendTextDialog"]')))
-            send_text_dialog_button.click()
+            # Open text dialog
+            if hasattr(self, '_send_text_option_button') and self._send_text_option_button:
+                self._send_text_option_button.click()
+            else:
+                send_text_dialog_button = self.wait.until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[@id="showSendTextDialog"]'))
+                )
+                send_text_dialog_button.click()
 
-            text_input_area = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sendTextInput"]')))
+            # Paste command into text box
+            text_input_area = self.wait.until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="sendTextInput"]'))
+            )
             text_input_area.send_keys(command)
 
-            send_text_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="sendTextButton"]')))
+            # Click Send button to send the command
+            send_text_button = self.wait.until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="sendTextButton"]'))
+            )
             send_text_button.click()
             
-            # Wait proportional to command length (from original)
-            time.sleep(len(command) * 0.05 + 0.5) # Adjusted multiplier
+            # Wait proportional to command length
+            self._wait_for_command_to_paste(command)
 
+            # Click Enter on virtual keyboard
             if auto_enter:
-                # This XPath for 'Enter' on virtual keyboard is highly specific
-                # //*[@id="keyboard"]//div[text()="Enter"]
-                enter_button_xpath = '//div[@id="keyboard"]//div[text()="Enter"]'
-                try: # Try physical enter first via send_keys if possible, else virtual
-                    # Attempting to send Enter to the active element if console allows direct input
-                    # self.driver.switch_to.active_element.send_keys(Keys.RETURN)
-                    # Or use virtual keyboard if that's the only way
-                     enter_key_on_virtual_keyboard = self.wait.until(EC.element_to_be_clickable((By.XPATH, enter_button_xpath)))
-                     enter_key_on_virtual_keyboard.click()
-                except Exception as e_enter:
-                    self.logger(f"Could not press Enter key via preferred method: {e_enter}. Ensure console is active or virtual keyboard XPath is correct.")
-
+                # Using the specific XPath from the original implementation
+                enter_key_xpath = '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'
+                try:
+                    enter_key = WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, enter_key_xpath))
+                    )
+                    enter_key.click()
+                except TimeoutException:
+                    # Fallback to generiCheckinc Enter key search
+                    try:
+                        self._click_virtual_keyboard_key("Enter")
+                    except Exception as e_enter:
+                        self.logger(f"Could not press Enter key: {e_enter}")
 
         except Exception as e:
             self.logger(f"Error introducing command '{command[:50]}...': {e}")
-            # self.selenium_driver.driver.save_screenshot(f"command_error_{command[:10]}.png")
 
+    def click_on_show_solution_buttons(self):
+        """Click all 'Show Solution' buttons on the current page."""
+        try:
+            while True:
+                try:
+                    show_solution_button = WebDriverWait(self.driver, 0.5).until(
+                        EC.element_to_be_clickable((By.XPATH, "//button[text()='Show Solution']"))
+                    )
+                    show_solution_button.click()
+                    time.sleep(0.5)
+                except TimeoutException:
+                    # No more show solution buttons, break the loop
+                    break
+        except Exception:
+            pass
 
-    def get_exercise_commands(self, course_id: str, chapter_section: str) -> list[str]:
-        self.logger(f"Getting commands for {course_id} - {chapter_section}")
-        # This method originally used local git repo and xq to parse XML.
-        # This needs a new strategy:
-        # 1. API endpoint if available.
-        # 2. Pre-processed JSON/text files.
-        # 3. User provides the commands.
-        # 4. Re-implement parsing if XML files are locally accessible via config path.
+    def get_exercise_commands(self, course_id: str, chapter_section: str, environment: str) -> list[str]:
+        """
+        Gets commands from an exercise by navigating to the course page and extracting userinput elements.
+        Switches to course tab, fetches commands, then switches back to console tab.
         
-        # For now, returns a placeholder or raises NotImplementedError
-        self.logger("Placeholder: Command retrieval from guides not yet implemented.")
-        # Example:
-        # guide_content_path = self.config.get("Paths", "course_guides_dir")
-        # if guide_content_path:
-        #     # Logic to find and parse the correct guide file
-        #     # return parsed_commands
-        # else:
-        #     print("Warning: Course guides directory not configured.")
-        return [] 
-
-    def filter_commands_list(self, commands: list[str]) -> list[str]:
-        # This is adapted from the original filter_commands_list
-        self.logger("Filtering command list...")
-        filtered_commands = []
-        composed_command = ''
-        for command in commands:
-            command_stripped = command.strip()
-            if not command_stripped:
-                continue
+        Args:
+            course_id: The course identifier (e.g., "rh124-9.3")
+            chapter_section: The chapter and section (e.g., "ch01s02")
+            environment: The target environment
             
-            if command_stripped.endswith('\\'):
-                composed_command += command_stripped[:-1] # Add line, remove trailing slash
-            else:
-                full_command = composed_command + command_stripped
-                if full_command: # Ensure not empty
-                    filtered_commands.append(full_command)
-                composed_command = ''
+        Returns:
+            List of commands extracted from the exercise
+        """
+        self.logger(f"Getting commands from exercise {chapter_section}")
         
-        # If the last command was a multiline pending, add it
-        if composed_command:
-             filtered_commands.append(composed_command)
-             
-        return filtered_commands
+        # Switch to course tab to fetch commands
+        self.switch_to_course_tab()
+        
+        # Navigate to the specific exercise page
+        base_url = self.config.get_lab_base_url(environment)
+        exercise_url = f"{base_url}{course_id}/pages/{chapter_section}"
+        self.selenium_driver.go_to_url(exercise_url)
+        
+        self.select_lab_environment_tab("course")
+        time.sleep(4)
 
-    def run_qa_on_exercise(self, course_id: str, chapter_section: str, commands: list[str]):
+        # Click on all the show solution buttons until there are no more
+        self.click_on_show_solution_buttons()
+
+        # Get commands directly from the online platform
+        commands_list = []
+        try:
+            # Try the old interface first
+            userinput_elements = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_all_elements_located(
+                    (By.XPATH, '//*[@id="course-tabs-pane-2"]//strong[@class="userinput"]')
+                )
+            )
+            for element in userinput_elements:
+                text = element.text.strip()
+                if text:
+                    commands_list.append(text)
+        except TimeoutException:
+            # Try the new PF5 interface
+            try:
+                userinput_elements = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_all_elements_located(
+                        (By.XPATH, '//strong[@class="userinput"]')
+                    )
+                )
+                for element in userinput_elements:
+                    text = element.text.strip()
+                    if text:
+                        commands_list.append(text)
+            except TimeoutException:
+                self.logger("Could not find any userinput elements on the page.")
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Exception while fetching commands: {e}")
+
+        commands = "\n".join(commands_list)
+        print("\n")
+        print(commands)
+        print("#####################################")
+
+        # Switch back to console tab for command execution
+        self.switch_to_console_tab()
+
+        return commands_list
+
+    def get_guided_exercises_and_labs(self, course_id: str, start_from: str, environment: str) -> list[str]:
+        """
+        Gets the list of Guided Exercises and Labs for a course using the TOC panel.
+        
+        Args:
+            course_id: The course identifier (e.g., "rh124-9.3")
+            start_from: The chapter_section to navigate to initially
+            environment: The target environment
+            
+        Returns:
+            List of chapter_section identifiers (e.g., ["ch01s02", "ch01s03", ...])
+        """
+        self.logger("Getting the list of Guided Exercises and Labs")
+        
+        # Ensure we're on the course tab (not the console tab)
+        self.switch_to_course_tab()
+        
+        # Navigate to course
+        base_url = self.config.get_lab_base_url(environment)
+        course_url = f"{base_url}{course_id}"
+        
+        if course_id not in self.driver.current_url:
+            self.selenium_driver.go_to_url(course_url)
+            time.sleep(3)
+
+        chapter_and_section_list = []
+
+        try:
+            # Wait for any backdrop/modal overlay to disappear
+            try:
+                WebDriverWait(self.driver, 15).until(
+                    EC.invisibility_of_element_located((By.XPATH, '//div[contains(@class, "pf-v5-c-backdrop")]'))
+                )
+            except TimeoutException:
+                self.logger("  ⚠ Backdrop overlay still present, attempting to continue...")
+                try:
+                    self.driver.execute_script("document.body.click();")
+                    time.sleep(0.5)
+                except:
+                    pass
+            
+            # Click on "Toggle Table of Contents panel" button to open TOC
+            toc_button = self.wait.until(EC.element_to_be_clickable(
+                (By.XPATH, '//button[contains(@aria-label, "Table of Contents") or contains(@aria-label, "Toggle Table of Contents")]')
+            ))
+            
+            # Check if TOC is already open
+            try:
+                toc_region = self.driver.find_element(By.XPATH, '//div[contains(@class, "ToC")] | //div[@aria-label="Table of contents"]')
+                if not toc_region.is_displayed():
+                    self.driver.execute_script("arguments[0].click();", toc_button)
+                    time.sleep(1)
+            except:
+                self.driver.execute_script("arguments[0].click();", toc_button)
+                time.sleep(1)
+            
+            # Click on "Expand all" toggle switch to show all chapters
+            try:
+                expand_all_selectors = [
+                    '//label[contains(@class, "pf-v5-c-switch") and .//span[contains(text(), "Expand all")]]',
+                    '//span[contains(@class, "pf-v5-c-switch__label") and contains(text(), "Expand all")]/..',
+                    '//input[following-sibling::*[contains(text(), "Expand all")]]',
+                    '//button[contains(text(), "Expand all")]',
+                    '//*[contains(text(), "Expand all")]/ancestor::label[contains(@class, "switch")]//input',
+                ]
+                
+                expand_all = None
+                for selector in expand_all_selectors:
+                    try:
+                        expand_all = self.driver.find_element(By.XPATH, selector)
+                        if expand_all.is_displayed():
+                            break
+                    except:
+                        continue
+                
+                if expand_all and expand_all.is_displayed():
+                    is_checked = expand_all.get_attribute('aria-checked') == 'true' or expand_all.get_attribute('checked')
+                    if not is_checked:
+                        self.driver.execute_script("arguments[0].click();", expand_all)
+                        time.sleep(1)
+                        self.logger("  Clicked 'Expand all' toggle")
+                else:
+                    self.logger("  'Expand all' toggle not found, expanding chapters manually...")
+            except Exception as e:
+                logging.getLogger(__name__).debug(f"Could not use 'Expand all' toggle: {e}")
+            
+            # Expand any collapsed chapter accordions
+            try:
+                collapsed_chapters = self.driver.find_elements(
+                    By.XPATH,
+                    '//button[contains(@class, "pf-v5-c-accordion__toggle") and @aria-expanded="false"]'
+                )
+                
+                if collapsed_chapters:
+                    self.logger(f"  Expanding {len(collapsed_chapters)} collapsed chapters...")
+                    for btn in collapsed_chapters:
+                        try:
+                            self.driver.execute_script("arguments[0].click();", btn)
+                            time.sleep(0.3)
+                        except:
+                            continue
+                    time.sleep(0.5)
+            except Exception as e:
+                logging.getLogger(__name__).debug(f"Error expanding chapters: {e}")
+            
+            # Get all section links from TOC
+            section_links = self.driver.find_elements(
+                By.XPATH,
+                '//a[contains(@href, "/pages/") and @data-analytics-id="toc-link-ole-lp"]'
+            )
+            
+            # If no links found with specific data-analytics-id, try broader search
+            if not section_links:
+                section_links = self.driver.find_elements(
+                    By.XPATH,
+                    '//div[contains(@class, "ToC")]//a[contains(@href, "/pages/")]'
+                )
+            
+            # If still no links, try even broader search
+            if not section_links:
+                section_links = self.driver.find_elements(
+                    By.XPATH,
+                    '//a[contains(@href, "/pages/")]'
+                )
+            
+            # Filter for Guided Exercises and Labs only
+            for link in section_links:
+                try:
+                    url = link.get_attribute('href')
+                    title = link.text.strip()
+                    
+                    if url and title and '/pages/' in url:
+                        # Only include Guided Exercises and Labs
+                        if "Guided Exercise:" in title or "Lab:" in title:
+                            try:
+                                chapter_and_section = str(re.findall(r"ch[0-9]*s[0-9]*", url)[0])
+                                # Avoid duplicates
+                                if chapter_and_section not in chapter_and_section_list:
+                                    print(title)
+                                    print(f"Section: {chapter_and_section}")
+                                    chapter_and_section_list.append(chapter_and_section)
+                            except (IndexError, TypeError):
+                                pass
+                except:
+                    continue
+            
+            self.logger(f"Found {len(chapter_and_section_list)} Guided Exercises and Labs")
+            
+        except TimeoutException:
+            self.logger(f"Timeout waiting for TOC in course {course_id}")
+        except Exception as e:
+            self.logger(f"Error getting guided exercises and labs: {e}")
+
+        return chapter_and_section_list
+
+    def _multiline_command(self, command: str) -> bool:
+        """
+        Check if a command ends with an odd number of backslashes (line continuation).
+        
+        Args:
+            command: The command to check
+            
+        Returns:
+            True if the command continues on the next line, False otherwise
+        """
+        stripped_command = command.rstrip()
+        if not stripped_command:
+            return False
+        trailing_backslashes = re.search(r'\\+$', stripped_command)
+        if not trailing_backslashes:
+            return False
+        return len(trailing_backslashes.group(0)) % 2 == 1
+
+    def _merge_command_fragments(self, previous_command: str, current_fragment: str) -> str | None:
+        """
+        Attempt to merge command fragments that might be split across lines.
+        
+        Args:
+            previous_command: The previous command
+            current_fragment: The current fragment to potentially merge
+            
+        Returns:
+            The merged command if fragments should be merged, None otherwise
+        """
+        previous = previous_command.rstrip()
+        current = current_fragment.lstrip()
+
+        if not previous or not current:
+            return None
+
+        # Check for unclosed quotes
+        if previous.count("'") % 2 == 1:
+            return f"{previous}{current}"
+        if previous.count('"') % 2 == 1:
+            return f"{previous}{current}"
+
+        # Check for assignment continuation
+        if previous.endswith('='):
+            return f"{previous}{current}"
+
+        # Check for path continuation
+        if previous.endswith('/'):
+            if '/' in current and ' ' not in current:
+                return f"{previous}{current}"
+
+        # Check for flag continuation
+        if current.startswith('--') or (current.startswith('-') and len(current) > 1 and current[1] != ' '):
+            return f"{previous} {current}"
+        
+        # Check for pipe/redirect continuation
+        if current.startswith(('|', '>', '<')):
+            return f"{previous} {current}"
+        
+        # Check for logical operator continuation
+        if current.startswith(('&&', '||')):
+            return f"{previous} {current}"
+
+        return None
+
+    def filter_commands_list(self, commands: list[str] | str) -> list[str]:
+        """
+        Filters and composes multi-line commands from a list or string of commands.
+        
+        Args:
+            commands: Either a list of command strings or a newline-separated string
+            
+        Returns:
+            List of filtered and composed commands
+        """
+        self.logger("Filtering command list...")
+        
+        # Handle string input
+        if isinstance(commands, str):
+            commands_array = commands.split("\n")
+        else:
+            commands_array = commands
+            
+        composed_command = ''
+        filtered_commands_array = []
+
+        for raw_command in commands_array:
+            command = raw_command.strip()
+            if command == '':
+                continue
+
+            # Check for multiline command (ends with backslash)
+            if self._multiline_command(command):
+                line_without_backslash = re.sub(r'\\+$', '', command.rstrip())
+                composed_command = f"{composed_command}{line_without_backslash.rstrip()} "
+                continue
+
+            # If we have a composed command pending, complete it
+            if composed_command:
+                composed_command = f"{composed_command}{command}"
+                filtered_commands_array.append(composed_command.strip())
+                composed_command = ''
+                continue
+
+            # Try to merge with previous command
+            if filtered_commands_array:
+                merged_command = self._merge_command_fragments(filtered_commands_array[-1], command)
+                if merged_command is not None:
+                    filtered_commands_array[-1] = merged_command.strip()
+                    continue
+
+            filtered_commands_array.append(command)
+
+        # Handle any remaining composed command
+        if composed_command:
+            filtered_commands_array.append(composed_command.strip())
+
+        return filtered_commands_array
+
+    def _prompt_user_to_continue(self, custom_message: str = ""):
+        """
+        Prompts for user input to continue the execution of the QA.
+        
+        Args:
+            custom_message: Optional message to display to the user
+        """
+        print("")
+        input(f"Press Enter to continue {custom_message}\n")
+
+    def _handle_special_command(self, command: str) -> bool:
+        """
+        Handles special commands that require specific treatment.
+        
+        Args:
+            command: The command to handle
+            
+        Returns:
+            True if the command was handled specially, False otherwise
+        """
+        
+        # Lab start/setup commands
+        if re.match(r"lab .*start", command) or re.match(r"lab .*setup", command):
+            command = "date; time " + command
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("with the exercise.")
+            return True
+            
+        # Lab grade commands
+        if re.match(r"lab .*grade", command):
+            command = "date; time " + command
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("with the exercise.")
+            return True
+            
+        # Lab finish commands
+        if re.match(r"lab .*finish", command):
+            command = "date; time " + command
+            self.introduce_command_to_console(command, auto_enter=True)
+            print("##############  Exercise completed ##############")
+            return True
+            
+        # SSH commands (excluding sshd, keygen, copy-id)
+        if "ssh" in command and "sshd" not in command and "keygen" not in command and "copy-id" not in command:
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("after the ssh.")
+            return True
+            
+        # Ansible commands
+        if "ansible" in command:
+            self._prompt_user_to_continue("if you did review/create the playbook.")
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("if playbook finished")
+            return True
+            
+        # Skip output lines (ok=, failed=)
+        if "ok=" in command or "failed=" in command:
+            print("skipping output")
+            return True
+            
+        # Podman build commands
+        if "podman build" in command:
+            self._prompt_user_to_continue("if the Containerfile is ready to build.")
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("if podman build finished.")
+            return True
+            
+        # Vim/vi commands
+        if "vim " in command or "vi " in command:
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("if you did review/create the file.")
+            return True
+            
+        # Enter command
+        if "Enter" in command:
+            self.introduce_command_to_console("\n", auto_enter=True)
+            return True
+            
+        # Less command (replace with cat)
+        if "less " in command:
+            command = command.replace("less ", "cat ")
+            self.introduce_command_to_console(command, auto_enter=True)
+            return True
+            
+        # Systemctl status commands
+        if "systemctl status" in command:
+            self.introduce_command_to_console(command, auto_enter=True)
+            self.introduce_command_to_console("q\n", auto_enter=True)
+            return True
+            
+        # Systemctl restart / daemon-reload commands
+        if "systemctl restart" in command or "daemon-reload" in command:
+            self._prompt_user_to_continue(
+                "if you made sure that the new configuration is in place to 'systemctl restart service.'"
+            )
+            self.introduce_command_to_console(command, auto_enter=True)
+            return True
+            
+        # Journalctl commands
+        if "journalctl" in command:
+            self.introduce_command_to_console(command, auto_enter=True)
+            self.introduce_command_to_console(" \n", auto_enter=True)
+            return True
+            
+        # Ping commands (excluding ansible)
+        if "ping" in command and "ansible" not in command:
+            if "-c" not in command:
+                command = command + " -c2"
+            self.introduce_command_to_console(command, auto_enter=True)
+            return True
+            
+        # Yum/dnf install/reinstall/remove commands
+        if any(x in command for x in ["yum install", "yum reinstall", "yum remove", "dnf install"]):
+            if "-y" not in command:
+                command = command + " -y"
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("when the installation has finished.")
+            return True
+            
+        # Podman login commands
+        if "podman login registry.redhat.io" in command:
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("when login is completed.")
+            return True
+            
+        # VG restore commands
+        if "vgcfgrestore -f" in command:
+            self._prompt_user_to_continue("when you have selected the desired .vg file.")
+            self.introduce_command_to_console(command, auto_enter=True)
+            return True
+            
+        # /etc/hosts or /etc/resolv.conf commands
+        if "/etc/hosts" in command or "/etc/resolv.conf" in command:
+            self._prompt_user_to_continue("when you have reviewed/fixed the /etc/hosts or /etc/resolv.conf files.")
+            self.introduce_command_to_console(command, auto_enter=True)
+            return True
+            
+        # iSCSI discovery commands
+        if "iscsiadm -m discovery" in command:
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("when discovery command has executed.")
+            return True
+            
+        # OC edit commands
+        if "oc edit" in command:
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("when the object edit has been saved.")
+            return True
+            
+        # OC create/apply with -f or -k commands
+        if ("oc create" in command or "oc apply" in command) and (" -f " in command or " -k " in command):
+            self._prompt_user_to_continue("when the yaml file has been saved.")
+            self.introduce_command_to_console(command, auto_enter=True)
+            return True
+            
+        # OC patch commands
+        if "oc patch" in command:
+            self._prompt_user_to_continue("when the yaml file has been saved.")
+            self.introduce_command_to_console(command, auto_enter=True)
+            return True
+            
+        # OC logs / podman logs commands
+        if "oc logs" in command or "podman logs" in command:
+            try:
+                suffix_match = re.findall(r"-\w+-\w+$", command)
+                if suffix_match:
+                    suffix = suffix_match[0]
+                    self.introduce_command_to_console(re.split(str(suffix), command)[0], auto_enter=False)
+                    self._prompt_user_to_continue(". Use TAB to complete the container/pod name.\n")
+                else:
+                    self.introduce_command_to_console(command, auto_enter=True)
+            except Exception:
+                self.introduce_command_to_console(command, auto_enter=True)
+            return True
+            
+        # Watch commands or oc get with -w
+        if "watch" in command or ("oc get" in command and " -w " in command):
+            self.introduce_command_to_console(command, auto_enter=True)
+            self._prompt_user_to_continue("when you finished using the watch command.")
+            return True
+
+        # Command was not handled specially
+        return False
+
+    def run_full_course_qa(self, course_id: str, environment: str, start_from: str = None):
+        """
+        Runs QA on all Guided Exercises and Labs in a course, optionally starting from a specific exercise.
+        
+        Note: This method assumes the lab environment is already set up (logged in, lab started, 
+        workstation console open). Call this after performing those setup steps.
+        
+        Args:
+            course_id: The course identifier (e.g., "rh124-9.3")
+            environment: The target environment
+            start_from: Optional chapter_section to start from (e.g., "ch01s02"). 
+                       If not provided, starts from the first guided exercise.
+        """
+        self.logger(f"Starting full course QA for {course_id}")
+        
+        # Get list of exercises and labs (switches to course tab internally)
+        exercises = self.get_guided_exercises_and_labs(course_id, start_from, environment)
+        
+        if not exercises:
+            self.logger("No exercises or labs found for this course.")
+            
+        
+        # Filter exercises to start from the specified chapter_section
+        if start_from:
+            if start_from in exercises:
+                start_index = exercises.index(start_from)
+                exercises = exercises[start_index:]
+                self.logger(f"Starting from {start_from} ({len(exercises)} exercises/labs remaining)")
+            else:
+                self.logger(f"Warning: {start_from} not found in exercises list. Starting from the beginning.")
+        
+        self.logger(f"Found {len(exercises)} exercises/labs to QA")
+        
+        # Run QA on each exercise
+        for chapter_section in exercises:
+            try:
+                self._run_qa_on_exercise(course_id, chapter_section, environment)
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Error during QA of {chapter_section}: {e}")
+                self._prompt_user_to_continue(f"after handling error in {chapter_section}.")
+        
+        self.logger(f"Completed full course QA for {course_id}")
+
+    def _run_qa_on_exercise(self, course_id: str, chapter_section: str, environment: str):
+        """
+        Internal method to run QA on a specific exercise by executing commands.
+        
+        Args:
+            course_id: The course identifier (e.g., "rh124-9.3")
+            chapter_section: The chapter and section (e.g., "ch01s02")
+            environment: The target environment
+        """
         self.logger(f"Starting QA for {course_id} - {chapter_section}")
         
+        commands = self.get_exercise_commands(course_id, chapter_section, environment)
         filtered_commands = self.filter_commands_list(commands)
+        
         if not filtered_commands:
-            self.logger("No commands to execute for QA.")
+            self.logger(f"No commands found for {chapter_section}, skipping to next exercise.")
             return
 
+        self.logger(f"Executing {len(filtered_commands)} commands...")
+
         for i, command in enumerate(filtered_commands):
-            self.logger(f"Introducing: {command}")
+            if command == '':
+                continue
+                
+            print(f"Introducing: {command}")
             if i + 1 < len(filtered_commands):
-                self.logger(f"Next command: {filtered_commands[i+1]}")
+                print('-------------------------------------------------')
             
-            # The original 'manage_special_commands' had complex logic with user prompts.
-            # This needs to be re-thought for an automated system.
-            # For now, just execute directly or add simplified conditions.
-            if self._is_special_command(command):
-                self._handle_special_command(command)
-            else:
+            # Check if this is a special command that needs specific handling
+            if not self._handle_special_command(command):
+                # Regular command - just execute it
                 self.introduce_command_to_console(command, auto_enter=True)
-            
-            time.sleep(self.config.get("QA", "command_delay_seconds", 3)) # Configurable delay
+
+            # Standard time for command to execute
+            command_delay = self.config.get("QA", "command_delay_seconds", 3)
+            if isinstance(command_delay, str):
+                command_delay = int(command_delay)
+            time.sleep(command_delay)
 
         self.logger(f"Finished QA for {course_id} - {chapter_section}")
-
-    def _is_special_command(self, command: str) -> bool:
-        # Simplified version of manage_special_commands conditions
-        # Add more patterns as needed
-        special_patterns = [
-            r"lab .*start", r"lab .*setup", r"lab .*grade", r"lab .*finish",
-            r"ssh", r"ansible", r"vim ", r"vi ", r"less ",
-            r"systemctl status", r"systemctl restart", r"daemon-reload",
-            r"journalctl", r"yum install", r"dnf install",
-            r"oc edit", r"oc create -f", r"oc apply -f",
-            r"watch"
-        ]
-        return any(re.search(pattern, command) for pattern in special_patterns)
-
-    def _handle_special_command(self, command: str):
-        self.logger(f"Handling special command: {command[:60]}...")
-        # This would contain the logic from manage_special_commands.
-        # Many involve `input()` which is problematic for full automation.
-        # These might need to become configurable actions or require manual steps.
-        
-        # Example: if "vim " in command or "vi " in command:
-        # self.introduce_command_to_console(command, auto_enter=True)
-        # self.logger("ACTION REQUIRED: File opened in editor. Resume script when done.")
-        # input("Press Enter to continue after editing file...")
-        
-        # For now, just log and execute
-        self.logger(f"Executing special command as regular command: {command}")
-        self.introduce_command_to_console(command, auto_enter=True)
-        # Add specific waits or interactions if a command is known to take time or change state
-        if "yum install" in command or "dnf install" in command:
-            time.sleep(self.config.get("QA", "install_command_delay_seconds", 30))
 
 
     def close_browser(self):
