@@ -1163,195 +1163,47 @@ class LinkChecker(LabManager):
         
         return all_courses
     
-    # Sections to exclude from link checking (lowercase for case-insensitive matching)
-    EXCLUDED_SECTION_KEYWORDS = [
-        "summary",
-        "lab:",
-        "guided exercise:",
-        "quiz:",
-        "comprehensive review",
-        "preface"
-    ]
-    
-    def _should_exclude_section(self, title: str) -> bool:
-        """Check if a section should be excluded based on its title."""
-        title_lower = title.lower()
-        for keyword in self.EXCLUDED_SECTION_KEYWORDS:
-            if keyword in title_lower:
-                return True
-        return False
-    
-    def get_course_sections(self, course_id: str, environment: str) -> list[dict]:
+    def get_course_sections(self, course_id: str, environment: str, section_type: str = "theory") -> list[dict]:
         """
-        Get all sections from a course's table of contents.
-        Returns a list of dicts with 'title', 'url', 'chapter', 'section_number'.
-        Filters out sections based on EXCLUDED_SECTION_KEYWORDS.
+        Get sections from a course's table of contents for link checking.
+        Extends parent method to add chapter/section parsing for report generation.
+        
+        Args:
+            course_id: The course identifier (e.g., "rh124-9.3")
+            environment: The target environment
+            section_type: Type of sections to fetch (default "theory" for link checking)
+            
+        Returns:
+            List of dicts with 'title', 'url', 'chapter', 'section_number', 'clean_title'.
         """
-        self.logger(f"Getting sections for course: {course_id}")
-        sections = []
+        # Get base sections from parent class
+        base_sections = super().get_course_sections(course_id, environment, section_type=section_type)
         
-        # Navigate to course if not already there
-        base_url = self.config.get_lab_base_url(environment)
-        course_url = f"{base_url}{course_id}"
+        # Enrich with chapter/section parsing for report generation
+        enriched_sections = []
+        for section in base_sections:
+            url = section['url']
+            title = section['title']
+            
+            # Extract just the path if full URL
+            if 'rol.redhat.com' in url:
+                path = url.split('rol.redhat.com')[1]
+            else:
+                path = url
+            
+            # Parse chapter and section from title
+            chapter, section_number, clean_title = self._parse_section_title(title)
+            
+            enriched_sections.append({
+                'title': title,
+                'clean_title': clean_title,
+                'url': path,
+                'chapter': chapter,
+                'section_number': section_number,
+                'chapter_section': section.get('chapter_section', '')
+            })
         
-        if course_id not in self.driver.current_url:
-            self.selenium_driver.go_to_url(course_url)
-            time.sleep(3)  # Wait for course to load
-        
-        try:
-            # Wait for any backdrop/modal overlay to disappear before interacting
-            try:
-                WebDriverWait(self.driver, 15).until(
-                    EC.invisibility_of_element_located((By.XPATH, '//div[contains(@class, "pf-v5-c-backdrop")]'))
-                )
-            except TimeoutException:
-                # If backdrop doesn't disappear, try to close it or continue anyway
-                self.logger("  ⚠ Backdrop overlay still present, attempting to continue...")
-                try:
-                    # Try clicking outside or pressing Escape to dismiss any modal
-                    self.driver.execute_script("document.body.click();")
-                    time.sleep(0.5)
-                except:
-                    pass
-            
-            # Click on "Toggle Table of Contents panel" button to open TOC
-            toc_button = self.wait.until(EC.element_to_be_clickable(
-                (By.XPATH, '//button[contains(@aria-label, "Table of Contents") or contains(@aria-label, "Toggle Table of Contents")]')
-            ))
-            
-            # Check if TOC is already open by looking for the TOC region
-            try:
-                toc_region = self.driver.find_element(By.XPATH, '//div[contains(@class, "ToC")] | //div[@aria-label="Table of contents"]')
-                if not toc_region.is_displayed():
-                    # Use JavaScript click to bypass any overlay issues
-                    self.driver.execute_script("arguments[0].click();", toc_button)
-                    time.sleep(1)
-            except NoSuchElementException:
-                # Use JavaScript click to bypass any overlay issues
-                self.driver.execute_script("arguments[0].click();", toc_button)
-                time.sleep(1)
-            
-            # Click on "Expand all" toggle switch to show all chapters
-            # The toggle is a switch with class "pf-v5-c-switch" and label "Expand all"
-            try:
-                # Try to find the Expand all switch/toggle
-                expand_all_selectors = [
-                    # PatternFly v5 switch with "Expand all" label
-                    '//label[contains(@class, "pf-v5-c-switch") and .//span[contains(text(), "Expand all")]]',
-                    '//span[contains(@class, "pf-v5-c-switch__label") and contains(text(), "Expand all")]/..',
-                    '//input[following-sibling::*[contains(text(), "Expand all")]]',
-                    '//button[contains(text(), "Expand all")]',
-                    # Generic switch/toggle near "Expand all" text
-                    '//*[contains(text(), "Expand all")]/ancestor::label[contains(@class, "switch")]//input',
-                ]
-                
-                expand_all = None
-                for selector in expand_all_selectors:
-                    try:
-                        expand_all = self.driver.find_element(By.XPATH, selector)
-                        if expand_all.is_displayed():
-                            break
-                    except NoSuchElementException:
-                        continue
-                
-                if expand_all and expand_all.is_displayed():
-                    # Check if already expanded by looking for aria-checked or checked state
-                    is_checked = expand_all.get_attribute('aria-checked') == 'true' or expand_all.get_attribute('checked')
-                    if not is_checked:
-                        # Use JavaScript click to bypass overlay issues
-                        self.driver.execute_script("arguments[0].click();", expand_all)
-                        time.sleep(1)
-                        self.logger("  Clicked 'Expand all' toggle")
-                else:
-                    self.logger("  'Expand all' toggle not found, expanding chapters manually...")
-            except Exception as e:
-                logging.debug(f"Could not use 'Expand all' toggle: {e}")
-            
-            # Ensure all chapters are expanded by clicking collapsed accordion toggles
-            try:
-                # Find all collapsed chapter accordion buttons
-                collapsed_chapters = self.driver.find_elements(
-                    By.XPATH,
-                    '//button[contains(@class, "pf-v5-c-accordion__toggle") and @aria-expanded="false"]'
-                )
-                
-                if collapsed_chapters:
-                    self.logger(f"  Expanding {len(collapsed_chapters)} collapsed chapters...")
-                    for btn in collapsed_chapters:
-                        try:
-                            self.driver.execute_script("arguments[0].click();", btn)
-                            time.sleep(0.3)
-                        except Exception as e:
-                            logging.debug(f"Could not expand chapter: {e}")
-                            continue
-                    time.sleep(0.5)
-            except Exception as e:
-                logging.debug(f"Error expanding chapters: {e}")
-            
-            # Get all section links from TOC
-            # Look for links that point to course pages
-            section_links = self.driver.find_elements(
-                By.XPATH,
-                '//a[contains(@href, "/pages/") and @data-analytics-id="toc-link-ole-lp"]'
-            )
-            
-            # If no links found with specific data-analytics-id, try broader search
-            if not section_links:
-                section_links = self.driver.find_elements(
-                    By.XPATH,
-                    '//div[contains(@class, "ToC")]//a[contains(@href, "/pages/")]'
-                )
-            
-            # If still no links, try even broader search
-            if not section_links:
-                section_links = self.driver.find_elements(
-                    By.XPATH,
-                    '//a[contains(@href, "/pages/")]'
-                )
-            
-            all_sections = []
-            for link in section_links:
-                try:
-                    url = link.get_attribute('href')
-                    title = link.text.strip()
-                    
-                    if url and title and '/pages/' in url:
-                        # Extract just the path
-                        if 'rol.redhat.com' in url:
-                            path = url.split('rol.redhat.com')[1]
-                        else:
-                            path = url
-                        
-                        # Parse chapter and section from title
-                        chapter, section_number, clean_title = self._parse_section_title(title)
-                        
-                        # Avoid duplicates
-                        if not any(s['url'] == path for s in all_sections):
-                            all_sections.append({
-                                'title': title,
-                                'clean_title': clean_title,
-                                'url': path,
-                                'chapter': chapter,
-                                'section_number': section_number
-                            })
-                except Exception as e:
-                    logging.debug(f"Error processing section link: {e}")
-                    continue
-            
-            # Filter out excluded sections
-            for section in all_sections:
-                if not self._should_exclude_section(section['title']):
-                    sections.append(section)
-            
-            excluded_count = len(all_sections) - len(sections)
-            self.logger(f"Found {len(all_sections)} total sections, {excluded_count} excluded, {len(sections)} to check")
-            
-        except TimeoutException:
-            self.logger(f"Timeout waiting for TOC in course {course_id}")
-        except Exception as e:
-            self.logger(f"Error getting course sections: {e}")
-        
-        return sections
+        return enriched_sections
     
     def extract_links_from_page(self, page_url: str, page_title: str) -> list[dict]:
         """
@@ -2839,6 +2691,7 @@ class LinkChecker(LabManager):
                         for link_group, group_name in [(references_links, "📎 References"), (content_links, "📝 Content Links")]:
                             if link_group:
                                 story.append(Paragraph(f"<b>{group_name}:</b>", normal_style))
+                                story.append(Spacer(1, 0.1*inch))
                                 
                                 for result in link_group:
                                     # Add anchor for broken links
@@ -2850,34 +2703,53 @@ class LinkChecker(LabManager):
                                     status_code = result.status_code if result.status_code else "ERR"
                                     status_desc = self._get_http_status_description(result.status_code)
                                     
-                                    # Link status line
-                                    style = success_style if result.is_valid else error_style
-                                    story.append(Paragraph(
-                                        f"{status_icon} [{status_code}] {result.link_text}",
-                                        style
-                                    ))
+                                    # Define colors based on status
+                                    if result.is_valid:
+                                        header_bg = colors.HexColor('#28a745')  # Green
+                                        border_color = colors.HexColor('#28a745')
+                                        header_text = colors.white
+                                    else:
+                                        header_bg = colors.HexColor('#dc3545')  # Red
+                                        border_color = colors.HexColor('#dc3545')
+                                        header_text = colors.white
+                                    
+                                    # Build card content
+                                    card_content = []
+                                    
+                                    # Header row with status
+                                    header_text_content = f"{status_icon} [{status_code}] {status_desc}"
+                                    
+                                    # URL row (truncate if too long for display)
+                                    url_display = result.url if len(result.url) < 80 else result.url[:77] + "..."
+                                    
+                                    # Build body content as a list of paragraphs
+                                    body_elements = []
+                                    
+                                    # Link text/title
+                                    if result.link_text and result.link_text != result.url:
+                                        body_elements.append(Paragraph(
+                                            f"<b>{result.link_text}</b>",
+                                            ParagraphStyle('CardTitle', parent=normal_style, fontSize=10, spaceAfter=4)
+                                        ))
                                     
                                     # Full URL (clickable)
-                                    story.append(Paragraph(
-                                        f'<a href="{result.url}" color="blue">{result.url}</a>',
-                                        url_style
+                                    body_elements.append(Paragraph(
+                                        f'<a href="{result.url}" color="#0066CC">{result.url}</a>',
+                                        ParagraphStyle('CardURL', parent=url_style, fontSize=8, spaceAfter=4)
                                     ))
-                                    
-                                    # Status description
-                                    story.append(Paragraph(f"Status: {status_desc}", normal_style))
                                     
                                     # Response time if available
                                     if result.response_time_ms:
-                                        story.append(Paragraph(
+                                        body_elements.append(Paragraph(
                                             f"Response Time: {result.response_time_ms:.0f}ms",
-                                            normal_style
+                                            ParagraphStyle('CardInfo', parent=normal_style, fontSize=9, textColor=colors.HexColor('#666666'))
                                         ))
                                     
                                     # Error message for broken links
                                     if not result.is_valid and result.error_message:
-                                        story.append(Paragraph(
-                                            f"⚠️ Error: {result.error_message}",
-                                            error_style
+                                        body_elements.append(Paragraph(
+                                            f"⚠️ {result.error_message}",
+                                            ParagraphStyle('CardError', parent=error_style, fontSize=9, spaceBefore=4)
                                         ))
                                     
                                     # Screenshot
@@ -2887,9 +2759,9 @@ class LinkChecker(LabManager):
                                             with PILImage.open(result.screenshot_path) as img:
                                                 img_width, img_height = img.size
                                             
-                                            # Scale to fit page width (max 6 inches)
-                                            max_width = 6 * inch
-                                            max_height = 4 * inch
+                                            # Scale to fit card width (max 5.5 inches to fit inside card)
+                                            max_width = 5.5 * inch
+                                            max_height = 3.5 * inch
                                             
                                             scale_w = max_width / img_width
                                             scale_h = max_height / img_height
@@ -2898,25 +2770,67 @@ class LinkChecker(LabManager):
                                             display_width = img_width * scale
                                             display_height = img_height * scale
                                             
-                                            story.append(Spacer(1, 0.1*inch))
-                                            story.append(Paragraph("📸 Screenshot:", normal_style))
-                                            story.append(Image(
+                                            body_elements.append(Spacer(1, 0.1*inch))
+                                            body_elements.append(Paragraph(
+                                                "■ Screenshot:",
+                                                ParagraphStyle('ScreenshotLabel', parent=normal_style, fontSize=9, textColor=colors.HexColor('#333333'))
+                                            ))
+                                            body_elements.append(Image(
                                                 result.screenshot_path,
                                                 width=display_width,
                                                 height=display_height
                                             ))
                                         except Exception as e:
-                                            story.append(Paragraph(
+                                            body_elements.append(Paragraph(
                                                 f"Screenshot: {os.path.basename(result.screenshot_path)} (could not embed: {e})",
                                                 normal_style
                                             ))
                                     elif result.screenshot_path:
-                                        story.append(Paragraph(
+                                        body_elements.append(Paragraph(
                                             f"Screenshot: {result.screenshot_path}",
                                             normal_style
                                         ))
                                     
-                                    story.append(Spacer(1, 0.15*inch))
+                                    # Create the card as a table with header and body
+                                    # Header row
+                                    header_para = Paragraph(
+                                        f"<font color='white'><b>{header_text_content}</b></font>",
+                                        ParagraphStyle('CardHeader', parent=normal_style, fontSize=10, alignment=TA_LEFT)
+                                    )
+                                    
+                                    # Body content in a nested table/cell
+                                    card_table_data = [
+                                        [header_para],  # Header row
+                                        [body_elements]  # Body row (list of elements)
+                                    ]
+                                    
+                                    # Create card table
+                                    card_table = Table(
+                                        card_table_data,
+                                        colWidths=[6.5*inch],
+                                        style=TableStyle([
+                                            # Header styling
+                                            ('BACKGROUND', (0, 0), (-1, 0), header_bg),
+                                            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                                            ('PADDING', (0, 0), (-1, 0), 8),
+                                            ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
+                                            ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+                                            
+                                            # Body styling
+                                            ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#FAFAFA')),
+                                            ('PADDING', (0, 1), (-1, 1), 10),
+                                            ('ALIGN', (0, 1), (-1, 1), 'LEFT'),
+                                            ('VALIGN', (0, 1), (-1, 1), 'TOP'),
+                                            
+                                            # Border (all around)
+                                            ('BOX', (0, 0), (-1, -1), 2, border_color),
+                                            ('LINEBELOW', (0, 0), (-1, 0), 1, border_color),
+                                        ])
+                                    )
+                                    
+                                    # Use KeepTogether to avoid splitting card across pages when possible
+                                    story.append(KeepTogether([card_table]))
+                                    story.append(Spacer(1, 0.2*inch))
                     else:
                         story.append(Paragraph("(No external links found)", normal_style))
                     
