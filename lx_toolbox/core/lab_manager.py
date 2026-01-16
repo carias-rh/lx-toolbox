@@ -50,15 +50,15 @@ class LabManager:
         # Try to detect new PF5 interface elements
         try:
             # New interface has TOC toggle button with specific aria-label
-            self.driver.find_element(By.XPATH, 
+            self.wait.until(EC.presence_of_element_located((By.XPATH, 
                 '//button[contains(@aria-label, "Table of Contents") or contains(@aria-label, "Toggle Table of Contents")]'
-            )
+            )))
             self._interface_type = self.INTERFACE_NEW
             self.logger(f"Detected interface type: NEW (PF5)")
         except:
             # Check for old interface elements
             try:
-                self.driver.find_element(By.XPATH, '//*[@id="course-tabs-tab-1"]')
+                self.wait.until(EC.presence_of_element_located((By.XPATH, '//div[@class="progress-map"]')))
                 self._interface_type = self.INTERFACE_OLD
                 self.logger(f"Detected interface type: OLD")
             except:
