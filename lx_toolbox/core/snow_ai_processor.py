@@ -90,6 +90,19 @@ class SnowAIProcessor:
             "- Complaints / Praises on the learning platform or the courses.\n"
         )
 
+        self.video_issues_examples = (
+            "Examples of video issues:\n"
+            "- Cannot find the video\n"
+            "- Video is not available\n"
+            "- Video doesn't match the section/chapter\n"
+            "- Video subtitles are incorrect or missing\n"
+            "- Video translation issues\n"
+            "- Video has bad cuts or editing problems\n"
+            "- Video audio is out of sync\n"
+            "- Video player is not working\n"
+            "- Where is the video for this course?\n"
+        )
+
     # --------------------------
     # LLM helpers
     # --------------------------
@@ -260,18 +273,22 @@ class SnowAIProcessor:
     # --------------------------
     def classify_ticket_llm(self, description: str) -> dict:
         self.logger("Classifying ticket using LLM")
-        json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue": false}'
+        json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue": false, "is_video_issue": false}'
         prompt = f"""
 You are an expert classifier of Red Hat Training tickets.
-Classify the user's feedback regarding a Red Hat Training course, there are two types of tickets:
+Classify the user's feedback regarding a Red Hat Training course, there are three types of tickets:
 - content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, etc.
 - environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', it's an environment issue.
+- video_issue_ticket: if the feedback is about videos not being available, video not matching the section, subtitle issues, translation problems, bad video cuts, or any other video-related problem.
 
 Examples of content issues:
 {self.content_issues_examples}
 
 Examples of environment issues:
 {self.environment_issues_examples}
+
+Examples of video issues:
+{self.video_issues_examples}
 
 Examples of types of issues to be manually managed:
 {self.manually_managed_issues_examples}
@@ -282,6 +299,7 @@ Return JSON with the following fields:
 - summary: in a short sentence, summarize the user's feedback
 - is_content_issue_ticket: (true/false)
 - is_environment_issue: (true/false)
+- is_video_issue: (true/false)
 
 This is the student's feedback:
 <student_feedback>
@@ -304,6 +322,7 @@ For example:
                 "summary": "Error parsing LLM response",
                 "is_content_issue_ticket": False,
                 "is_environment_issue": False,
+                "is_video_issue": False,
             }
 
     def analyze_content_issue(self, user_issue: str, guide_text: str) -> dict:
@@ -377,6 +396,73 @@ For example:
             return json.loads(response)
         except Exception:
             return {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
+
+    def analyze_video_issue(self, user_issue: str, video_available: bool) -> dict:
+        """
+        Analyze video-related issues reported by students.
+        
+        Args:
+            user_issue: The student's feedback/complaint about video
+            video_available: Whether the video player button is available on the page
+        
+        Returns:
+            dict with analysis results including whether a Jira is needed
+        """
+        self.logger("Analyzing video issue using LLM")
+        
+        video_context = "The video player IS available on the page, so videos should be accessible." if video_available else "The video player button is NOT available on the page, which typically means videos for this course version are still being produced."
+        
+        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "jira_title": "video issue title for jira"}'
+        
+        prompt_text = f"""
+        You are an expert in Red Hat Training video content issues.
+        
+        A student has reported a video-related issue. The student's feedback is:
+        <student_feedback>
+        {user_issue}
+        </student_feedback>
+        
+        Video availability status: {video_context}
+        
+        Classify the video issue into one of these types:
+        - "videos_not_ready": Videos for this course version are not yet available (typically for new course versions)
+        - "content_mismatch": Video doesn't match the section/chapter content
+        - "subtitle_issue": Problems with subtitles (missing, incorrect, translation issues)
+        - "technical_issue": Video player problems, bad cuts, audio sync issues
+        - "other": Other video-related issues
+        
+        Determine if a Jira ticket needs to be created:
+        - If videos are not available (video player not present) AND the student is asking where videos are, this is "videos_not_ready" - NO Jira needed
+        - If videos ARE available but there's a content, subtitle, or technical issue - Jira IS needed
+        
+        Return your analysis in exactly the following JSON format without any extra text:
+        {json_example}
+        
+        Fields:
+        - analysis: detailed step-by-step analysis of the issue
+        - is_valid_issue: true if this is a legitimate video issue
+        - needs_jira: true if a Jira ticket should be created, false if it's just videos not ready yet
+        - video_issue_type: one of "videos_not_ready", "content_mismatch", "subtitle_issue", "technical_issue", "other"
+        - suggested_correction: what needs to be fixed (empty if videos_not_ready)
+        - summary: short summary of the analysis
+        - jira_title: title for the Jira ticket (empty if no Jira needed)
+        
+        Do not include any explanations, xml or markdown formatting outside the JSON object.
+        Substitute double quote (") for single quote (') in all fields to avoid errors in the JSON object.
+        """
+        response = self.ask_llm(prompt_text)
+        logging.getLogger(__name__).info(f"LLM Video analysis response: {response}")
+        try:
+            return json.loads(response)
+        except Exception:
+            return {
+                "is_valid_issue": False,
+                "needs_jira": False,
+                "video_issue_type": "other",
+                "summary": "analysis parse error",
+                "suggested_correction": "",
+                "jira_title": ""
+            }
 
     def is_openshift_lab_first_boot(self, snow_info: dict, analysis_response_json: dict) -> bool:
         course = snow_info.get("Course", "")
@@ -481,6 +567,42 @@ LLM Analysis: {analysis_response_json.get('analysis', '')}\n"""
                     WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(default_jira_reply + signature)
                 except Exception:
                     pass
+            elif classification_data.get("is_video_issue", False):
+                # Handle video issues
+                video_issue_type = analysis_response_json.get("video_issue_type", "other")
+                needs_jira = analysis_response_json.get("needs_jira", False)
+                
+                if video_issue_type == "videos_not_ready" or not needs_jira:
+                    # Videos not yet available for this course version - no Jira needed
+                    reply_text = (
+                        f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
+                        f"Thank you for reaching out regarding the video content for this course.\n\n"
+                        f"The videos for this course version are still being produced by our team. "
+                        f"Once they become available, the \"Enable video player\" button will appear "
+                        f"in the dock bar at the bottom of the learning platform.\n\n"
+                        f"We appreciate your patience and understanding. Please check back later "
+                        f"for video availability.\n\n"
+                    )
+                    try:
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\nVIDEO NOT READY - No Jira needed. Videos for this course version are still being produced.")
+                    except Exception:
+                        pass
+                else:
+                    # Video content issue that needs a Jira ticket
+                    crafted = self.craft_llm_response(snow_info, analysis_response_json)
+                    reply_text = crafted.get("response", "")
+                    default_jira_reply = (
+                        f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
+                        f"We have created a Jira ticket to address this video issue.\n\n"
+                        f"Thanks for helping us improve the video content!\n\n"
+                    )
+                    try:
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\nVIDEO ISSUE - Jira ticket created with 'Video Content' component.")
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(default_jira_reply + signature)
+                    except Exception:
+                        pass
             elif classification_data.get("is_environment_issue", False) and self.is_openshift_lab_first_boot(snow_info, analysis_response_json):
                 reply_text = (
                     f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
@@ -623,9 +745,24 @@ Translate the following text from {language} to english:
     def open_jira_create_prefilled(self, snow_info: dict, analysis: dict, classification: dict):
         self.driver.get("https://issues.redhat.com/projects/PTL/issues")
         time.sleep(5)
+        self.driver.execute_script("document.body.style.zoom = '0.6'")
+
         try:
-            # Click Create
-            WebDriverWait(self.driver, 20).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="create_link"]'))).click()
+            # Wait for tabs-placeholder to disappear (it obscures the Create button)
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, 'div.tabs-placeholder'))
+                )
+            except Exception:
+                pass  # Continue even if placeholder doesn't exist or timeout
+
+            # Click Create - use JavaScript click as fallback if element is obscured
+            create_btn = WebDriverWait(self.driver, 20).until(EC.presence_of_element_located((By.XPATH, '//*[@id="create_link"]')))
+            try:
+                create_btn.click()
+            except Exception:
+                # Fallback to JavaScript click if regular click fails
+                self.driver.execute_script("arguments[0].click();", create_btn)
             time.sleep(2)
 
             # Select Text mode
@@ -670,7 +807,16 @@ Translate the following text from {language} to english:
 
             # Select Component (course)
             try:
-                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]'))).send_keys(snow_info.get("Course",""))
+                components_field = WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]')))
+                components_field.send_keys(snow_info.get("Course",""))
+                
+                # Add "Video Content" component if this is a video issue
+                if classification.get("is_video_issue", False):
+                    time.sleep(0.5)  # Brief pause to allow first component to register
+                    components_field.send_keys(Keys.TAB)
+                    components_field = WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]')))
+                    components_field.send_keys("Video Content")
+                    logging.getLogger(__name__).info("Added 'Video Content' component for video issue")
             except Exception as e:
                 logging.getLogger(__name__).error(f"Failed to select Component: {e}")
                 pass
@@ -737,6 +883,7 @@ Translate the following text from {language} to english:
                 self.driver.switch_to.window(ticket_window)
                 self.driver.switch_to.new_window('tab')
                 tab_rol = self.driver.current_window_handle
+                video_player_available = False
                 try:
                     self.driver.switch_to.window(tab_rol)
                     course_id = snow_info["Course"].lower() + "-" + snow_info["Version"]
@@ -750,6 +897,10 @@ Translate the following text from {language} to english:
                         self.lab_mgr.select_lab_environment_tab("course")
                     except Exception:
                         pass
+                    
+                    # Check if video player is available (for video issue detection)
+                    video_player_available = self.lab_mgr.check_video_player_available()
+                    
                     # Fetch guide text from website for content analysis
                     guide_text = ""
                     try:
@@ -758,8 +909,10 @@ Translate the following text from {language} to english:
                     except Exception as e:
                         logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
 
-                    # Now perform analysis using the guide_text (if content) or env analysis
-                    if classification.get("is_content_issue_ticket"):
+                    # Now perform analysis using the guide_text (if content), env analysis, or video analysis
+                    if classification.get("is_video_issue"):
+                        analysis = self.analyze_video_issue(snow_info["Description"], video_player_available)
+                    elif classification.get("is_content_issue_ticket"):
                         analysis = self.analyze_content_issue(snow_info["Description"], guide_text)
                     elif classification.get("is_environment_issue"):
                         analysis = self.analyze_environment_issue(snow_info["Description"]) 
@@ -773,29 +926,39 @@ Translate the following text from {language} to english:
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"Failed updating SNOW notes/reply for {snow_id}: {e}")
 
-                # Tab 3: Jira search of similar tickets
-                self.driver.switch_to.window(ticket_window)
-                self.driver.switch_to.new_window('tab')
-                tab_jira_search = self.driver.current_window_handle
-                try:
-                    self.driver.switch_to.window(tab_jira_search)
-                    self.logger("Opening Jira search tab")
-                    keyword = self.extract_jira_keyword(snow_info)
-                    search_url = self.build_jira_search_url(snow_info, keyword)
-                    self.driver.get(search_url)
-                except Exception as e:
-                    logging.getLogger(__name__).warning(f"Jira search setup failed for {snow_id}: {e}")
+                # Determine if Jira ticket is needed
+                # Skip Jira for video issues where videos are just not ready yet
+                skip_jira = (
+                    classification.get("is_video_issue", False) and 
+                    (analysis.get("video_issue_type") == "videos_not_ready" or not analysis.get("needs_jira", True))
+                )
 
-                # Tab 4: Jira prefilled new ticket
-                self.driver.switch_to.window(ticket_window)
-                self.driver.switch_to.new_window('tab')
-                tab_jira_create = self.driver.current_window_handle
-                try:
-                    self.driver.switch_to.window(tab_jira_create)
-                    self.logger("Opening Jira create dialog")
-                    self.open_jira_create_prefilled(snow_info, analysis, classification)
-                except Exception as e:
-                    logging.getLogger(__name__).warning(f"Jira create prefill failed for {snow_id}: {e}")
+                if skip_jira:
+                    self.logger("Skipping Jira creation - videos not ready, no ticket needed")
+                else:
+                    # Tab 3: Jira search of similar tickets
+                    self.driver.switch_to.window(ticket_window)
+                    self.driver.switch_to.new_window('tab')
+                    tab_jira_search = self.driver.current_window_handle
+                    try:
+                        self.driver.switch_to.window(tab_jira_search)
+                        self.logger("Opening Jira search tab")
+                        keyword = self.extract_jira_keyword(snow_info)
+                        search_url = self.build_jira_search_url(snow_info, keyword)
+                        self.driver.get(search_url)
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"Jira search setup failed for {snow_id}: {e}")
+
+                    # Tab 4: Jira prefilled new ticket
+                    self.driver.switch_to.window(ticket_window)
+                    self.driver.switch_to.new_window('tab')
+                    tab_jira_create = self.driver.current_window_handle
+                    try:
+                        self.driver.switch_to.window(tab_jira_create)
+                        self.logger("Opening Jira create dialog")
+                        self.open_jira_create_prefilled(snow_info, analysis, classification)
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"Jira create prefill failed for {snow_id}: {e}")
 
 
                 # Increase autostop and lifespan

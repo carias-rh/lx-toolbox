@@ -330,6 +330,24 @@ class LabManager:
         except Exception:
             pass
 
+    def check_video_player_available(self) -> bool:
+        """
+        Check if the video player button is available in the dock bar.
+        
+        Returns True if the "Enable video player" button exists and is visible,
+        indicating that videos are available for this course section.
+        Returns False if the button doesn't exist, indicating videos are not yet ready.
+        """
+        try:
+            video_btn = self.driver.find_element(By.XPATH, '//button[@id="HUD__dock-item__btn--video-player"]')
+            if video_btn and video_btn.is_displayed():
+                self.logger("Video player button is available")
+                return True
+            return False
+        except Exception:
+            self.logger("Video player button not found - videos may not be available")
+            return False
+
     def dismiss_active_alerts(self):
         """Dismiss any active PF5 alerts on the page."""
         try:
