@@ -740,7 +740,10 @@ Translate the following text from {language} to english:
                 try:
                     self.driver.switch_to.window(tab_rol)
                     course_id = snow_info["Course"].lower() + "-" + snow_info["Version"]
-                    chapter_section=f"ch{ snow_info.get("Chapter", "01") }s{ snow_info.get("Section", "01") }"
+                    if snow_info.get("Section"):
+                        chapter_section=f"ch{ snow_info.get("Chapter", "01") }s{ snow_info.get("Section", "01") }"
+                    else:
+                        chapter_section=f"ch{ snow_info.get("Chapter", "01") }"
                     self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
                     time.sleep(2)
                     try:
