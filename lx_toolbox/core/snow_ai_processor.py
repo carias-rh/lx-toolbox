@@ -879,11 +879,12 @@ Translate the following text from {language} to english:
                 classification["translated_student_feedback"] = translated
                 analysis = {"summary": "", "suggested_correction": "", "jira_title": "", "is_valid_issue": False}
 
-                # Tab 2: ROL chapter/section, ensure lab started
+                # Tab 2: ROL chapter/section
                 self.driver.switch_to.window(ticket_window)
                 self.driver.switch_to.new_window('tab')
                 tab_rol = self.driver.current_window_handle
                 video_player_available = False
+                course_id = ""
                 try:
                     self.driver.switch_to.window(tab_rol)
                     course_id = snow_info["Course"].lower() + "-" + snow_info["Version"]
@@ -891,31 +892,40 @@ Translate the following text from {language} to english:
                         chapter_section=f"ch{ snow_info.get("Chapter", "01") }s{ snow_info.get("Section", "01") }"
                     else:
                         chapter_section=f"ch{ snow_info.get("Chapter", "01") }"
-                    self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
-                    time.sleep(2)
-                    try:
-                        self.lab_mgr.select_lab_environment_tab("course")
-                    except Exception:
-                        pass
                     
-                    # Check if video player is available (for video issue detection)
-                    video_player_available = self.lab_mgr.check_video_player_available()
-                    
-                    # Fetch guide text from website for content analysis
-                    guide_text = ""
-                    try:
-                        guide_text = self.fetch_guide_text_from_website()
-                        self.logger(f"Fetched guide text length: {len(guide_text)}")
-                    except Exception as e:
-                        logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
-
-                    # Now perform analysis using the guide_text (if content), env analysis, or video analysis
+                    # For video issues, just navigate to course page (don't start lab)
                     if classification.get("is_video_issue"):
+                        self.logger("Video issue detected - navigating to course page without starting lab")
+                        self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                        time.sleep(2)
+                        
+                        # Check if video player is available
+                        video_player_available = self.lab_mgr.check_video_player_available()
+                        
+                        # Analyze video issue (no guide text needed)
                         analysis = self.analyze_video_issue(snow_info["Description"], video_player_available)
-                    elif classification.get("is_content_issue_ticket"):
-                        analysis = self.analyze_content_issue(snow_info["Description"], guide_text)
-                    elif classification.get("is_environment_issue"):
-                        analysis = self.analyze_environment_issue(snow_info["Description"]) 
+                    else:
+                        # For non-video issues, start lab as usual
+                        self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                        time.sleep(2)
+                        try:
+                            self.lab_mgr.select_lab_environment_tab("course")
+                        except Exception:
+                            pass
+                        
+                        # Fetch guide text from website for content analysis
+                        guide_text = ""
+                        try:
+                            guide_text = self.fetch_guide_text_from_website()
+                            self.logger(f"Fetched guide text length: {len(guide_text)}")
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
+
+                        # Perform analysis using the guide_text (if content) or env analysis
+                        if classification.get("is_content_issue_ticket"):
+                            analysis = self.analyze_content_issue(snow_info["Description"], guide_text)
+                        elif classification.get("is_environment_issue"):
+                            analysis = self.analyze_environment_issue(snow_info["Description"]) 
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"ROL tab setup failed for {snow_id}: {e}\n{traceback.format_exc()}")
 
@@ -961,13 +971,16 @@ Translate the following text from {language} to english:
                         logging.getLogger(__name__).warning(f"Jira create prefill failed for {snow_id}: {e}")
 
 
-                # Increase autostop and lifespan
-                self.driver.switch_to.window(tab_rol)
-                self.lab_mgr.select_lab_environment_tab("lab-environment")
-                self.lab_mgr.increase_autostop(course_id=course_id)
-                self.lab_mgr.increase_lifespan(course_id=course_id)
-                self.driver.switch_to.window(tab_snow)
-                self.logger(f"Autostop and lifespan increased for course {course_id}")
+                # Increase autostop and lifespan (skip for video issues since no lab was started)
+                if not classification.get("is_video_issue"):
+                    self.driver.switch_to.window(tab_rol)
+                    self.lab_mgr.select_lab_environment_tab("lab-environment")
+                    self.lab_mgr.increase_autostop(course_id=course_id)
+                    self.lab_mgr.increase_lifespan(course_id=course_id)
+                    self.driver.switch_to.window(tab_snow)
+                    self.logger(f"Autostop and lifespan increased for course {course_id}")
+                else:
+                    self.driver.switch_to.window(tab_snow)
 
             except Exception as e:
                 logging.getLogger(__name__).error(f"Failed to orchestrate window for ticket {snow_id}: {e}")
