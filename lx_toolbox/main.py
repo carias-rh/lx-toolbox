@@ -408,7 +408,7 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style):
 @click.option('--course', '-c', default=None, help='Specific course ID to check (e.g., rh124-9.3). Checks all if omitted.')
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='chrome', help='Browser to use (firefox, chrome)')
-@click.option('--headless/--no-headless', default=False, help='Run browser in headless/headfull mode')
+@click.option('--headless/--no-headless', default=True, help='Run browser in headless/headfull mode')
 @click.option('--screenshots/--no-screenshots', default=True, help='Take screenshots of each visited external link')
 @click.option('--screenshots-dir', '-s', default=None, help='Custom directory for screenshots (default: link_check_reports/timestamp/screenshots)')
 @click.option('--retry/--no-retry', default=True, help='Retry failed links before generating report')
