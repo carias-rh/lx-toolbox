@@ -905,9 +905,12 @@ Translate the following text from {language} to english:
                         # Analyze video issue (no guide text needed)
                         analysis = self.analyze_video_issue(snow_info["Description"], video_player_available)
                     else:
-                        # For non-video issues, start lab as usual
-                        self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
-                        time.sleep(2)
+                        try:
+                            # For non-video issues, start lab as usual
+                            self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                        except Exception:
+                            pass
+                            
                         try:
                             self.lab_mgr.select_lab_environment_tab("course")
                         except Exception:
