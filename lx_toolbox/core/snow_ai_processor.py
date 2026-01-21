@@ -66,28 +66,23 @@ class SnowAIProcessor:
         # Rich prompt examples (ported from original template)
         self.content_issues_examples = (
             "Examples of content issues:\n"
-            "- There is a typo\n"
+            "- There is a typo in the guide text\n"
             "- A paragraph or phrase is incorrect.\n"
             "- Missing information to complete the exercise\n"
-            "- The exercise in the guide doesn't match with the video from the instructor\n"
-            "- Outdated content of the guide\n"
+            "- Outdated content of the guide\n
+            "- Some command is not working as expected in the lab environment\n"
+            "- The solution is doing something that was not in the requirements of the exercise\n"
+            "- The output of a command in the lab environment is different from the expected output in the guide\n"
+            "- The grading script is not considering a particular solution from the student\n"       
         )
 
         self.environment_issues_examples = (
             "Examples of environment issues:\n"
             "- lab start script is failing\n"
             "- lab script is not available\n"
-            "- user can't access visual block mode in vim, due to platform limitations. Solution is use the virtual keyboard and press ctrl + V\n"
-            "- User can't complete boot troubleshooting because is not selecting the \"recovery\" entry in the boot menu\n"
-        )
-
-        self.manually_managed_issues_examples = (
-            "Examples of types of issues to be manually managed:\n"
-            "- Need to open the LAB in a new WINDOW... Tabs aren't cool, Need to see video side-by-side with lab\n"
-            "- Content of the course not appearing\n"
-            "- Labs are stuck in starting/stopping state\n"
-            "- UI suggestions of improvement\n"
-            "- Complaints / Praises on the learning platform or the courses.\n"
+            "- lab is stuck in starting/stopping state\n"
+            "- cluster is taking too long to start\n"
+            "- ssh to the lab workstation VM is not working, ~/.ssh/rht_classroom.rsa, cloud-user@some-ip:22022, -J jump host, is not working\n"
         )
 
         self.video_issues_examples = (
@@ -101,8 +96,16 @@ class SnowAIProcessor:
             "- Video audio is out of sync\n"
             "- Video player is not working\n"
             "- Where is the video for this course?\n"
+            "- The exercise in the guide doesn't match with the video from the instructor\n"
         )
 
+        self.manually_managed_issues_examples = (
+            "Examples of types of issues to be manually managed:\n"
+            "- I've lost many lab hours with an issue and I want hours back or a refund\n"
+            "- How can I schedule an exam?\n"
+            "- UI suggestions of improvement\n"
+            "- Complaints / Praises on the learning platform or the courses.\n"
+        )
     # --------------------------
     # LLM helpers
     # --------------------------
