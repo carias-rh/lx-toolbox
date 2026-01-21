@@ -377,6 +377,7 @@ For example:
             return {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
 
     def analyze_environment_issue(self, user_issue: str) -> dict:
+        self.logger("Analyzing environment issue using LLM")
         json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "jira_title": "a short title for the Jira ticket, all characters in lowercase separated by spaces, no dashes"}'
         prompt_text = f"""
         We have a student who reported an issue within the lab environment. The student's feedback is:
