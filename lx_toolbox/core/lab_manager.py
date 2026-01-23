@@ -320,11 +320,19 @@ class LabManager:
         self.selenium_driver.go_to_url(f"{base_url}{course_id}/pages/{chapter_section}")
         self.wait_for_site_to_be_ready(environment) # Ensure page is loaded after navigation
 
-    def disable_video_player(self):
-        """Disable video player to avoid issues with page interactions."""
+    def toggle_video_player(self, state: bool = False):
+        """Toggle video player on or off.
+        
+        Args:
+            state: True to enable video player, False to disable it.
+        """
         try:
             video_btn = self.driver.find_element(By.XPATH, '//button[@id="HUD__dock-item__btn--video-player"]')
-            if video_btn.get_attribute("aria-pressed") == "true":
+            is_pressed = video_btn.get_attribute("aria-pressed") == "true"
+            if state and not is_pressed:
+                video_btn.click()
+                self.logger("Enabled video player")
+            elif not state and is_pressed:
                 video_btn.click()
                 self.logger("Disabled video player")
         except Exception:
@@ -346,6 +354,37 @@ class LabManager:
             return False
         except Exception:
             self.logger("Video player button not found - videos may not be available")
+
+    def is_lab_running(self) -> bool:
+        """
+        Check if a lab environment is currently running for this course.
+        
+        Lab states:
+        - Running: first=DELETE, second=STOP
+        - Starting: first=DELETE (or CREATING), second=STARTING
+        - Stopping: first=DELETE, second=STOPPING
+        - Stopped: first=DELETE, second=START
+        - No lab: first=CREATE
+        
+        Returns True if the lab is running or starting (active state),
+        False otherwise (lab not created, stopped, or being deleted).
+        """
+        try:
+            self.select_lab_environment_tab("lab-environment")
+            primary_status, secondary_status = self.check_lab_status()
+            
+            # Lab is running if:
+            # - second button is STOP (fully running)
+            # - second button is STOPPING (in process of stopping, but still active)
+            # - second button is STARTING (in process of starting)
+            is_running = secondary_status in ("STOP", "STOPPING", "STARTING")
+            
+            logging.getLogger(__name__).debug(
+                f"Lab running check: primary={primary_status}, secondary={secondary_status}, is_running={is_running}"
+            )
+            return is_running
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Could not determine if lab is running: {e}")
             return False
 
     def dismiss_active_alerts(self):
@@ -429,170 +468,312 @@ class LabManager:
             except Exception as e:
                 raise Exception(f"Could not select tab '{tab_name}' in old interface: {e}")
             
-    def _get_lab_action_button(self, action_texts: list[str], timeout: int = 1):
-        """Helper to find a lab action button (Create, Start, Stop, Delete)."""
-        # Combined logic for finding create/delete or start/stop buttons
-        # XPATH from original: //*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Action")]
-        # This might need refinement if button positions are key (first vs second)
+    def _get_lab_buttons_by_position(self, timeout: int = 3) -> tuple:
+        """
+        Get lab action buttons by their position (first and second).
+        
+        Lab button positions indicate state:
+        - No lab: first=CREATE, second=None
+        - Creating: first=CREATING, second=STARTING
+        - Running: first=DELETE, second=STOP
+        - Stopped: first=DELETE, second=START
+        - Stopping: first=DELETE, second=STOPPING
+        - Deleting: first=DELETING, second=None
+        
+        Returns:
+            Tuple of (first_button, first_text, second_button, second_text)
+            Any value may be None if button doesn't exist.
+        """
+        first_button = None
+        first_text = None
+        second_button = None
+        second_text = None
+        
+        try:
+            # Get all action buttons in the lab environment tab
+            # These are the main action buttons (Create, Delete, Start, Stop, etc.)
+            buttons_xpath = '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Creat") or contains(text(), "Delet") or contains(text(), "Start") or contains(text(), "Stop")]'
+            
+            buttons = WebDriverWait(self.driver, timeout).until(
+                EC.presence_of_all_elements_located((By.XPATH, buttons_xpath))
+            )
+            
+            if buttons and len(buttons) >= 1:
+                first_button = buttons[0]
+                first_text = first_button.text.strip().upper() if first_button.text else None
+                
+            if buttons and len(buttons) >= 2:
+                second_button = buttons[1]
+                second_text = second_button.text.strip().upper() if second_button.text else None
+                
+        except TimeoutException:
+            pass
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"Error getting lab buttons by position: {e}")
+        
+        return first_button, first_text, second_button, second_text
+
+    def _get_lab_action_button(self, action_texts: list[str], timeout: int = 1, position: str = None):
+        """
+        Helper to find a lab action button by text (Create, Start, Stop, Delete).
+        
+        Args:
+            action_texts: List of button text values to search for (case-insensitive match)
+            timeout: Maximum seconds to wait for button
+            position: Optional "first" or "second" to restrict search to specific position
+            
+        Returns:
+            Tuple of (button_element, button_text) or (None, None) if not found
+        """
+        # If position is specified, use position-based search
+        if position in ("first", "second"):
+            first_btn, first_text, second_btn, second_text = self._get_lab_buttons_by_position(timeout)
+            
+            if position == "first":
+                if first_text and any(t.upper() in first_text for t in action_texts):
+                    return first_btn, first_text
+            elif position == "second":
+                if second_text and any(t.upper() in second_text for t in action_texts):
+                    return second_btn, second_text
+            return None, None
+        
+        # Otherwise search by text (original behavior)
         for text in action_texts:
             try:
                 button_xpath = f'//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "{text}")]'
                 button = WebDriverWait(self.driver, timeout).until(
                     EC.presence_of_element_located((By.XPATH, button_xpath))
                 )
-                return button, button.text 
+                return button, button.text.strip().upper() if button.text else None
             except TimeoutException:
-                continue # Try next text
+                continue  # Try next text
         return None, None
-
 
     def check_lab_status(self) -> tuple[str | None, str | None]:
         """
-        Checks the status of the lab by looking for Create/Delete/Start/Stop buttons.
-        Returns a tuple: (primary_action, secondary_action) e.g., ("CREATE", None) or ("DELETE", "STARTING")
-        This simplifies the original check_lab_status_button which took 'first' or 'second'.
-        We now look for specific keywords.
+        Checks the status of the lab by examining button positions.
+        
+        Lab states based on button positions:
+        - No lab created: first=CREATE, second=None
+        - Creating: first=CREATING, second=STARTING  
+        - Running: first=DELETE, second=STOP
+        - Stopped: first=DELETE, second=START
+        - Stopping: first=DELETE, second=STOPPING
+        - Deleting: first=DELETING, second=None
+        
+        Returns:
+            Tuple of (primary_status, secondary_status) where:
+            - primary_status is the first button text (uppercase)
+            - secondary_status is the second button text (uppercase) or None
         """
         self.select_lab_environment_tab("lab-environment")
-
-        # Check for Create/Creating or Delete/Deleting button (usually primary)
-        create_delete_button, create_delete_text = self._get_lab_action_button(["Create", "Creating", "Delete", "Deleting"])
         
-        # Check for Start/Starting or Stop/Stopping button (usually secondary or alternative primary)
-        start_stop_button, start_stop_text = self._get_lab_action_button(["Start", "Starting", "Stop", "Stopping"])
-
-        primary_status = None
-        secondary_status = None
-
-        if create_delete_button:
-            primary_status = create_delete_text.upper()
+        first_btn, first_text, second_btn, second_text = self._get_lab_buttons_by_position(timeout=5)
         
-        if start_stop_button:
-            # If no create/delete button found, start/stop is the primary
-            if not primary_status:
-                primary_status = start_stop_text.upper()
-            else: # Otherwise it's a secondary status indicator
-                secondary_status = start_stop_text.upper()
+        primary_status = first_text
+        secondary_status = second_text
         
-        #self.logger(f"Lab status: Primary='{primary_status}', Secondary='{secondary_status}'")
+        logging.getLogger(__name__).debug(
+            f"Lab status: Primary='{primary_status}', Secondary='{secondary_status}'"
+        )
         return primary_status, secondary_status
 
 
     def create_lab(self, course_id: str):
+        """
+        Creates a lab environment for the specified course.
+        Only works when no lab exists (first button is CREATE).
+        """
         self.logger(f"Creating lab for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
         try:
-            create_button, _ = self._get_lab_action_button(["Create"])
-            if create_button:
+            # Create button should be the first (and only) button when no lab exists
+            create_button, btn_text = self._get_lab_action_button(["Create"], position="first")
+            if create_button and btn_text == "CREATE":
                 create_button.click()
-                # Add wait for lab creation, e.g., wait for status to change or a specific element.
+                # Wait until status changes from CREATE to CREATING/DELETE/etc
                 WebDriverWait(self.driver, 60).until(
-                    lambda d: self._get_lab_action_button(["Creating", "Delete", "Starting", "Stop"])[0] is not None, # Wait until create is done
-                    message="Lab did not appear to start creating or finish creating." 
+                    lambda d: self._get_lab_buttons_by_position()[1] in ("CREATING", "DELETE", "DELETING"),
+                    message="Lab did not appear to start creating or finish creating."
                 )
+                self.logger("Lab creation initiated")
+            else:
+                self.logger(f"Create button not available (current first button: {btn_text})")
         except Exception as e:
             logging.getLogger(__name__).error(f"Failed to create lab {course_id}: {e}")
-            # self.selenium_driver.driver.save_screenshot(f"create_lab_error_{course_id}.png")
             raise
     
     def start_lab(self, course_id: str):
+        """
+        Starts a stopped lab environment.
+        When lab is stopped: first=DELETE, second=START
+        """
         self.logger(f"Starting lab for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
         try:
-            start_button, _ = self._get_lab_action_button(["Start"])
-            if start_button:
+            # Start button is the second button when lab is stopped
+            start_button, btn_text = self._get_lab_action_button(["Start"], position="second")
+            if start_button and btn_text == "START":
                 start_button.click()
-                # Add wait for lab start
-                time.sleep(5)
+                time.sleep(2)
+                # Wait until second button changes to STARTING or STOP
                 WebDriverWait(self.driver, 60).until(
-                    lambda d: self._get_lab_action_button(["Stop", "Starting"])[0] is not None,
+                    lambda d: self._get_lab_buttons_by_position()[3] in ("STARTING", "STOP", "STOPPING"),
                     message="Lab did not appear to start."
                 )
+                self.logger("Lab start initiated")
             else:
-                logging.getLogger(__name__).error(f"Start lab button not found for {course_id}. Lab might be running or in another state.")
+                # Check if lab is already running (second button is STOP)
+                _, _, _, second_text = self._get_lab_buttons_by_position()
+                if second_text in ("STOP", "STOPPING"):
+                    logging.getLogger(__name__).info(f"Lab already running for {course_id}.")
+                else:
+                    logging.getLogger(__name__).warning(
+                        f"Start button not available (second button: {btn_text or second_text})"
+                    )
         except Exception as e:
             logging.getLogger(__name__).error(f"Failed to start lab {course_id}: {e}")
-            # self.selenium_driver.driver.save_screenshot(f"start_lab_error_{course_id}.png")
             raise
 
     def stop_lab(self, course_id: str):
+        """
+        Stops a running lab environment.
+        When lab is running: first=DELETE, second=STOP
+        """
         self.logger(f"Stopping lab for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
         try:
-            stop_button, _ = self._get_lab_action_button(["Stop"])
-            if stop_button:
+            # Stop button is the second button when lab is running
+            stop_button, btn_text = self._get_lab_action_button(["Stop"], position="second")
+            if stop_button and btn_text == "STOP":
                 stop_button.click()
                 # Confirm stop in dialog
                 confirm_button_xpath = '//*[@role="dialog"]//*[@type="button"][contains(text(), "Stop")]'
                 confirm_stop = self.wait.until(EC.element_to_be_clickable((By.XPATH, confirm_button_xpath)))
                 confirm_stop.click()
-                # Add wait for lab stop
-                time.sleep(5)
-                WebDriverWait(self.driver, 30).until(
-                    lambda d: self._get_lab_action_button(["Start", "Stopping"])[0] is not None,
+                time.sleep(2)
+                # Wait until second button changes to STOPPING or START
+                WebDriverWait(self.driver, 60).until(
+                    lambda d: self._get_lab_buttons_by_position()[3] in ("STOPPING", "START"),
                     message="Lab did not appear to stop."
                 )
+                self.logger("Lab stop initiated")
             else:
-                logging.getLogger(__name__).error(f"Stop lab button not found for {course_id}.")
+                # Check if lab is already stopped (second button is START)
+                _, _, _, second_text = self._get_lab_buttons_by_position()
+                if second_text == "START":
+                    logging.getLogger(__name__).info(f"Lab already stopped for {course_id}.")
+                else:
+                    logging.getLogger(__name__).error(
+                        f"Stop button not found for {course_id} (second button: {btn_text or second_text})"
+                    )
         except Exception as e:
             logging.getLogger(__name__).error(f"Failed to stop lab {course_id}: {e}")
-            # self.selenium_driver.driver.save_screenshot(f"stop_lab_error_{course_id}.png")
             raise
             
     def delete_lab(self, course_id: str):
+        """
+        Deletes a lab environment (works whether running or stopped).
+        When lab exists (running or stopped): first=DELETE
+        """
         self.logger(f"Deleting lab for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
         try:
-            delete_button, _ = self._get_lab_action_button(["Delete"])
-            if delete_button:
+            # Delete button is the first button when lab exists
+            delete_button, btn_text = self._get_lab_action_button(["Delete"], position="first")
+            if delete_button and btn_text == "DELETE":
                 delete_button.click()
                 # Confirm delete in dialog
                 confirm_button_xpath = '//*[@role="dialog"]//*[@type="button"][contains(text(), "Delete")]'
                 confirm_delete = self.wait.until(EC.element_to_be_clickable((By.XPATH, confirm_button_xpath)))
                 confirm_delete.click()
-                # Add wait for lab deletion
-                # Original: time.sleep(20)
-                WebDriverWait(self.driver, 60).until(
-                    lambda d: self._get_lab_action_button(["Create"])[0] is not None, # Wait until delete is done (Create becomes available)
-                    message="Lab did not appear to be deleted."
+                time.sleep(2)
+                # Wait until first button changes to DELETING or CREATE
+                WebDriverWait(self.driver, 120).until(
+                    lambda d: self._get_lab_buttons_by_position()[1] in ("DELETING", "CREATE"),
+                    message="Lab deletion did not initiate."
                 )
+                # If still DELETING, wait for CREATE
+                first_text = self._get_lab_buttons_by_position()[1]
+                if first_text == "DELETING":
+                    WebDriverWait(self.driver, 180).until(
+                        lambda d: self._get_lab_buttons_by_position()[1] == "CREATE",
+                        message="Lab did not finish deleting."
+                    )
+                self.logger("Lab deleted successfully")
             else:
-                logging.getLogger(__name__).error(f"Delete lab button not found for {course_id}.")
+                # Check if lab doesn't exist (first button is CREATE)
+                first_text = self._get_lab_buttons_by_position()[1]
+                if first_text == "CREATE":
+                    logging.getLogger(__name__).info(f"No lab to delete for {course_id} (lab doesn't exist).")
+                else:
+                    logging.getLogger(__name__).error(
+                        f"Delete button not found for {course_id} (first button: {btn_text or first_text})"
+                    )
         except Exception as e:
             logging.getLogger(__name__).error(f"Failed to delete lab {course_id}: {e}")
-            # self.selenium_driver.driver.save_screenshot(f"delete_lab_error_{course_id}.png")
             raise
             
     def recreate_lab(self, course_id: str, environment: str):
+        """
+        Recreates a lab environment by deleting any existing lab and creating a new one.
+        Handles all lab states appropriately.
+        """
         self.logger(f"Recreating lab for course: {course_id} in {environment}")
-        self.go_to_course(course_id, environment=environment) # Ensure on correct page
+        self.go_to_course(course_id, environment=environment)
         self.select_lab_environment_tab("lab-environment")
         
         primary_status, secondary_status = self.check_lab_status()
+        self.logger(f"Current lab status: Primary='{primary_status}', Secondary='{secondary_status}'")
 
-        if primary_status in ["STOP", "START"]: # Corresponds to STOP or START button being the main one
+        if primary_status == "CREATE":
+            # No lab exists, just create
+            self.create_lab(course_id)
+            
+        elif primary_status == "DELETE":
+            # Lab exists (running or stopped), delete first then create
             self.delete_lab(course_id)
-            # Wait for delete to complete and create button to be available
-            self.wait.until(lambda d: self._get_lab_action_button(["Create"])[0] is not None, message="Create button not available after delete.")
+            # Wait for CREATE button to appear
+            WebDriverWait(self.driver, 180).until(
+                lambda d: self._get_lab_buttons_by_position()[1] == "CREATE",
+                message="Create button not available after delete."
+            )
             self.create_lab(course_id)
-        elif primary_status == "CREATE":
+            
+        elif primary_status == "CREATING":
+            # Lab is being created, wait for it to finish
+            self.logger("Lab is currently creating, waiting for completion...")
+            WebDriverWait(self.driver, 300).until(
+                lambda d: self._get_lab_buttons_by_position()[1] in ("DELETE", "CREATE"),
+                message="Lab did not finish creating."
+            )
+            # Re-evaluate and recurse
+            self.recreate_lab(course_id, environment)
+            return  # Don't do increase_autostop/lifespan twice
+            
+        elif primary_status == "DELETING":
+            # Lab is being deleted, wait for it to finish
+            self.logger("Lab is currently deleting, waiting for completion...")
+            WebDriverWait(self.driver, 300).until(
+                lambda d: self._get_lab_buttons_by_position()[1] == "CREATE",
+                message="Lab did not finish deleting."
+            )
             self.create_lab(course_id)
-        elif primary_status in ["DELETING", "CREATING"]:
-             # Wait until a stable state (Create or Stop/Start button appears)
-             WebDriverWait(self.driver, 300).until(
-                 lambda d: self._get_lab_action_button(["Create", "Start", "Stop"])[0] is not None,
-                 message = f"Lab did not stabilize from {primary_status} state."
-             )
-             # Recurse or re-check status and act
-             self.recreate_lab(course_id, environment) # Call again to re-evaluate
+            
         else:
-            logging.getLogger(__name__).error(f"Cannot determine action for lab status: Primary='{primary_status}', Secondary='{secondary_status}'. Recreating might fail.")
-            # Fallback to trying delete then create
+            # Unknown state, try to handle gracefully
+            logging.getLogger(__name__).warning(
+                f"Unexpected lab status: Primary='{primary_status}', Secondary='{secondary_status}'. "
+                "Attempting fallback delete+create."
+            )
             try:
                 self.delete_lab(course_id)
-                self.wait.until(lambda d: self._get_lab_action_button(["Create"])[0] is not None)
+                WebDriverWait(self.driver, 180).until(
+                    lambda d: self._get_lab_buttons_by_position()[1] == "CREATE",
+                    message="Create button not available after delete."
+                )
             except Exception as e:
-                logging.getLogger(__name__).error(f"Delete failed during recreate, attempting create anyway: {e}")
+                logging.getLogger(__name__).error(f"Delete failed during recreate: {e}")
             self.create_lab(course_id)
 
         self.increase_autostop(course_id)
@@ -628,11 +809,55 @@ class LabManager:
         except Exception as e:
             pass
 
-    def increase_autostop(self, course_id: str, times: int = 4):
-        self._click_lab_adjustment_button(course_id, "1", times, "Increasing auto-stop")
+    def get_autostop_hours_remaining(self) -> int:
+        """
+        Get the number of hours remaining before auto-stop.
+        Parses text like "in an hour", "in 2 hours", "in 9 hours".
+        Returns hours as int, or 0 if unable to determine.
+        """
+        try:
+            self.select_lab_environment_tab("lab-environment")
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(0.3)
+            
+            # Get the time element text from the auto-stop row (tr[1]/td[1])
+            time_element = WebDriverWait(self.driver, 30).until(
+                EC.presence_of_element_located((By.XPATH, '//table/tr[1]/td[1]/time'))
+            )
+            text = time_element.text.lower()  # e.g., "in an hour", "in 2 hours"
+            
+            if "an hour" in text:
+                return 1
+            
+            # Extract number from text like "in 2 hours"
+            match = re.search(r'(\d+)', text)
+            if match:
+                hours = int(match.group(1))
+                return hours
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Could not determine auto-stop time: {e}")
+        return 0
 
-    def increase_lifespan(self, course_id: str, times: int = 5):
-        self._click_lab_adjustment_button(course_id, "2", times, "Increasing auto-destroy (lifespan)")
+    def increase_autostop(self, course_id: str, max_hours: int = 2):
+        """
+        Increase auto-stop time up to max_hours (default 2 hours).
+        Each click adds 1 hour. Will only add hours if current time is below max_hours.
+        """
+        current_hours = self.get_autostop_hours_remaining()
+        hours_to_add = max(0, max_hours - current_hours)
+        
+        if hours_to_add <= 0:
+            self.logger(f"Auto-stop already at {current_hours}h (max: {max_hours}h), no increase needed")
+            return
+        
+        self._click_lab_adjustment_button(course_id, "1", hours_to_add, f"Increasing auto-stop ({current_hours}h -> {current_hours + hours_to_add}h)")
+
+    def increase_lifespan(self, course_id: str, times: int = 14):
+        """
+        Increase auto-destroy (lifespan) to maximum.
+        Each click adds 1 day. Default 14 clicks should reach max lifespan.
+        """
+        self._click_lab_adjustment_button(course_id, "2", times, "Increasing auto-destroy (lifespan) to max")
 
     def impersonate_user(self, impersonate_username: str, current_course_id: str, environment: str):
         self.logger(f"Impersonating user '{impersonate_username}'")
@@ -701,7 +926,7 @@ class LabManager:
         
         # Wait for workstation button using original XPath
         workstation_button_xpath = "//*[text()='workstation']/../td[3]/button"
-        workstation_button = self.wait.until(
+        workstation_button = WebDriverWait(self.driver, 200).until(
             EC.presence_of_element_located((By.XPATH, workstation_button_xpath))
         )
         
@@ -895,11 +1120,13 @@ class LabManager:
         try:
             while True:
                 try:
-                    show_solution_button = WebDriverWait(self.driver, 0.5).until(
+                    show_solution_button = WebDriverWait(self.driver, 1.5).until(
                         EC.element_to_be_clickable((By.XPATH, "//button[text()='Show Solution']"))
                     )
                     show_solution_button.click()
                     time.sleep(0.5)
+                    # Scroll down a bit
+                    self.driver.execute_script("window.scrollBy(0, 500);")
                 except TimeoutException:
                     # No more show solution buttons, break the loop
                     break
@@ -1286,6 +1513,32 @@ class LabManager:
             return False
         return len(trailing_backslashes.group(0)) % 2 == 1
 
+    def _normalize_multiline_command(self, command: str) -> str:
+        """
+        Normalize a command that contains embedded newlines with line continuation.
+        
+        Handles cases like:
+            'oc login -u admin \\n    https://api.example.com'
+        Which should become:
+            'oc login -u admin https://api.example.com'
+        
+        Args:
+            command: The command string potentially containing embedded newlines
+            
+        Returns:
+            Normalized command with line continuations resolved
+        """
+        # Check if command contains backslash + newline (line continuation)
+        if '\\\n' in command:
+            # Replace backslash + newline + optional whitespace with a single space
+            # This handles: "cmd \\\n    arg" -> "cmd arg"
+            normalized = re.sub(r'\\\n\s*', ' ', command)
+            # Clean up any double spaces
+            normalized = re.sub(r' +', ' ', normalized)
+            return normalized.strip()
+        
+        return command
+
     def _merge_command_fragments(self, previous_command: str, current_fragment: str) -> str | None:
         """
         Attempt to merge command fragments that might be split across lines.
@@ -1357,6 +1610,9 @@ class LabManager:
             command = raw_command.strip()
             if command == '':
                 continue
+
+            # Normalize any embedded line continuations (e.g., "cmd \\\n  arg" -> "cmd arg")
+            command = self._normalize_multiline_command(command)
 
             # Check for multiline command (ends with backslash)
             if self._multiline_command(command):
@@ -1633,6 +1889,8 @@ class LabManager:
 
         self.logger(f"Executing {len(filtered_commands)} commands...")
 
+        self._prompt_user_to_continue(f"Press enter to run the lab start script for {chapter_section}.")
+
         for i, command in enumerate(filtered_commands):
             if command == '':
                 continue
@@ -1666,73 +1924,3 @@ class LabManager:
         self.close_browser()
 
 
-# Example Usage (illustrative)
-# if __name__ == '__main__':
-#     # Setup ConfigManager (ensure config files are in expected relative paths or adjust)
-#     # Assuming lx-toolbox is the project root and this script is run from there or PYTHONPATH is set.
-#     # If running this file directly for testing, paths in ConfigManager need to be relative to *this file's location*
-#     # or absolute.
-#     # For package use, relative from project root is fine for ConfigManager defaults.
-#     config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'config.ini.example')
-#     env_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env.example') # Use example if no .env
-    
-#     if not os.path.exists(env_path.replace(".example","")): # If real .env doesn't exist, copy example
-#         if os.path.exists(env_path):
-#             import shutil
-#             shutil.copy(env_path, env_path.replace(".example",""))
-
-#     cfg = ConfigManager(config_file_path=config_path, env_file_path=env_path.replace(".example",""))
-    
-#     # Ensure you have geckodriver/chromedriver in PATH
-#     # And update .env with actual credentials for testing login
-    
-#     lab_env_to_test = cfg.get("General", "default_lab_environment", "rol")
-#     course_to_test = "rh124-9.3" # Example course
-
-#     try:
-#         with LabManager(config=cfg) as lab_ops:
-#             reset_step_counter()
-            
-#             # 1. Login
-#             lab_ops.login(environment=lab_env_to_test)
-            
-#             # 2. Go to course
-#             lab_ops.go_to_course(course_id=course_to_test, environment=lab_env_to_test)
-            
-#             # 3. Check lab status
-#             primary_status, secondary_status = lab_ops.check_lab_status()
-#             print(f"Initial Lab Status for {course_to_test}: Primary='{primary_status}', Secondary='{secondary_status}'")
-
-#             # 4. Example: Ensure lab is created and started
-#             if primary_status == "CREATE":
-#                 lab_ops.create_lab(course_id=course_to_test)
-#                 primary_status, _ = lab_ops.check_lab_status() # Re-check
-            
-#             if primary_status == "START":
-#                 lab_ops.start_lab(course_id=course_to_test)
-#                 primary_status, _ = lab_ops.check_lab_status() # Re-check
-
-#             if primary_status == "STOP" or secondary_status == "STOPPING": # Assuming it's running
-#                 lab_ops.increase_autostop(course_id=course_to_test, times=5)
-#                 lab_ops.increase_lifespan(course_id=course_to_test, times=5)
-
-#             # Example: Impersonate (if configured in .env)
-#             # impersonate_target = cfg.get("Credentials", "IMPERSONATE_USERNAME")
-#             # if impersonate_target:
-#             #    lab_ops.impersonate_user(impersonate_username=impersonate_target, current_course_id=course_to_test, environment=lab_env_to_test)
-
-
-#             # Example: Delete lab at the end of test
-#             # lab_ops.delete_lab(course_id=course_to_test)
-
-
-#             print("LabManager example operations completed.")
-
-#     except ValueError as ve:
-#         print(f"Configuration Error: {ve}")
-#     except TimeoutException as te:
-#         print(f"A timeout occurred during lab operations: {te}")
-#     except Exception as e:
-#         print(f"An unexpected error occurred: {e}")
-#         import traceback
-#         traceback.print_exc()
