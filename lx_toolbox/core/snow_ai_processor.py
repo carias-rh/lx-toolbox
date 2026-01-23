@@ -69,7 +69,7 @@ class SnowAIProcessor:
             "- There is a typo in the guide text\n"
             "- A paragraph or phrase is incorrect.\n"
             "- Missing information to complete the exercise\n"
-            "- Outdated content of the guide\n
+            "- Outdated content of the guide\n"
             "- Some command is not working as expected in the lab environment\n"
             "- The solution is doing something that was not in the requirements of the exercise\n"
             "- The output of a command in the lab environment is different from the expected output in the guide\n"
@@ -193,7 +193,7 @@ class SnowAIProcessor:
         self.logger("Fetching guide text from website")
         self.lab_mgr.select_lab_environment_tab("course")
 
-        self.lab_mgr.disable_video_player()
+        self.lab_mgr.toggle_video_player(state=False)
         self.lab_mgr.dismiss_active_alerts()
 
         try:
@@ -276,7 +276,7 @@ class SnowAIProcessor:
     # --------------------------
     def classify_ticket_llm(self, description: str) -> dict:
         self.logger("Classifying ticket using LLM")
-        json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue": false, "is_video_issue": false}'
+        json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue_ticket": false, "is_video_issue_ticket": false, "needs_lab_verification": true}'
         prompt = f"""
 You are an expert classifier of Red Hat Training tickets.
 Classify the user's feedback regarding a Red Hat Training course, there are three types of tickets:
@@ -296,13 +296,26 @@ Examples of video issues:
 Examples of types of issues to be manually managed:
 {self.manually_managed_issues_examples}
 
+IMPORTANT: Determine if lab verification is needed. Lab verification IS needed when:
+- The student claims a command output is different from the guide
+- The student says a lab script (start/grade/finish) is not working
+- The student says a particular solution doesn't work in the grading script
+- The student reports specific behavior in the lab environment that needs confirmation
+
+Lab verification is NOT needed when:
+- There is a simple typo in the guide text
+- Video issues (missing, not matching, subtitle problems)
+- Manually managed issues (refunds, exam scheduling, UI suggestions)
+- The issue can be determined just by reading the guide text
+
 Return JSON with the following fields:
 - student_feedback: the user's feedback in english, as it is, without any changes. Substitute double quotes with single quotes.
 - language: the language of the student's feedback. If the student's feedback is in english, the value of this key-value pair is 'en'.
 - summary: in a short sentence, summarize the user's feedback
 - is_content_issue_ticket: (true/false)
-- is_environment_issue: (true/false)
-- is_video_issue: (true/false)
+- is_environment_issue_ticket: (true/false)
+- is_video_issue_ticket: (true/false)
+- needs_lab_verification: (true/false) - whether we need to start a lab to verify the student's claim
 
 This is the student's feedback:
 <student_feedback>
@@ -324,8 +337,9 @@ For example:
                 "language": "en",
                 "summary": "Error parsing LLM response",
                 "is_content_issue_ticket": False,
-                "is_environment_issue": False,
-                "is_video_issue": False,
+                "is_environment_issue_ticket": False,
+                "is_video_issue_ticket": False,
+                "needs_lab_verification": False,
             }
 
     def analyze_content_issue(self, user_issue: str, guide_text: str) -> dict:
@@ -571,7 +585,7 @@ LLM Analysis: {analysis_response_json.get('analysis', '')}\n"""
                     WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(default_jira_reply + signature)
                 except Exception:
                     pass
-            elif classification_data.get("is_video_issue", False):
+            elif classification_data.get("is_video_issue_ticket", False):
                 # Handle video issues
                 video_issue_type = analysis_response_json.get("video_issue_type", "other")
                 needs_jira = analysis_response_json.get("needs_jira", False)
@@ -607,7 +621,7 @@ LLM Analysis: {analysis_response_json.get('analysis', '')}\n"""
                         WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(default_jira_reply + signature)
                     except Exception:
                         pass
-            elif classification_data.get("is_environment_issue", False) and self.is_openshift_lab_first_boot(snow_info, analysis_response_json):
+            elif classification_data.get("is_environment_issue_ticket", False) and self.is_openshift_lab_first_boot(snow_info, analysis_response_json):
                 reply_text = (
                     f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
                     f"Labs take about 20-30 min to finish the setup the first time they are booted up, so please give it time. Once everything is working, it should be pretty fast.\n\n"
@@ -815,7 +829,7 @@ Translate the following text from {language} to english:
                 components_field.send_keys(snow_info.get("Course",""))
                 
                 # Add "Video Content" component if this is a video issue
-                if classification.get("is_video_issue", False):
+                if classification.get("is_video_issue_ticket", False):
                     time.sleep(0.5)  # Brief pause to allow first component to register
                     components_field.send_keys(Keys.TAB)
                     components_field = WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]')))
@@ -897,30 +911,30 @@ Translate the following text from {language} to english:
                     else:
                         chapter_section=f"ch{ snow_info.get("Chapter", "01") }"
                     
-                    # For video issues, just navigate to course page (don't start lab)
-                    if classification.get("is_video_issue"):
+                    # Determine issue type from classification
+                    needs_lab = classification.get("needs_lab_verification", False)
+                    is_content_issue = classification.get("is_content_issue_ticket", False)
+                    is_environment_issue = classification.get("is_environment_issue_ticket", False)
+                    is_video_issue = classification.get("is_video_issue_ticket", False)
+                    
+                    # For video issues, just navigate and check video player availability
+                    if is_video_issue:
                         self.logger("Video issue detected - navigating to course page without starting lab")
                         self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
                         time.sleep(2)
-                        
-                        # Check if video player is available
                         video_player_available = self.lab_mgr.check_video_player_available()
-                        
-                        # Analyze video issue (no guide text needed)
                         analysis = self.analyze_video_issue(snow_info["Description"], video_player_available)
-                    else:
-                        try:
-                            # For non-video issues, start lab as usual
-                            self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
-                        except Exception:
-                            pass
-                            
+                    elif is_content_issue:                        
+                        # Navigate to the course page
+                        self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                        time.sleep(2)
+                        
+                        # Fetch guide text for "content guide" issue analysis
                         try:
                             self.lab_mgr.select_lab_environment_tab("course")
                         except Exception:
                             pass
                         
-                        # Fetch guide text from website for content analysis
                         guide_text = ""
                         try:
                             guide_text = self.fetch_guide_text_from_website()
@@ -928,11 +942,28 @@ Translate the following text from {language} to english:
                         except Exception as e:
                             logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
 
-                        # Perform analysis using the guide_text (if content) or env analysis
-                        if classification.get("is_content_issue_ticket"):
-                            analysis = self.analyze_content_issue(snow_info["Description"], guide_text)
-                        elif classification.get("is_environment_issue"):
-                            analysis = self.analyze_environment_issue(snow_info["Description"]) 
+                        # Perform analysis based on issue type
+                        analysis = self.analyze_content_issue(snow_info["Description"], guide_text)
+
+                    elif is_environment_issue:
+                        # Fetch guide text for "lab environment" issue analysis
+                        analysis = self.analyze_environment_issue(snow_info["Description"])
+
+                    # If the issue requires lab verification, start the lab
+                    if needs_lab:
+                        self.logger("Lab verification needed - starting lab environment")
+                        try:
+                            self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"Failed to start lab: {e}")
+                    else:
+                        self.logger("No lab verification needed - navigating to course page only")
+                        self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                        self.lab_mgr.select_lab_environment_tab("course")
+                        if is_video_issue:
+                            self.lab_mgr.toggle_video_player(state=True)
+                        time.sleep(2)
+
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"ROL tab setup failed for {snow_id}: {e}\n{traceback.format_exc()}")
 
@@ -946,7 +977,7 @@ Translate the following text from {language} to english:
                 # Determine if Jira ticket is needed
                 # Skip Jira for video issues where videos are just not ready yet
                 skip_jira = (
-                    classification.get("is_video_issue", False) and 
+                    classification.get("is_video_issue_ticket", False) and 
                     (analysis.get("video_issue_type") == "videos_not_ready" or not analysis.get("needs_jira", True))
                 )
 
@@ -978,16 +1009,17 @@ Translate the following text from {language} to english:
                         logging.getLogger(__name__).warning(f"Jira create prefill failed for {snow_id}: {e}")
 
 
-                # Increase autostop and lifespan (skip for video issues since no lab was started)
-                if not classification.get("is_video_issue"):
-                    self.driver.switch_to.window(tab_rol)
-                    self.lab_mgr.select_lab_environment_tab("lab-environment")
-                    self.lab_mgr.increase_autostop(course_id=course_id)
+                # Increase autostop and lifespan only if a lab is running for this course
+                self.driver.switch_to.window(tab_rol)
+                if self.lab_mgr.is_lab_running():
+                    # Limit auto-stop to max 2 hours, always maximize lifespan
+                    self.lab_mgr.increase_autostop(course_id=course_id, max_hours=2)
                     self.lab_mgr.increase_lifespan(course_id=course_id)
-                    self.driver.switch_to.window(tab_snow)
-                    self.logger(f"Autostop and lifespan increased for course {course_id}")
+                    self.logger(f"Lab timers adjusted for course {course_id} (max 2h auto-stop, max lifespan)")
+                    self.driver.switch_to.window(tab_rol)
                 else:
-                    self.driver.switch_to.window(tab_snow)
+                    self.logger(f"No running lab for {course_id} - skipping timer adjustments")
+                self.driver.switch_to.window(tab_snow)
 
             except Exception as e:
                 logging.getLogger(__name__).error(f"Failed to orchestrate window for ticket {snow_id}: {e}")
