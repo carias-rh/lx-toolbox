@@ -1691,7 +1691,7 @@ class LabManager:
             return True
             
         # Ansible commands
-        if "ansible" in command:
+        if "ansible-playbook" or "ansible-navigator" in command:
             self._prompt_user_to_continue("if you did review/create the playbook.")
             self.introduce_command_to_console(command, auto_enter=True)
             self._prompt_user_to_continue("if playbook finished")
