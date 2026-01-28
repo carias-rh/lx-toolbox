@@ -1,224 +1,482 @@
-This project contains a series of web automation scripts for the daily tasks of the Learner Experience Team at Red Hat. 
-- Automated lab environment creation
-- Semi-automated QA for RHxxx courses
-- SNOW auto-assign tickets
-- Intercom status change
+# LX Toolbox
 
+Automation tools for various work tasks including lab operations, ServiceNow, and Jira.
 
-## Setup
+## Features
+- **ServiceNow to Jira AI Processor**: LLM-powered ticket classification, analysis, and Jira ticket preparation using Ollama
+- **QA Automation**: Run automated QA tests on lab exercises
+- **Lab Operations**: Create, start, stop, delete, and manage labs
+- **User Impersonation**: Switch to different users for testing
+- **Multi-Environment Support**: Works with ROL, Factory, and China environments
+- **ServiceNow Auto-Assignment**: Automated ticket assignment with team-specific configurations
+- **Link Checker**: Validate external links in course content with PDF/JSON reports and Jira integration
 
-### Requisites
-- Root access to your laptop
-- ansible core
-- python3
-- selenium libraries
-`pip3 install selenium`
-- [geckodriver](https://github.com/mozilla/geckodriver/releases) and/or [Chromedriver](https://chromedriver.chromium.org/downloads) under `/usr/bin/`
+## Prerequisites
 
+- Python 3.8+
+- Firefox or Chrome browser
+- Geckodriver (for Firefox) or Chromedriver (for Chrome)
+- Podman or Docker (for Link Checker - optional but recommended for faster link validation)
 
-Run the `setup.yml` playbook that will install the requirements and wrapper scripts to create the labs:
-``` 
-$ ansible-playbook playbooks/setup.yml -K
-```
+## Installation
 
-### SSO for Associates
-As you may have seen, the `setup.yml` playbook generated a `secret` that we will use to create our SSO token. 
-```
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd lx-toolbox
+   ```
 
-TASK [Use this secret string to create your token.redhat.com] *************************************************************************************************************************************************************************************************************************************************************
-ok: [localhost] => {
-    "generated_secret.stdout": "4439be1a......................bc2d3ec263"
-}
-...output omitted...
-```
+2. Set up your credentials:
+   ```bash
+   # Copy the template
+   cp env.template .env
+   
+   # Edit with your credentials
+   vim .env  # or use your preferred editor
+   ```
 
-Fill in the `playbooks/vars/credentials.yml` file with your `rol.redhat.com` username. Vault-encrypting this file is recommended:
-```
-# SSO Red Hat credentials
-username: "rh-username"	                            # without @redhat.com
-secret: "4439be1a......................bc2d3ec263"          # OTP Key to generate the SSO token
-pin: "yourpin" 		                                    # Create a PIN for the OTP Key
+3. Configure settings:
+   ```bash
+   cp config/config.ini.example config/config.ini
+   
+   # Edit config/config.ini as needed
+   vim config/config.ini
+   ```
 
-# Github credentials
-github_username: ""
-github_password: ""
-```
+4. Run the installer (creates virtualenv, installs dependencies, drivers, and deploys lx-toolbox):
+   ```bash
+   # Basic installation (skips Ollama - recommended for faster setup)
+   ansible-playbook playbooks/setup.yml -K --skip-tags ai-capabilities
+   
+   # Full installation including Ollama (for SNOW AI features)
+   ansible-playbook playbooks/setup.yml -K
+   ```
 
+## Usage
 
-Go to `token.redhat.com` with the VPN activated to create the new token with the given secret. Uncheck the ☑️ `Generate OTP Key on the Server` box, paste your secret, and choose a PIN.
+After running the Ansible setup.yml playbook, wrapper commands are available system-wide.
 
-![image](https://user-images.githubusercontent.com/80515069/177427661-7a1d9c81-ad96-485c-a31a-376e7dc3c1e5.png)
+### Quick Start (Wrapper Commands)
 
-Make sure that the `./counter` file always matches the `Count` value of the token, **initially set to 1**. It will increase the value each time you login.
+These simplified commands are installed to `/usr/bin/` and available from anywhere:
 
-![hotp](https://user-images.githubusercontent.com/80515069/212667043-69dd2e9e-c81e-4b75-a5ac-41e1b52b8f27.png)
-
-### Other learners
-
-Fill in the credentials.yml file with your rol.redhat.com credentials:
-```
-username: "youruser@mail.com"
-password: "yourpassword"
-``` 
-
-
-# Automated lab environment creation
-This script uses ansible and selenium to create, delete, and extend life of most used labs in rol.redhat.com:
-  - rh124-9.0
-  - rh134-9.0
-  - rh199-9.0
-  - rh294-9.0
-  - do180-4.10
-  - do280-4.10
-  - do288-4.10
-  - do447-2.8
-
-It uses ansible-playbook to generate python scripts from templates that will launch a browser by using selenium.
-
-## Running the thing
-
-The `setup.yml` playbook has placed in your `/usr/local/bin/` dir some wrapper scripts that use the `rol-prod` environment by default. So if you want to use stage, append `rol-stage` as the second parameter.
-- start
-- delete
-- recreate
-- impersonate (only rol-prod)
-
-The wrapper script will look into the list of courses and match the latest version of the course if you write only the number of the course.
-
-[rol-start-render.webm](https://user-images.githubusercontent.com/80515069/214608957-41e14cd4-1084-45fc-bd4a-3e08cc34cf84.webm)
-
-```
-$ start 180 rol-stage
-
-Course starting: do180-4.10
-Environment: rol-stage
-
-Using /etc/ansible/ansible.cfg as config file
-[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
-
-PLAY [ROL labs launcher] *****************************************************************************************************************************************************************************************************************************************************************
-...
-``` 
-Another wrapper example that allows you to impersonate a user:
-```
-$ impersonate 280 carias
-
-Course starting: do280-4.10
-Environment: rol-production
-Impersonate: carias
-
-Using /etc/ansible/ansible.cfg as config file
-[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
-
-PLAY [ROL labs launcher] *****************************************************************************************************************************************************************************************************************************************************************
-...
-```
-
-You can also directly run the playbooks to start the labs:
-``` 
-$ ansible-playbook playbooks/create.yml
-
-``` 
-
-An example to override the variables without editing the yaml files by using the extra-vars parameter.
-```
-$ ansible-playbook delete.yml \
-        -e 'lab_environment=rol-stage' \
-        -e '{"course_id": ["rh124-8.2", "rh134-8.2"]}'
-```
-
-## Custom courses and environment
-You can customize the default `lab_environment` and `courses_id` variables in the vars section, so that you can create, start, delete multiple labs with a single run:
-```
-$ cat playbooks/create.yaml
-- name: ROL labs launcher
-  hosts: localhost
-  vars_files: credentials.yml
-  vars:
-    - lab_environment: rol 	# Valid options are: rol / rol-stage
-    - course_id:  		# Get the course_id from the URL, such https://rol.redhat.com/rol/app/courses/rh124-8.2
-        - rh124-9.0
-        - rh134-9.0
-        - rh294-9.0
-        ...
-```
-# Semi-automated QA for RHxxx courses
-This script will assist you in the introduction of the commands during any QA of the RH series, which are mostly done using the command line interface. It has some limitations, such those exercise where it's asked the user to open a new terminal tab, or that commands may need to be introduced directly into a different host without sshing it first, or with commands that require some custom user input. 
-
-Despite these limitations, the script has proven to serve of great help during E2E QAs, reducing the human work to merely check that the output of the commands correspond to the steps in the guide.
-
-You will need the SSH key access to [github](https://www.freecodecamp.org/news/git-ssh-how-to/) configured to checkout the version of the course from repo to get the commands.
-
-It's possible to start the QA from any chapter and the script will continue from that point until the end.  
-
-`$ qa -c 180 -s ch02s02 -e china`
-
-![image](https://user-images.githubusercontent.com/80515069/233403992-3e15964b-32c9-4f6a-95a3-ec0efa5bac42.png)
-
-`[...]`
-
-The script will get the commands from the indicated section, or from the first guided exercise if not indicated 
-
-![image](https://user-images.githubusercontent.com/80515069/233404289-9ca4540e-4b00-4081-a8be-08f2bf5d7cf2.png)
-
-
-`[...]`
-
-![image](https://user-images.githubusercontent.com/80515069/233405072-26d7810c-0148-4841-9fb9-bbcaed416895.png)
-
-
-At this point of the script, the lab is up and running, but needs 2 manual steps before hitting Enter to start the introduction of the commands: 
- - opening a terminal
- - disabling key repetition on `Settings > Universal Access > Typing > Repeat Keys = Off`
-
-Note that this script is run in headless mode to avoid any manual interruption of the user in the automation tool, so you will need to open a new session with (i.e.)  `start 180` to have your monitoring workstation terminal.
-
-You will notice that after introducing some kind of commands, a prompt to continue with the script execution will appear. This is to avoid the script running without control and introducing commands incorrectly. Have a look at some special commands that require these stopper prompts in the `operate-lab.py.j2` template. 
-
-![image](https://user-images.githubusercontent.com/80515069/233406747-cc578ae1-d1c1-4b25-be4c-4b7084896c22.png)
-
-How to steer the script in other exceptional situations:
-
-- If for any reasons, the script introduced an incorrect command, because it needed a customized input, or is missing some configuration file, you can stop the terminal process with `CTRL + s`. Then, resolve any inconsistencies in the exercise and resume the script execution with `CTRL + q`. 
-- This is a work in progress project, mostly tested on RHxxx courses, so if you find any other exceptional kind of command that needs a stopper prompt, please tell or submit a PR. Thanks!
-
-# SNOW auto-assign tickets
-The `playbook/snow.yml` will auto-assign any tickets in your queue that are not yet assigned to anybody. The need for this script emerged from the time-consuming task of filling all the field of each ticket, which came without the name, email, and summary filled.
-I could have make this script simpler, but I finally decided to automate the whole thing to auto-assign the tickets to my queue as they come and automatically reply to the users.
-
-To achieve this, I created in my favourites a customized query for `RHT Learner Experience - T2` group. This will correspond to a unique url that needs to be substituted in the `playbooks/templates/snow-auto-assign.yml` selenium template.       
-
-![image](https://user-images.githubusercontent.com/80515069/212669278-29f9a09e-9fe0-427e-9ed3-3f25d92bde45.png)
-
-Substitute your filter URL in the `driver.get` function parameter.
-
-![image](https://user-images.githubusercontent.com/80515069/212669964-817f766d-ba67-463b-bf62-7a7124a86158.png)
-
-Customize the email that will be sent to the customer as an ACK in the `auto_assign_tickets()` function.
-
-![image](https://user-images.githubusercontent.com/80515069/212670415-862f3829-9bcb-42f6-8da9-79044584708b.png)
-
-I created a crontab to periodically run the script every hour during my shift.
 ```bash
-#######################
-# Auto-assign tickets #
-#######################
+# Start a lab
+start rh124-9.3
+start do180 factory          # Use Factory environment
 
-59 8-13 * * 1-5   export DISPLAY=:1 && SHELL=/usr/bin/bash && source ${HOME}/.bashrc && /usr/bin/ansible-playbook /home/carias/Documents/rol-lab-persistence/playbooks/snow.yml
+# Stop a lab
+stop rh124-9.3
+stop do180 factory
+
+# Delete a lab
+delete rh124-9.3
+delete do180 factory
+
+# Recreate a lab (delete + create)
+recreate rh124-9.3
+recreate do180 factory
+
+# Impersonate a user
+impersonate rh124-9.3 jsmith
+impersonate do180-4.14 jsmith
+
+# Run QA automation
+qa 124 2.3                        # Run QA on chapter 2.3
+qa do180 ch02s05 factory          # Run on Factory
+
+# Check links in course content
+check-links --course do280-4.18
+check-links --course rh124 --all-versions
+check-links --course do180 --create-jira
+check-links                         # Check all courses
+
+# Process SNOW tickets with AI
+snow-ai                             # Process tickets from user queue
+snow-ai --ticket INC12345678        # Process specific ticket
+snow-ai -t INC111 -t INC222         # Process multiple tickets
 ```
 
-# Jira ticket from SNOW Feedback
-This script create a new jira from a SNOW feedback ticket. Review that everything is fine according to priority, categorization and a proper summary and description.
+All wrapper commands support `-h` or `--help` for usage information.
 
-`$ jira RHT1915340`
+### Full lx-tool Commands
 
-# Intercom status change
-This script will switch your status on intercom to Away/Active.
+For advanced usage or when wrapper commands aren't available, use `lx-tool` directly:
 
-`$ ansible-playbook playbooks/intercom.yml -e status="Away"`
+```bash
+# Lab operations
+lx-tool lab start rh124-9.3 --env rol --browser firefox
+lx-tool lab stop rh124-9.3
+lx-tool lab create rh124-9.3
+lx-tool lab delete rh124-9.3
+lx-tool lab recreate rh124-9.3
+lx-tool lab impersonate rh124-9.3 student01
+```
+## ServiceNow to Jira AI Processor
 
-![image](https://user-images.githubusercontent.com/80515069/223106095-6628576d-ba36-4c86-b258-856eca079b73.png)
+The ServiceNow to Jira AI Processor uses a local LLM (Ollama) to analyze and classify ServiceNow Feedback tickets, automatically preparing Jira tickets for content or environment issues.
+
+### Prerequisites
+
+- **Ollama**: Install from [ollama.ai](https://ollama.ai)
+- **LLM Model**: Download a model (e.g., `ollama pull ministral-3:8b`)
+
+### Configuration
+
+Add the following to your `.env` file:
+
+```bash
+# LLM Provider (default: ollama)
+LLM_PROVIDER=ollama
+
+# Ollama Configuration
+OLLAMA_MODEL=ministral-3:8b
+OLLAMA_COMMAND=/usr/local/bin/ollama
+
+# Your signature for responses
+SIGNATURE_NAME=Your Name
+```
+Configure ServiceNow url path in the `config/config.ini` file:
+```bash
+SNOW_BASE_URL = <ask to carias>
+SNOW_FEEDBACK_QUEUE_PATH = <ask to carias>
+```
+### CLI Commands
+
+```bash
+# Process all tickets in your feedback queue (wrapper command)
+snow-ai
+
+# Process specific tickets
+snow-ai -t RITM0123456 -t RITM0123457
+
+# Use Chrome instead of Firefox
+snow-ai --browser chrome
+
+# Run in a specific environment
+snow-ai --env factory
+```
+
+Opens a separate browser window per ticket with organized tabs for efficient processing.
+
+### How It Works
+
+The SNOW AI Processor follows this workflow for each ticket:
+
+1. **Ticket Retrieval**: Fetches ticket details from ServiceNow (description, course, chapter, section, URL)
+
+2. **Classification**: Uses the LLM to classify the ticket as:
+   - **Content Issue**: Typos, incorrect instructions, missing steps, outdated content
+   - **Environment Issue**: Lab script failures, stuck labs, platform limitations
+   - **Manual Review**: UI suggestions, complaints, complex issues
+
+3. **Language Detection & Translation**: Detects non-English feedback and translates it
+
+4. **Guide Text Extraction**: Navigates to the course section in ROL and extracts the relevant content
+
+5. **Analysis**: Uses the LLM to:
+   - Compare student feedback with the guide text
+   - Determine if the issue is valid
+   - Suggest corrections
+   - Generate a Jira-ready title
+
+6. **Response Generation**: Crafts a professional response to the student
+
+7. **Jira Preparation**: Opens a prefilled Jira ticket with:
+   - Course and section information
+   - Translated issue description
+   - Suggested workaround
+   - Component and version pre-selected
+
+### Browser Window Layout
+
+Each ticket gets its own browser window with 4 tabs:
+
+| Tab | Content |
+|-----|---------|
+| **Tab 1** | ServiceNow ticket (zoomed for readability) |
+| **Tab 2** | ROL course section (guide content) |
+| **Tab 3** | Jira search (find similar existing tickets) |
+| **Tab 4** | Jira create (prefilled new ticket form) |
+
+This layout enables quick context switching and manual review before submitting tickets.
+
+### Supported Issue Types
+
+**Content Issues** (automatically creates Jira):
+- Typos or grammatical errors
+- Incorrect or outdated instructions
+- Missing steps or commands
+- Mismatches between video and guide
+- Incomplete exercise information
+
+**Environment Issues** (suggests debugging steps):
+- Lab start/finish script failures
+- Labs stuck in starting/stopping state
+- Platform-specific limitations (e.g., vim visual mode)
+- OpenShift lab first-boot delays
+
+**Video Issues** (creates Jira if videos exist, otherwise informs student):
+- Video not available or cannot be found
+- Video doesn't match section/chapter content
+- Video subtitles incorrect, missing, or translation issues
+- Video technical problems (bad cuts, audio sync)
+- Video player not working
+- Exercise/guide mismatch with instructor video
 
 
+
+
+## Link Checker Commands
+
+The Link Checker functionality validates all external links in course content (References sections) and generates comprehensive reports.
+
+**Basic Usage:**
+
+```bash
+# Check links in a specific course
+check-links --course do280-4.18
+
+# Check all available versions of a course
+check-links --course rh124-9.3 --all-versions
+
+# Check all courses in the catalog
+check-links
+```
+
+**Key Features:**
+
+- **Automatic link validation**: Checks all external links in course References sections
+- **Screenshot capture**: Takes screenshots of each visited link (including error pages)
+- **Comprehensive reports**: Generates both PDF and JSON reports
+- **Retry mechanism**: Automatically retries failed links before final report
+- **Multi-version support**: Can check all versions of a course
+- **Anti-crawler workaround**: Will overcome website limitations for bots
+- **Jira integration**: Optionally creates prefilled Jira tickets for broken links
+- **Fast validation**: Uses containerized `linkchecker` tool for quick checks when screenshots aren't needed
+- **Authenticated access**: Automatically logs into access.redhat.com to check knowledge base articles that require authentication (avoiding 403 Forbidden errors)
+
+**Report Structure:**
+
+- **PDF Report**: Includes course summary, broken links with hyperlinks, embedded screenshots, and detailed section-by-section breakdown
+- **JSON Report**: Machine-readable format for alternative validation methods
+- **Screenshots**: Organized by run timestamp, course name, version, and section name
+
+**Command Options:**
+
+- `--course, -c`: Specific course ID to check (e.g., `rh124-9.3`). Checks all courses if omitted
+- `--env, -e`: Environment (rol, factory, china). Default: rol
+- `--browser, -b`: Browser to use (firefox, chrome). Default: firefox
+- `--headless/--no-headless`: Run browser in headless mode. Default: no-headless
+- `--output-dir, -d`: Directory to save reports. Default: current directory
+- `--screenshots/--no-screenshots`: Take screenshots of visited links. Default: screenshots enabled
+- `--screenshots-dir, -s`: Directory to save screenshots. Default: `./link_checker_screenshots`
+- `--retry/--no-retry`: Retry failed links before generating report. Default: retry enabled
+- `--all-versions/--single-version`: Check all available versions of the course. Default: single version
+- `--create-jira/--no-jira`: Create prefilled Jira tickets for broken links. Default: disabled
+
+**Examples:**
+
+```bash
+# Quick check without screenshots (faster)
+check-links --course do280-4.18 --no-screenshots
+
+# Check all versions with custom output directory
+check-links --course rh124-9.3 --all-versions --output-dir ./reports
+
+# Check all courses and create Jira tickets for broken links
+check-links --create-jira
+
+# Custom screenshots directory
+check-links --course do280-4.18 --screenshots-dir ./my_screenshots
+
+# Skip retry for faster execution
+check-links --course do280-4.18 --no-retry
+
+# Headless mode for automated runs
+check-links --course do280-4.18 --headless
+```
+
+**How It Works:**
+
+1. **Navigation**: Logs into ROL and navigates to the course(s)
+2. **Section Discovery**: Expands the table of contents and collects all sections (excluding summaries, labs, quizzes, etc.)
+3. **Link Extraction**: Extracts all external links from References sections
+4. **Link Validation**: 
+   - Uses containerized `linkchecker` for fast validation (when screenshots disabled)
+   - Uses Selenium for validation with screenshots
+   - Supports parallel checking for faster execution
+5. **Retry Round**: Optionally retries failed links to catch transient errors
+6. **Report Generation**: Creates PDF (with screenshots) and JSON reports
+7. **Jira Integration**: Optionally creates prefilled Jira tickets with broken links, hyperlinks to course sections, and attached reports
+
+**Screenshot Organization:**
+
+Screenshots are organized in a hierarchical structure:
+```
+link_checker_screenshots/
+└── 20251228_143022/          # Run timestamp
+    └── do280/                 # Course name
+        └── 4.18/             # Version
+            └── Section_1.2/  # Section name
+                └── screenshot_*.png
+```
+
+**Jira Ticket Features:**
+
+When `--create-jira` is enabled, the tool creates prefilled Jira tickets with:
+- Course information and version
+- Table of broken links with clickable section hyperlinks
+- Links to search for existing tickets (prevents duplicates)
+- Attached PDF and JSON reports
+- Opens in a new window to avoid interfering with link checking
+
+**Excluded Sections:**
+
+The following section types are automatically excluded from checking:
+- Sections containing "summary" in the title
+- Sections containing "lab:", "guided exercise:", "quiz:" in the title
+- "Comprehensive Review" sections
+- "Preface" sections
+
+### Command Options
+
+- `--env, -e` : Specify environment (rol, factory, china)
+- `--browser, -b` : Choose browser (firefox, chrome)
+- `--headless` : Run in headless mode
+- `--no-headless` : Run with browser visible
+
+
+## Configuration
+
+See [CREDENTIALS.md](CREDENTIALS.md) for detailed information on setting up credentials.
+
+### Authentication and Login
+
+The automation assists with login by autofilling credentials when configured:
+- **Username** is autofilled when `RH_USERNAME` is set
+
+### Quick Setup
+
+1. Create a `.env` file with your credentials:
+   ```
+   RH_USERNAME=your_username
+   SNOW_INSTANCE_URL=
+   SNOW_API_USER=your_snow_user
+   SNOW_API_PASSWORD=your_snow_password
+   ```
+
+2. Test your configuration:
+   ```bash
+   lx-tool config
+   lx-tool snow test
+   ```
+
+
+
+## ServiceNow Auto-Assignment
+
+The ServiceNow auto-assignment feature supports multiple teams with different configurations:
+
+### Team Configurations
+
+- **T1 Team (`t1`)**: RHT Learner Experience
+  - Handles standard support requests
+  - Supports round-robin assignment
+  - Automatic acknowledgment messages
+  - Handles special cases (iqlaserpress.net emails)
+
+- **T2 Team (`t2`)**: RHT Learner Experience - T2  
+  - Handles feedback tickets
+  - Automatic user name lookup via LMS API
+  - Auto-resolution for specific reporters
+  - Course information extraction
+
+### Adding New Teams
+
+To add a new team, modify the `_load_team_configurations()` method in `lx_toolbox/core/servicenow_handler.py`:
+
+```python
+teams["new_team"] = TeamConfig(
+    team_name="Your Team Name",
+    assignment_group_id="your_group_sys_id", 
+    category="Your Category",
+    acknowledgment_template="Your template with {customer_name} and {assignee_name}",
+    # ... other configuration options
+)
+```
+
+### ServiceNow Auto-Assignment Commands
+
+```bash
+# Test ServiceNow and LMS connections
+lx-tool snow test
+
+# List unassigned tickets for a team
+lx-tool snow list-tickets t1
+lx-tool snow list-tickets t2 --limit 20
+
+# Run single auto-assignment cycle
+lx-tool snow assign t1
+lx-tool snow assign t2 --assignee "John Doe"
+
+# Run continuous auto-assignment
+lx-tool snow assign t1 --continuous
+lx-tool snow assign t2 --continuous --interval 120
+```
+## Project Structure
+
+```
+lx-toolbox/
+├── lx_toolbox/          # Main Python package
+│   ├── core/            # Core business logic
+│   │   ├── base_selenium_driver.py
+│   │   ├── jira_handler.py
+│   │   ├── lab_manager.py
+│   │   ├── servicenow_autoassign.py
+│   │   ├── servicenow_handler.py
+│   │   └── snow_ai_processor.py
+│   ├── utils/           # Utility modules
+│   │   ├── config_manager.py
+│   │   ├── course_resolver.py
+│   │   ├── helpers.py
+│   │   └── keyboard_handler.py
+│   └── main.py          # CLI entry point
+├── config/              # Configuration files
+│   └── config.ini
+├── scripts/             # Wrapper scripts
+│   └── lx-tool
+├── playbooks/           # Legacy Ansible files (to be removed)
+├── .env                 # Environment variables (credentials)
+└──  requirements.txt     # Python dependencies
+```
+
+## Troubleshooting
+
+If you encounter "Username not configured":
+1. Ensure `.env` file exists in the project root
+2. Check variable names are correct (case-sensitive)
+3. Verify no spaces around `=` in `.env` file
+4. Run `lx-tool config` to check configuration
+
+
+For SNOW AI Processor issues:
+1. Verify Ollama is running: `ollama list`
+2. Test the model directly: `ollama run ministral-3:8b "Hello"`
+3. Check `OLLAMA_COMMAND` path in `.env` is correct
+4. Ensure the model specified in `OLLAMA_MODEL` is downloaded
+5. For slow responses, consider a smaller model (e.g., `qwen3:8b`)
+
+For ServiceNow issues:
+1. Test connections with `lx-tool snow test`
+2. Verify ServiceNow credentials and permissions
+3. Check that assignment group IDs are correct
+
+## Contributing
+
+1. Create a feature branch
+2. Make your changes
+3. Add tests if applicable
+4. Submit a pull request
 
 

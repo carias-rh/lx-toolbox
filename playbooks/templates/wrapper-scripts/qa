@@ -1,0 +1,82 @@
+#!/bin/bash
+# LX Toolbox Wrapper - QA Automation
+# Usage: qa <course> <chapter.section> [environment]
+# Example: qa 199 2.3
+#          qa do180 4.1 factory
+
+set -e
+
+# Auto-detect lx-tool location
+if command -v lx-tool &> /dev/null; then
+    LX_TOOL="lx-tool"
+elif [[ -n "${LX_TOOLBOX_DIR}" ]] && [[ -x "${LX_TOOLBOX_DIR}/scripts/lx-tool" ]]; then
+    LX_TOOL="${LX_TOOLBOX_DIR}/scripts/lx-tool"
+elif [[ -x "/opt/lx-toolbox/scripts/lx-tool" ]]; then
+    LX_TOOL="/opt/lx-toolbox/scripts/lx-tool"
+else
+    echo "Error: lx-tool not found. Please install lx-toolbox or set LX_TOOLBOX_DIR environment variable." >&2
+    exit 1
+fi
+
+show_help() {
+    echo "Usage: qa <course> <chapter.section> [environment] [--commands-file FILE]"
+    echo ""
+    echo "Run QA automation for a specific course chapter/section."
+    echo ""
+    echo "Arguments:"
+    echo "  course           Course ID or short name (e.g., '199', 'do180', 'rh124-9.3')"
+    echo "  chapter.section  Chapter and section number (e.g., '2.3', '4.1')"
+    echo "  environment      Optional: rol (default), factory, china"
+    echo ""
+    echo "Options:"
+    echo "  --commands-file FILE  File containing commands to execute"
+    echo ""
+    echo "Examples:"
+    echo "  qa 199 2.3              # Run QA on rh199 chapter 2.3"
+    echo "  qa do180 4.1            # Run QA on do180 chapter 4.1"
+    echo "  qa do180 4.1 factory    # Run QA on Factory"
+    echo "  qa 199 2.3 --commands-file cmds.txt"
+}
+
+if [[ $# -lt 2 ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+    show_help
+    [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]] && exit 0
+    exit 1
+fi
+
+COURSE="$1"
+CHAPTER_SECTION="$2"
+shift 2
+
+# Parse remaining arguments
+ENV="rol"
+EXTRA_ARGS=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --commands-file)
+            EXTRA_ARGS="$EXTRA_ARGS --commands-file $2"
+            shift 2
+            ;;
+        -f)
+            EXTRA_ARGS="$EXTRA_ARGS -f $2"
+            shift 2
+            ;;
+        rol|factory|china)
+            ENV="$1"
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+echo ""
+echo "Running QA on course: $COURSE"
+echo "Chapter/Section: $CHAPTER_SECTION"
+echo "Environment: $ENV"
+echo ""
+
+exec $LX_TOOL lab qa "$COURSE" "$CHAPTER_SECTION" --env "$ENV" $EXTRA_ARGS
+

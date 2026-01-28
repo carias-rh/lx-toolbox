@@ -1,84 +1,95 @@
-- name: ROL labs installer
+- name: LX Toolbox installer
   hosts: localhost
   become: true
+  vars:
+    lx_toolbox_dir: "{{ playbook_dir | dirname }}"
+    wrapper_scripts:
+      - start
+      - stop
+      - delete
+      - recreate
+      - impersonate
+      - qa
+      - snow-ai
+      - check-links
 
   tasks:
-    - name: Install epel repository
-      command: dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
-      ignore_errors: true
-      tags: install
-
-    - name: Ensure dependencies are installed.
-      package:
+    - name: Ensure system dependencies are installed
+      ansible.builtin.package:
         name:
-          - oathtool
-          - perl-Digest-SHA-1
-          - epel-release
           - python3-pip
-          - firefox.x86_64
-          - chromium.x86_64
-          - perl-Digest-SHA-1:6.02-1.el8.x86_64
+          - python3-virtualenv
+          - firefox
+          - chromium
+          - chromedriver
         state: present
       tags: install
 
-    - name: Install Selenium with pip
+    - name: Install Python dependencies in virtualenv
       ansible.builtin.pip:
-        name: selenium
-        executable: pip3
+        requirements: "{{ lx_toolbox_dir }}/requirements.txt"
+        virtualenv: "{{ lx_toolbox_dir }}/venv"
+        virtualenv_command: python3 -m venv
       tags: install
 
-    - name: Install xq
-      shell: 'curl -sSL https://bit.ly/install-xq | sudo bash'
-      tags: install
-
-    - name: Download selenium drivers
+    - name: Download geckodriver
       ansible.builtin.get_url:
-        url: "{{ item }}"
-        dest: "/tmp/{{ item | split('/')| last }}"
-      loop:
-        - "https://github.com/mozilla/geckodriver/releases/download/v0.32.2/geckodriver-v0.32.2-linux64.tar.gz"
-        - "https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip"
+        url: "https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz"
+        dest: "/tmp/geckodriver-v0.36.0-linux64.tar.gz"
       tags: drivers
 
-    - name: Extract selenium drivers into /usr/bin/
+    - name: Extract geckodriver into /usr/bin/
       ansible.builtin.unarchive:
-        src: "/tmp/{{ item }}"
+        src: "/tmp/geckodriver-v0.36.0-linux64.tar.gz"
         dest: "/usr/bin/"
-      loop:
-        - geckodriver-v0.32.2-linux64.tar.gz
-        - chromedriver_linux64.zip
       tags: drivers
 
 
-    - name: Install wrapper scripts into /usr/bin/
-      ansible.builtin.template:
-        src: "./templates/wrapper-scripts/{{ item }}"
-        dest: "/usr/bin/{{ item | splitext | first }}"
-        mode: 0755
-      loop:
-        - start.j2
-        - delete.j2
-        - recreate.j2
-        - impersonate.j2
-        - qa.j2
-        - jira.j2
-        - snow.j2
+    # LX Toolbox symlinks (use repo directly, no /opt copy)
+    - name: Create symlink for lx-tool in /usr/bin/
+      ansible.builtin.file:
+        src: "{{ lx_toolbox_dir }}/scripts/lx-tool"
+        dest: "/usr/bin/lx-tool"
+        state: link
+        force: yes
       tags: scripts
 
-    - name: generate secret and
-      shell: 'dd if=/dev/random bs=1M count=1 status=none | shasum | cut -b 1-40'
-      register: generated_secret
-      tags: secret
+    - name: Create symlinks for wrapper scripts in /usr/bin/
+      ansible.builtin.file:
+        src: "{{ lx_toolbox_dir }}/playbooks/templates/wrapper-scripts/{{ item }}"
+        dest: "/usr/bin/{{ item }}"
+        state: link
+        force: yes
+      loop: "{{ wrapper_scripts }}"
+      tags: scripts
 
-
-    - name: place secret in playbooks/vars/credentials.yml file
+    - name: Set LX_TOOLBOX_DIR in /etc/environment
       ansible.builtin.lineinfile:
-        path: '{{ playbook_dir }}/vars/credentials.yml'
-        regexp: '^secret'
-        line: 'secret: {{ generated_secret.stdout }}'
-      tags: secret
+        path: /etc/environment
+        regexp: '^LX_TOOLBOX_DIR='
+        line: 'LX_TOOLBOX_DIR={{ lx_toolbox_dir }}'
+        create: yes
+      tags: scripts
 
-    - name: Use this secret string to create your token.redhat.com
-      debug:
-        var: generated_secret.stdout
-      tags: secret
+    - name: Install Ollama (for AI features)
+      ansible.builtin.shell: curl -fsSL https://ollama.com/install.sh | sh
+      args:
+        creates: /usr/bin/ollama
+      tags: 
+        - install
+        - ai-capabilities
+
+
+    - name: Display post-installation message
+      ansible.builtin.debug:
+        msg:
+          - "LX Toolbox Installation Complete!"
+          - ""
+          - "Installed from: {{ lx_toolbox_dir }}"
+          - ""
+          - "Available commands: lx-tool, start, stop, delete, recreate, impersonate, qa, check-links, snow-ai"
+          - ""
+          - "To update: git pull"
+      tags: always
+
+

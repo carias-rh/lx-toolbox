@@ -1,0 +1,48 @@
+#!/bin/bash
+# LX Toolbox Wrapper - Check Links
+# Usage: check-links [course] [options]
+# Example: check-links do180
+#          check-links --all-versions do180
+
+set -e
+
+# Auto-detect lx-tool location
+if command -v lx-tool &> /dev/null; then
+    LX_TOOL="lx-tool"
+elif [[ -n "${LX_TOOLBOX_DIR}" ]] && [[ -x "${LX_TOOLBOX_DIR}/scripts/lx-tool" ]]; then
+    LX_TOOL="${LX_TOOLBOX_DIR}/scripts/lx-tool"
+elif [[ -x "/opt/lx-toolbox/scripts/lx-tool" ]]; then
+    LX_TOOL="/opt/lx-toolbox/scripts/lx-tool"
+else
+    echo "Error: lx-tool not found. Please install lx-toolbox or set LX_TOOLBOX_DIR environment variable." >&2
+    exit 1
+fi
+
+show_help() {
+    echo "Usage: check-links [options]"
+    echo ""
+    echo "Check links in course content (References sections)."
+    echo ""
+    echo "Options:"
+    echo "  --course COURSE      Specific course ID to check (e.g., rh124-9.3)"
+    echo "  --env ENV            Lab environment (rol, factory, china)"
+    echo "  --all-versions       Check all available versions of the course"
+    echo "  --no-screenshots     Disable screenshots"
+    echo "  --no-retry           Don't retry failed links"
+    echo "  --create-jira        Create Jira tickets for broken links"
+    echo "  --headless           Run browser in headless mode"
+    echo ""
+    echo "Examples:"
+    echo "  check-links --course do180-4.18"
+    echo "  check-links --course do180 --all-versions"
+    echo "  check-links --course rh124 --create-jira"
+    echo "  check-links  # Check all courses"
+}
+
+if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+    show_help
+    exit 0
+fi
+
+exec $LX_TOOL lab check-links "$@"
+
