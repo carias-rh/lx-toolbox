@@ -138,8 +138,8 @@ SIGNATURE_NAME=Your Name
 ```
 Configure ServiceNow url path in the `config/config.ini` file:
 ```bash
-SNOW_BASE_URL = <ask to carias@redhat.com>
-SNOW_FEEDBACK_QUEUE_PATH = <ask to carias@redhat.com>
+SNOW_BASE_URL = <ask to carias>
+SNOW_FEEDBACK_QUEUE_PATH = <ask to carias>
 ```
 ### CLI Commands
 
