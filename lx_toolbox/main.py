@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .utils.config_manager import ConfigManager
 from .utils.helpers import reset_step_counter
-from .utils.course_resolver import resolve_course, resolve_course_safe, list_course_versions
+from .utils.course_resolver import resolve_course, resolve_course_safe, list_course_versions, resolve_chapter_section
 from .core.lab_manager import LabManager
 from .core.link_checker import LinkChecker
 from .core.servicenow_autoassign import ServiceNowAutoAssign
@@ -52,12 +52,10 @@ def resolve_course_id(short_name: str) -> str:
     """
     resolved, error = resolve_course_safe(short_name)
     if error:
-        # If resolution failed, return original (might be exact match or user error)
-        click.echo(f"Note: Could not resolve '{short_name}' ({error}). Using as-is.", err=True)
-        return short_name
+        raise click.ClickException(f"Could not resolve course '{short_name}': {error}")
     
     if resolved != short_name:
-        click.echo(f"→ Resolved '{short_name}' to '{resolved}'")
+        click.echo(f"Resolved course '{short_name}' to '{resolved}'")
     
     return resolved
 
@@ -343,8 +341,8 @@ def versions(ctx, course_name):
 @click.argument('course_id')
 @click.argument('chapter_section', required=False, default=None)
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
-@click.option('--browser', '-b', default='chrome', help='Browser to use (firefox, chrome)')
-@click.option('--headless/--no-headless', default=True, help='Run browser in headless mode')
+@click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
+@click.option('--headless/--no-headless', default=False, help='Run browser in no-headless mode')
 @click.option('--setup-style', '-s', default=None, help='Environment setup style (e.g., rgdacosta)')
 @click.pass_context
 def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style):
@@ -357,6 +355,13 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style):
     config = ctx.obj['config']
     environment = env or config.get("General", "default_lab_environment", "rol")
     course_id = resolve_course_id(course_id)
+    
+    # Resolve chapter_section format (e.g., "2.7" → "ch02s07")
+    if chapter_section:
+        resolved_section = resolve_chapter_section(chapter_section)
+        if resolved_section != chapter_section:
+            click.echo(f"Resolved section '{chapter_section}' → '{resolved_section}'")
+        chapter_section = resolved_section
     
     try:
         lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
@@ -787,9 +792,9 @@ def config(ctx):
     # Credentials (just show if they're set, not the values)
     click.echo("\n[Credentials Status]")
     cred_keys = [
-        'RH_USERNAME', 'RH_PASSWORD', 'RH_AUTH_HELPER',
-        'GITHUB_USERNAME', 'GITHUB_PASSWORD', 'GITHUB_AUTH_HELPER',
-        'CHINA_USERNAME', 'CHINA_PASSWORD', 
+        'RH_USERNAME',
+        'GITHUB_USERNAME',
+        'CHINA_USERNAME',
         'SNOW_API_USER', 'JIRA_API_USER'
     ]
     for key in cred_keys:

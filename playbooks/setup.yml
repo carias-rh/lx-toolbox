@@ -18,20 +18,18 @@
       ansible.builtin.package:
         name:
           - python3-pip
+          - python3-virtualenv
           - firefox
           - chromium
           - chromedriver
         state: present
       tags: install
 
-    - name: Install Python dependencies with pip
+    - name: Install Python dependencies in virtualenv
       ansible.builtin.pip:
-        name:
-          - selenium
-          #- click
-          #- python-dotenv
-          #- requests
-        executable: pip3
+        requirements: "{{ lx_toolbox_dir }}/requirements.txt"
+        virtualenv: "{{ lx_toolbox_dir }}/venv"
+        virtualenv_command: python3 -m venv
       tags: install
 
     - name: Download geckodriver
@@ -46,11 +44,6 @@
         dest: "/usr/bin/"
       tags: drivers
 
-    - name: Install Ollama (for AI features)
-      ansible.builtin.shell: curl -fsSL https://ollama.com/install.sh | sh
-      args:
-        creates: /usr/bin/ollama
-      tags: install
 
     # LX Toolbox symlinks (use repo directly, no /opt copy)
     - name: Create symlink for lx-tool in /usr/bin/
@@ -78,6 +71,15 @@
         create: yes
       tags: scripts
 
+    - name: Install Ollama (for AI features)
+      ansible.builtin.shell: curl -fsSL https://ollama.com/install.sh | sh
+      args:
+        creates: /usr/bin/ollama
+      tags: 
+        - install
+        - ai-capabilities
+
+
     - name: Display post-installation message
       ansible.builtin.debug:
         msg:
@@ -89,3 +91,5 @@
           - ""
           - "To update: git pull"
       tags: always
+
+

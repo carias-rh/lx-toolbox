@@ -10,8 +10,11 @@ factory_base_url = https://rol-factory-prod.ole.redhat.com/rol/app/courses/
 china_base_url = https://rol-cn.ole.redhat.com/rol/app/courses/
 
 [ServiceNow]
-# ServiceNow instance configuration
+# Add any non-sensitive ServiceNow configurations here
 # SNOW_INSTANCE_URL, SNOW_API_USER, SNOW_API_PASSWORD should be in .env file
+SNOW_BASE_URL = <ask to carias@redhat.com>
+SNOW_FEEDBACK_QUEUE_PATH = <ask to carias@redhat.com>
+
 
 [LMS]
 # LMS API configuration

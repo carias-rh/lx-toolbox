@@ -1,18 +1,67 @@
 #!/usr/bin/env python3
 """
-Course Resolver - Resolves short course names to full course IDs.
+Course Resolver - Resolves short course names to full course IDs and section identifiers.
 
 Examples:
-    "199" → "rh199-9.3"
-    "do180" → "do180-4.18"
-    "do180ea" → "do180ea-4.14"
-    "do180-4.14" → "do180-4.14" (exact match)
+    Course resolution:
+        "199" → "rh199-9.3"
+        "do180" → "do180-4.18"
+        "do180ea" → "do180ea-4.14"
+        "do180-4.14" → "do180-4.14" (exact match)
+    
+    Section resolution:
+        "2.7" → "ch02s07"
+        "1.2" → "ch01s02"
+        "ch02s07" → "ch02s07" (already in correct format)
 """
 
 import os
 import re
 from pathlib import Path
 from typing import Optional
+
+
+def resolve_chapter_section(section_input: str) -> str:
+    """
+    Resolve a section identifier to the chXXsXX format.
+    
+    Accepts:
+        - "x.y" format (e.g., "2.7" → "ch02s07")
+        - "chXXsYY" format (passed through unchanged)
+        - "XX.YY" format with leading zeros (e.g., "02.07" → "ch02s07")
+    
+    Args:
+        section_input: Section identifier in any supported format
+        
+    Returns:
+        Section identifier in chXXsXX format
+        
+    Examples:
+        >>> resolve_chapter_section("2.7")
+        'ch02s07'
+        >>> resolve_chapter_section("1.2")
+        'ch01s02'
+        >>> resolve_chapter_section("12.3")
+        'ch12s03'
+        >>> resolve_chapter_section("ch02s07")
+        'ch02s07'
+    """
+    section_input = section_input.strip().lower()
+    
+    # Already in chXXsXX format
+    if re.match(r'^ch\d{2}s\d{2}$', section_input):
+        return section_input
+    
+    # Handle x.y format (e.g., "2.7", "02.07", "12.3")
+    match = re.match(r'^(\d{1,2})\.(\d{1,2})$', section_input)
+    if match:
+        chapter = int(match.group(1))
+        section = int(match.group(2))
+        return f"ch{chapter:02d}s{section:02d}"
+    
+    # If it doesn't match any known format, return as-is
+    # This allows for graceful handling of unknown formats
+    return section_input
 
 
 def get_courses_list_path() -> Path:
@@ -180,17 +229,18 @@ def resolve_course(short_name: str, courses_file: Optional[Path] = None) -> str:
                 numeric_match = re.search(r'\d{3,}', base_name)
                 if numeric_match:
                     extracted_number = numeric_match.group()
-                    # Try resolving with the extracted number
-                    try:
-                        # Recursively resolve using the numeric part
-                        numeric_input = f"{extracted_number}-{version_part}"
-                        return resolve_course(numeric_input, courses_file)
-                    except ValueError:
-                        # If that fails, try without version (get latest)
+                    # Only recurse if extracted number is different to prevent infinite recursion
+                    if extracted_number != base_name and extracted_number != base_part:
                         try:
-                            return resolve_course(extracted_number, courses_file)
+                            # Recursively resolve using the numeric part
+                            numeric_input = f"{extracted_number}-{version_part}"
+                            return resolve_course(numeric_input, courses_file)
                         except ValueError:
-                            pass
+                            # If that fails, try without version (get latest)
+                            try:
+                                return resolve_course(extracted_number, courses_file)
+                            except ValueError:
+                                pass
                 
                 raise ValueError(f"Course '{short_name}' not found in courses list.")
         # If split failed or no version part, continue with general resolution
@@ -243,13 +293,29 @@ def resolve_course(short_name: str, courses_file: Optional[Path] = None) -> str:
         numeric_match = re.search(r'\d{3,}', base_name)
         if numeric_match:
             extracted_number = numeric_match.group()
-            # Recursively resolve using the extracted number
-            try:
-                return resolve_course(extracted_number, courses_file)
-            except ValueError:
-                pass
+            # Only recurse if extracted number is different from the input to prevent infinite recursion
+            if extracted_number != base_name and extracted_number != short_name:
+                try:
+                    return resolve_course(extracted_number, courses_file)
+                except ValueError:
+                    pass
         
-        raise ValueError(f"Course '{short_name}' not found in courses list")
+        # Provide helpful suggestions for common course prefixes
+        suggestions = []
+        prefixes = ['rh', 'do', 'ad', 'ai', 'cl', 'cs', 'jb', 'er', 'hol', 'tl', 'ws', 'bfx', 'ceph']
+        for prefix in prefixes:
+            # Check if any course with this prefix and numeric part exists
+            search_num = re.search(r'\d+', short_name)
+            if search_num:
+                pattern = f"{prefix}{search_num.group()}"
+                matches = [c for c in courses if c.startswith(pattern + '-') or c.startswith(pattern + 'ea-')]
+                if matches:
+                    suggestions.extend(matches[:2])  # Add up to 2 suggestions per prefix
+        
+        error_msg = f"Course '{short_name}' not found in courses list."
+        if suggestions:
+            error_msg += f" Did you mean: {', '.join(sorted(set(suggestions))[:5])}?"
+        raise ValueError(error_msg)
     
     # Find the latest version
     # Sort by (major_version, minor_version) descending
@@ -276,6 +342,10 @@ def resolve_course_safe(short_name: str, courses_file: Optional[Path] = None) ->
         return (resolved, None)
     except (ValueError, FileNotFoundError) as e:
         return (short_name, str(e))
+    except RecursionError:
+        return (short_name, f"Course '{short_name}' not found (resolution failed).")
+    except Exception as e:
+        return (short_name, f"Unexpected error resolving course: {e}")
 
 
 def list_course_versions(short_name: str, courses_file: Optional[Path] = None) -> list[str]:

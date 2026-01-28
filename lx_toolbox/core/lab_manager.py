@@ -636,8 +636,24 @@ class LabManager:
             else:
                 # Check if lab is already running (second button is STOP)
                 _, _, _, second_text = self._get_lab_buttons_by_position()
-                if second_text in ("STOP", "STOPPING"):
-                    logging.getLogger(__name__).info(f"Lab already running for {course_id}.")
+                if second_text in ("STOPPING"): 
+                    logging.getLogger(__name__).info(f"Lab is stopping for course {course_id}.")
+                    WebDriverWait(self.driver, 120).until(
+                        lambda d: self._get_lab_buttons_by_position()[3] in ("START"),
+                        message="Lab did not appear to start."
+                    )
+                    start_button, btn_text = self._get_lab_action_button(["Start"], position="second")
+                    start_button.click()
+                    self.logger("Lab start initiated")
+                elif first_text in ("DELETING"):
+                    logging.getLogger(__name__).info(f"Lab is deleting for course {course_id}.")
+                    WebDriverWait(self.driver, 120).until(
+                        lambda d: self._get_lab_buttons_by_position()[1] in ("CREATE"),
+                        message="Lab did not appear to create."
+                    )
+                    create_button, btn_text = self._get_lab_action_button(["Create"], position="first")
+                    create_button.click()
+                    self.logger("Lab create initiated")
                 else:
                     logging.getLogger(__name__).warning(
                         f"Start button not available (second button: {btn_text or second_text})"
@@ -854,6 +870,8 @@ class LabManager:
         Increase auto-stop time up to max_hours (default 2 hours).
         Each click adds 1 hour. Will only add hours if current time is below max_hours.
         """
+        time.sleep(5) # Wait for 5 seconds to ensure the lab is starting
+
         current_hours = self.get_autostop_hours_remaining()
         hours_to_add = max(0, max_hours - current_hours)
         
@@ -937,7 +955,7 @@ class LabManager:
         
         # Wait for workstation button using original XPath
         workstation_button_xpath = "//*[text()='workstation']/../td[3]/button"
-        workstation_button = WebDriverWait(self.driver, 200).until(
+        workstation_button = WebDriverWait(self.driver, 300).until(
             EC.presence_of_element_located((By.XPATH, workstation_button_xpath))
         )
         
@@ -1852,7 +1870,9 @@ class LabManager:
         Args:
             course_id: The course identifier (e.g., "rh124-9.3")
             environment: The target environment
-            start_from: Optional chapter_section to start from (e.g., "ch01s02"). 
+            start_from: Optional chapter_section to start from. Accepts:
+                       - "chXXsYY" format (e.g., "ch01s02", "ch02s07")
+                       - "X.Y" format (e.g., "1.2", "2.7") which is auto-converted
                        If not provided, starts from the first guided exercise.
         """
         self.logger(f"Starting full course QA for {course_id}")
