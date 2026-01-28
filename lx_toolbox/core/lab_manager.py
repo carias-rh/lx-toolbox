@@ -11,6 +11,12 @@ from selenium.common.exceptions import TimeoutException
 from .base_selenium_driver import BaseSeleniumDriver
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger, reset_step_counter
+from ..utils.keyboard_handler import KeyboardHandler, print_status, clear_status_line
+
+
+class QAQuitException(Exception):
+    """Raised when user requests to quit QA execution."""
+    pass
 
 class LabManager:
     # External service verification field IDs (from third-party login pages)
@@ -24,6 +30,11 @@ class LabManager:
         self.config = config
         self.logger = step_logger # Alias for convenience
         self._interface_type = None  # Will be detected on first use
+        
+        # Interactive QA control state
+        self._qa_paused = False
+        self._qa_quit_requested = False
+        self._keyboard_handler = None
 
         _browser_name = browser_name if browser_name else self.config.get("General", "default_selenium_driver", "firefox")
         _is_headless = is_headless if is_headless is not None else self.config.get("General", "debug_mode", False) == False # Assuming debug_mode=True means not headless for lab ops
@@ -1158,6 +1169,7 @@ class LabManager:
         
         self.select_lab_environment_tab("course")
         time.sleep(4)
+        self.toggle_video_player(state=False)
 
         # Click on all the show solution buttons until there are no more
         self.click_on_show_solution_buttons()
@@ -1691,7 +1703,7 @@ class LabManager:
             return True
             
         # Ansible commands
-        if "ansible-playbook" or "ansible-navigator" in command:
+        if "ansible-playbook" in command or "ansible-navigator" in command:
             self._prompt_user_to_continue("if you did review/create the playbook.")
             self.introduce_command_to_console(command, auto_enter=True)
             self._prompt_user_to_continue("if playbook finished")
@@ -1833,6 +1845,10 @@ class LabManager:
         Note: This method assumes the lab environment is already set up (logged in, lab started, 
         workstation console open). Call this after performing those setup steps.
         
+        Interactive controls during execution:
+        - Press 'p' to pause/resume
+        - Press 'q' to quit
+        
         Args:
             course_id: The course identifier (e.g., "rh124-9.3")
             environment: The target environment
@@ -1840,13 +1856,14 @@ class LabManager:
                        If not provided, starts from the first guided exercise.
         """
         self.logger(f"Starting full course QA for {course_id}")
+        print("\n[QA Interactive Controls] Press [P] to pause/resume, [Q] to quit\n")
         
         # Get list of exercises and labs (switches to course tab internally)
         exercises = self.get_guided_exercises_and_labs(course_id, start_from, environment)
         
         if not exercises:
             self.logger("No exercises or labs found for this course.")
-            
+            return
         
         # Filter exercises to start from the specified chapter_section
         if start_from:
@@ -1859,15 +1876,39 @@ class LabManager:
         
         self.logger(f"Found {len(exercises)} exercises/labs to QA")
         
-        # Run QA on each exercise
-        for chapter_section in exercises:
-            try:
-                self._run_qa_on_exercise(course_id, chapter_section, environment)
-            except Exception as e:
-                logging.getLogger(__name__).error(f"Error during QA of {chapter_section}: {e}")
-                self._prompt_user_to_continue(f"after handling error in {chapter_section}.")
+        # Initialize keyboard handler for interactive control
+        self._keyboard_handler = KeyboardHandler()
+        self._qa_paused = False
+        self._qa_quit_requested = False
         
-        self.logger(f"Completed full course QA for {course_id}")
+        try:
+            self._keyboard_handler.start()
+            
+            # Run QA on each exercise
+            for chapter_section in exercises:
+                # Check for quit request between exercises
+                if self._qa_quit_requested:
+                    self.logger("QA quit requested by user.")
+                    break
+                    
+                try:
+                    self._run_qa_on_exercise(course_id, chapter_section, environment)
+                except QAQuitException:
+                    self.logger("QA quit requested by user.")
+                    break
+                except Exception as e:
+                    logging.getLogger(__name__).error(f"Error during QA of {chapter_section}: {e}")
+                    self._prompt_user_to_continue(f"after handling error in {chapter_section}.")
+            
+            if self._qa_quit_requested:
+                self.logger(f"QA stopped early for {course_id} (user quit)")
+            else:
+                self.logger(f"Completed full course QA for {course_id}")
+        finally:
+            # Always restore terminal settings
+            self._keyboard_handler.stop()
+            self._keyboard_handler = None
+            clear_status_line()
 
     def _run_qa_on_exercise(self, course_id: str, chapter_section: str, environment: str):
         """
@@ -1877,6 +1918,9 @@ class LabManager:
             course_id: The course identifier (e.g., "rh124-9.3")
             chapter_section: The chapter and section (e.g., "ch01s02")
             environment: The target environment
+            
+        Raises:
+            QAQuitException: If user requests to quit during execution
         """
         self.logger(f"Starting QA for {course_id} - {chapter_section}")
         
@@ -1891,12 +1935,21 @@ class LabManager:
 
         self._prompt_user_to_continue(f"Press enter to run the lab start script for {chapter_section}.")
 
+        total_commands = len(filtered_commands)
         for i, command in enumerate(filtered_commands):
             if command == '':
                 continue
-                
-            print(f"Introducing: {command}")
-            if i + 1 < len(filtered_commands):
+            
+            command_num = i + 1
+            
+            # Check for quit request before each command
+            if self._qa_quit_requested:
+                raise QAQuitException("User requested quit")
+            
+            # Display status and command
+            print_status(command_num, total_commands, self._qa_paused)
+            print(f"\nIntroducing: {command}")
+            if command_num < total_commands:
                 print('-------------------------------------------------')
             
             # Check if this is a special command that needs specific handling
@@ -1904,13 +1957,59 @@ class LabManager:
                 # Regular command - just execute it
                 self.introduce_command_to_console(command, auto_enter=True)
 
-            # Standard time for command to execute
+            # Interactive delay with keyboard checking
             command_delay = self.config.get("QA", "command_delay_seconds", 3)
             if isinstance(command_delay, str):
                 command_delay = int(command_delay)
-            time.sleep(command_delay)
+            
+            self._interactive_delay(command_delay, command_num, total_commands)
 
+        clear_status_line()
         self.logger(f"Finished QA for {course_id} - {chapter_section}")
+    
+    def _interactive_delay(self, delay_seconds: int, command_num: int, total_commands: int):
+        """
+        Wait for the specified delay while checking for keyboard input.
+        
+        Args:
+            delay_seconds: Total delay time in seconds
+            command_num: Current command number (for status display)
+            total_commands: Total number of commands (for status display)
+            
+        Raises:
+            QAQuitException: If user requests to quit
+        """
+        if self._keyboard_handler is None:
+            # Fallback to simple sleep if no keyboard handler
+            time.sleep(delay_seconds)
+            return
+        
+        elapsed = 0.0
+        check_interval = 0.1  # Check every 100ms
+        
+        while elapsed < delay_seconds or self._qa_paused:
+            # Check for keypress
+            key = self._keyboard_handler.check_keypress(timeout=check_interval)
+            
+            if key == 'p':
+                self._qa_paused = not self._qa_paused
+                if self._qa_paused:
+                    clear_status_line()
+                    print_status(command_num, total_commands, is_paused=True)
+                    print("\n")  # Move to new line after status
+                else:
+                    clear_status_line()
+                    print_status(command_num, total_commands, is_paused=False)
+                    print("")  # New line
+            elif key == 'q':
+                self._qa_quit_requested = True
+                clear_status_line()
+                print("\n[QA] Quit requested - stopping after current command...")
+                raise QAQuitException("User requested quit")
+            
+            # Only increment elapsed time if not paused
+            if not self._qa_paused:
+                elapsed += check_interval
 
 
     def close_browser(self):

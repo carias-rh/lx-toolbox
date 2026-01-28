@@ -3,14 +3,13 @@
 Automation tools for various work tasks including lab operations, ServiceNow, and Jira.
 
 ## Features
-
-- **Lab Operations**: Create, start, stop, delete, and manage labs
+- **ServiceNow to Jira AI Processor**: LLM-powered ticket classification, analysis, and Jira ticket preparation using Ollama
 - **QA Automation**: Run automated QA tests on lab exercises
+- **Lab Operations**: Create, start, stop, delete, and manage labs
 - **User Impersonation**: Switch to different users for testing
 - **Multi-Environment Support**: Works with ROL, Factory, and China environments
 - **ServiceNow Auto-Assignment**: Automated ticket assignment with team-specific configurations
 - **LMS Integration**: User name lookups via LMS API
-- **SNOW AI Processor**: LLM-powered ticket classification, analysis, and Jira ticket preparation using Ollama
 - **Link Checker**: Validate external links in course content with PDF/JSON reports and Jira integration
 
 ## Prerequisites
@@ -28,12 +27,7 @@ Automation tools for various work tasks including lab operations, ServiceNow, an
    cd lx-toolbox
    ```
 
-2. Install Python dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Set up your credentials:
+2. Set up your credentials:
    ```bash
    # Copy the template
    cp env.template .env
@@ -42,64 +36,102 @@ Automation tools for various work tasks including lab operations, ServiceNow, an
    vim .env  # or use your preferred editor
    ```
 
-4. Configure settings:
+3. Configure settings:
    ```bash
    cp config/config.ini.example config/config.ini
+   
    # Edit config/config.ini as needed
+   vim config/config.ini
    ```
 
-5. Install selenium, drivers, and deploy lx-toolbox:
+4. Run the installer (creates virtualenv, installs dependencies, drivers, and deploys lx-toolbox):
    ```bash
+   # Basic installation (skips Ollama - recommended for faster setup)
+   ansible-playbook playbooks/setup.yml -K --skip-tags ai-capabilities
+   
+   # Full installation including Ollama (for SNOW AI features)
    ansible-playbook playbooks/setup.yml -K
    ```
 
 ## Usage
 
-### Lab Commands
+After running the Ansible playbook, wrapper commands are available system-wide.
+
+### Quick Start (Wrapper Commands)
+
+These simplified commands are installed to `/usr/bin/` and available from anywhere:
 
 ```bash
-# Make the script executable (first time only)
-chmod +x scripts/lx-tool
-
 # Start a lab
-./scripts/lx-tool lab start rh124-9.3
+start rh124-9.3
+start do180 factory          # Use Factory environment
 
 # Stop a lab
-./scripts/lx-tool lab stop rh124-9.3
-
-# Create a new lab
-./scripts/lx-tool lab create rh124-9.3
+stop rh124-9.3
+stop do180 factory
 
 # Delete a lab
-./scripts/lx-tool lab delete rh124-9.3
+delete rh124-9.3
+delete do180 factory
 
 # Recreate a lab (delete + create)
-./scripts/lx-tool lab recreate rh124-9.3
+recreate rh124-9.3
+recreate do180 factory
 
 # Impersonate a user
-./scripts/lx-tool lab impersonate rh124-9.3 student01
+impersonate rh124-9.3 jsmith
+impersonate do180-4.14 jsmith
 
 # Run QA automation
-./scripts/lx-tool lab qa rh124-9.3 ch01s02 -f commands.txt
+qa 124 2.3                        # Run QA on chapter 2.3
+qa do180 ch02s05 factory                # Run on Factory
+
+# Check links in course content
+check-links --course do280-4.18
+check-links --course rh124 --all-versions
+check-links --course do180 --create-jira
+check-links                         # Check all courses
+
+# Process SNOW tickets with AI
+snow-ai                             # Process tickets from user queue
+snow-ai --ticket INC12345678        # Process specific ticket
+snow-ai -t INC111 -t INC222         # Process multiple tickets
+```
+
+All wrapper commands support `-h` or `--help` for usage information.
+
+### Full lx-tool Commands
+
+For advanced usage or when wrapper commands aren't available, use `lx-tool` directly:
+
+```bash
+# Lab operations
+lx-tool lab start rh124-9.3 --env rol --browser firefox
+lx-tool lab stop rh124-9.3
+lx-tool lab create rh124-9.3
+lx-tool lab delete rh124-9.3
+lx-tool lab recreate rh124-9.3
+lx-tool lab impersonate rh124-9.3 student01
+lx-tool lab qa rh124-9.3 ch01s02 -f commands.txt
 ```
 
 ### ServiceNow Commands
 
 ```bash
 # Test ServiceNow and LMS connections
-./scripts/lx-tool snow test
+lx-tool snow test
 
 # List unassigned tickets for a team
-./scripts/lx-tool snow list-tickets t1
-./scripts/lx-tool snow list-tickets t2 --limit 20
+lx-tool snow list-tickets t1
+lx-tool snow list-tickets t2 --limit 20
 
 # Run single auto-assignment cycle
-./scripts/lx-tool snow assign t1
-./scripts/lx-tool snow assign t2 --assignee "John Doe"
+lx-tool snow assign t1
+lx-tool snow assign t2 --assignee "John Doe"
 
 # Run continuous auto-assignment
-./scripts/lx-tool snow assign t1 --continuous
-./scripts/lx-tool snow assign t2 --continuous --interval 120
+lx-tool snow assign t1 --continuous
+lx-tool snow assign t2 --continuous --interval 120
 ```
 
 ### Link Checker Commands
@@ -110,13 +142,13 @@ The Link Checker validates all external links in course content (References sect
 
 ```bash
 # Check links in a specific course
-./scripts/lx-tool lab check-links --course do280-4.18
+check-links --course do280-4.18
 
 # Check all available versions of a course
-./scripts/lx-tool lab check-links --course rh124-9.3 --all-versions
+check-links --course rh124-9.3 --all-versions
 
 # Check all courses in the catalog
-./scripts/lx-tool lab check-links
+check-links
 ```
 
 **Key Features:**
@@ -153,22 +185,22 @@ The Link Checker validates all external links in course content (References sect
 
 ```bash
 # Quick check without screenshots (faster)
-./scripts/lx-tool lab check-links --course do280-4.18 --no-screenshots
+check-links --course do280-4.18 --no-screenshots
 
 # Check all versions with custom output directory
-./scripts/lx-tool lab check-links --course rh124-9.3 --all-versions --output-dir ./reports
+check-links --course rh124-9.3 --all-versions --output-dir ./reports
 
 # Check all courses and create Jira tickets for broken links
-./scripts/lx-tool lab check-links --create-jira
+check-links --create-jira
 
 # Custom screenshots directory
-./scripts/lx-tool lab check-links --course do280-4.18 --screenshots-dir ./my_screenshots
+check-links --course do280-4.18 --screenshots-dir ./my_screenshots
 
 # Skip retry for faster execution
-./scripts/lx-tool lab check-links --course do280-4.18 --no-retry
+check-links --course do280-4.18 --no-retry
 
 # Headless mode for automated runs
-./scripts/lx-tool lab check-links --course do280-4.18 --headless
+check-links --course do280-4.18 --headless
 ```
 
 **How It Works:**
@@ -220,23 +252,23 @@ The following section types are automatically excluded from checking:
 - `--headless` : Run in headless mode
 - `--no-headless` : Run with browser visible
 
-### Examples
+### Advanced Examples
 
 ```bash
-# Start lab in Factory with Chrome
-./scripts/lx-tool lab start rh124-9.3 --env factory --browser chrome
+# Start lab in Factory with Chrome (using lx-tool for browser option)
+lx-tool lab start rh124-9.3 --env factory --browser chrome
 
 # Delete lab in headless mode
-./scripts/lx-tool lab delete rh124-9.3 --headless
+lx-tool lab delete rh124-9.3 --headless
 
 # Run QA with custom commands file
-./scripts/lx-tool lab qa rh124-9.3 ch01s02 -f my-commands.txt
+qa rh124-9.3 2.3 --commands-file my-commands.txt
 
 # Check your configuration
-./scripts/lx-tool config
+lx-tool config
 
 # Auto-assign T1 tickets continuously with 2-minute intervals
-./scripts/lx-tool snow assign t1 --continuous --interval 120
+lx-tool snow assign t1 --continuous --interval 120
 ```
 
 ## Configuration
@@ -260,8 +292,8 @@ The automation assists with login by autofilling credentials when configured:
 
 2. Test your configuration:
    ```bash
-   ./scripts/lx-tool config
-   ./scripts/lx-tool snow test
+   lx-tool config
+   lx-tool snow test
    ```
 
 ## ServiceNow Auto-Assignment
@@ -303,7 +335,7 @@ The SNOW AI Processor uses a local LLM (Ollama) to analyze and classify ServiceN
 ### Prerequisites
 
 - **Ollama**: Install from [ollama.ai](https://ollama.ai)
-- **LLM Model**: Download a model (e.g., `ollama pull gemma3:12b`)
+- **LLM Model**: Download a model (e.g., `ollama pull ministral-3:8b`)
 
 ### Configuration
 
@@ -314,7 +346,7 @@ Add the following to your `.env` file:
 LLM_PROVIDER=ollama
 
 # Ollama Configuration
-OLLAMA_MODEL=gemma3:12b
+OLLAMA_MODEL=ministral-3:8b
 OLLAMA_COMMAND=/usr/local/bin/ollama
 
 # Your signature for responses
@@ -324,17 +356,17 @@ SIGNATURE_NAME=Your Name
 ### CLI Commands
 
 ```bash
-# Process all tickets in your feedback queue
-./scripts/lx-tool snowai
+# Process all tickets in your feedback queue (wrapper command)
+snow-ai
 
 # Process specific tickets
-./scripts/lx-tool snowai -t RITM0123456 -t RITM0123457
+snow-ai -t RITM0123456 -t RITM0123457
 
 # Use Chrome instead of Firefox
-./scripts/lx-tool snowai --browser chrome
+snow-ai --browser chrome
 
 # Run in a specific environment
-./scripts/lx-tool snowai --env factory
+snow-ai --env factory
 ```
 
 Opens a separate browser window per ticket with organized tabs for efficient processing.
@@ -431,7 +463,6 @@ lx-toolbox/
 │   └── lx-tool
 ├── tests/               # Test files (TODO)
 ├── playbooks/           # Legacy Ansible files (to be removed)
-├── legacy/              # Legacy files
 ├── openshift/           # OpenShift deployment files
 ├── .env                 # Environment variables (credentials)
 ├── env.template         # Template for .env file
@@ -445,16 +476,16 @@ If you encounter "Username or password not configured":
 1. Ensure `.env` file exists in the project root
 2. Check variable names are correct (case-sensitive)
 3. Verify no spaces around `=` in `.env` file
-4. Run `./scripts/lx-tool config` to check configuration
+4. Run `lx-tool config` to check configuration
 
 For ServiceNow issues:
-1. Test connections with `./scripts/lx-tool snow test`
+1. Test connections with `lx-tool snow test`
 2. Verify ServiceNow credentials and permissions
 3. Check that assignment group IDs are correct
 
 For SNOW AI Processor issues:
 1. Verify Ollama is running: `ollama list`
-2. Test the model directly: `ollama run gemma3:12b "Hello"`
+2. Test the model directly: `ollama run ministral-3:8b "Hello"`
 3. Check `OLLAMA_COMMAND` path in `.env` is correct
 4. Ensure the model specified in `OLLAMA_MODEL` is downloaded
 5. For slow responses, consider a smaller model (e.g., `qwen3:8b`)
