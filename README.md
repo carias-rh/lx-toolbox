@@ -9,7 +9,6 @@ Automation tools for various work tasks including lab operations, ServiceNow, an
 - **User Impersonation**: Switch to different users for testing
 - **Multi-Environment Support**: Works with ROL, Factory, and China environments
 - **ServiceNow Auto-Assignment**: Automated ticket assignment with team-specific configurations
-- **LMS Integration**: User name lookups via LMS API
 - **Link Checker**: Validate external links in course content with PDF/JSON reports and Jira integration
 
 ## Prerequisites
@@ -55,7 +54,7 @@ Automation tools for various work tasks including lab operations, ServiceNow, an
 
 ## Usage
 
-After running the Ansible playbook, wrapper commands are available system-wide.
+After running the Ansible setup.yml playbook, wrapper commands are available system-wide.
 
 ### Quick Start (Wrapper Commands)
 
@@ -84,7 +83,7 @@ impersonate do180-4.14 jsmith
 
 # Run QA automation
 qa 124 2.3                        # Run QA on chapter 2.3
-qa do180 ch02s05 factory                # Run on Factory
+qa do180 ch02s05 factory          # Run on Factory
 
 # Check links in course content
 check-links --course do280-4.18
@@ -112,31 +111,125 @@ lx-tool lab create rh124-9.3
 lx-tool lab delete rh124-9.3
 lx-tool lab recreate rh124-9.3
 lx-tool lab impersonate rh124-9.3 student01
-lx-tool lab qa rh124-9.3 ch01s02 -f commands.txt
 ```
+## ServiceNow to Jira AI Processor
 
-### ServiceNow Commands
+The ServiceNow to Jira AI Processor uses a local LLM (Ollama) to analyze and classify ServiceNow Feedback tickets, automatically preparing Jira tickets for content or environment issues.
+
+### Prerequisites
+
+- **Ollama**: Install from [ollama.ai](https://ollama.ai)
+- **LLM Model**: Download a model (e.g., `ollama pull ministral-3:8b`)
+
+### Configuration
+
+Add the following to your `.env` file:
 
 ```bash
-# Test ServiceNow and LMS connections
-lx-tool snow test
+# LLM Provider (default: ollama)
+LLM_PROVIDER=ollama
 
-# List unassigned tickets for a team
-lx-tool snow list-tickets t1
-lx-tool snow list-tickets t2 --limit 20
+# Ollama Configuration
+OLLAMA_MODEL=ministral-3:8b
+OLLAMA_COMMAND=/usr/local/bin/ollama
 
-# Run single auto-assignment cycle
-lx-tool snow assign t1
-lx-tool snow assign t2 --assignee "John Doe"
+# Your signature for responses
+SIGNATURE_NAME=Your Name
+```
+Configure ServiceNow url path in the `config/config.ini` file:
+```bash
+SNOW_BASE_URL = <ask to carias@redhat.com>
+SNOW_FEEDBACK_QUEUE_PATH = <ask to carias@redhat.com>
+```
+### CLI Commands
 
-# Run continuous auto-assignment
-lx-tool snow assign t1 --continuous
-lx-tool snow assign t2 --continuous --interval 120
+```bash
+# Process all tickets in your feedback queue (wrapper command)
+snow-ai
+
+# Process specific tickets
+snow-ai -t RITM0123456 -t RITM0123457
+
+# Use Chrome instead of Firefox
+snow-ai --browser chrome
+
+# Run in a specific environment
+snow-ai --env factory
 ```
 
-### Link Checker Commands
+Opens a separate browser window per ticket with organized tabs for efficient processing.
 
-The Link Checker validates all external links in course content (References sections) and generates comprehensive reports.
+### How It Works
+
+The SNOW AI Processor follows this workflow for each ticket:
+
+1. **Ticket Retrieval**: Fetches ticket details from ServiceNow (description, course, chapter, section, URL)
+
+2. **Classification**: Uses the LLM to classify the ticket as:
+   - **Content Issue**: Typos, incorrect instructions, missing steps, outdated content
+   - **Environment Issue**: Lab script failures, stuck labs, platform limitations
+   - **Manual Review**: UI suggestions, complaints, complex issues
+
+3. **Language Detection & Translation**: Detects non-English feedback and translates it
+
+4. **Guide Text Extraction**: Navigates to the course section in ROL and extracts the relevant content
+
+5. **Analysis**: Uses the LLM to:
+   - Compare student feedback with the guide text
+   - Determine if the issue is valid
+   - Suggest corrections
+   - Generate a Jira-ready title
+
+6. **Response Generation**: Crafts a professional response to the student
+
+7. **Jira Preparation**: Opens a prefilled Jira ticket with:
+   - Course and section information
+   - Translated issue description
+   - Suggested workaround
+   - Component and version pre-selected
+
+### Browser Window Layout
+
+Each ticket gets its own browser window with 4 tabs:
+
+| Tab | Content |
+|-----|---------|
+| **Tab 1** | ServiceNow ticket (zoomed for readability) |
+| **Tab 2** | ROL course section (guide content) |
+| **Tab 3** | Jira search (find similar existing tickets) |
+| **Tab 4** | Jira create (prefilled new ticket form) |
+
+This layout enables quick context switching and manual review before submitting tickets.
+
+### Supported Issue Types
+
+**Content Issues** (automatically creates Jira):
+- Typos or grammatical errors
+- Incorrect or outdated instructions
+- Missing steps or commands
+- Mismatches between video and guide
+- Incomplete exercise information
+
+**Environment Issues** (suggests debugging steps):
+- Lab start/finish script failures
+- Labs stuck in starting/stopping state
+- Platform-specific limitations (e.g., vim visual mode)
+- OpenShift lab first-boot delays
+
+**Video Issues** (creates Jira if videos exist, otherwise informs student):
+- Video not available or cannot be found
+- Video doesn't match section/chapter content
+- Video subtitles incorrect, missing, or translation issues
+- Video technical problems (bad cuts, audio sync)
+- Video player not working
+- Exercise/guide mismatch with instructor video
+
+
+
+
+## Link Checker Commands
+
+The Link Checker functionality validates all external links in course content (References sections) and generates comprehensive reports.
 
 **Basic Usage:**
 
@@ -158,6 +251,7 @@ check-links
 - **Comprehensive reports**: Generates both PDF and JSON reports
 - **Retry mechanism**: Automatically retries failed links before final report
 - **Multi-version support**: Can check all versions of a course
+- **Anti-crawler workaround**: Will overcome website limitations for bots
 - **Jira integration**: Optionally creates prefilled Jira tickets for broken links
 - **Fast validation**: Uses containerized `linkchecker` tool for quick checks when screenshots aren't needed
 - **Authenticated access**: Automatically logs into access.redhat.com to check knowledge base articles that require authentication (avoiding 403 Forbidden errors)
@@ -252,24 +346,6 @@ The following section types are automatically excluded from checking:
 - `--headless` : Run in headless mode
 - `--no-headless` : Run with browser visible
 
-### Advanced Examples
-
-```bash
-# Start lab in Factory with Chrome (using lx-tool for browser option)
-lx-tool lab start rh124-9.3 --env factory --browser chrome
-
-# Delete lab in headless mode
-lx-tool lab delete rh124-9.3 --headless
-
-# Run QA with custom commands file
-qa rh124-9.3 2.3 --commands-file my-commands.txt
-
-# Check your configuration
-lx-tool config
-
-# Auto-assign T1 tickets continuously with 2-minute intervals
-lx-tool snow assign t1 --continuous --interval 120
-```
 
 ## Configuration
 
@@ -285,7 +361,7 @@ The automation assists with login by autofilling credentials when configured:
 1. Create a `.env` file with your credentials:
    ```
    RH_USERNAME=your_username
-   SNOW_INSTANCE_URL=https://redhat.service-now.com
+   SNOW_INSTANCE_URL=
    SNOW_API_USER=your_snow_user
    SNOW_API_PASSWORD=your_snow_password
    ```
@@ -295,6 +371,8 @@ The automation assists with login by autofilling credentials when configured:
    lx-tool config
    lx-tool snow test
    ```
+
+
 
 ## ServiceNow Auto-Assignment
 
@@ -328,160 +406,59 @@ teams["new_team"] = TeamConfig(
 )
 ```
 
-## SNOW AI Processor
-
-The SNOW AI Processor uses a local LLM (Ollama) to analyze and classify ServiceNow feedback tickets, automatically preparing Jira tickets for content or environment issues.
-
-### Prerequisites
-
-- **Ollama**: Install from [ollama.ai](https://ollama.ai)
-- **LLM Model**: Download a model (e.g., `ollama pull ministral-3:8b`)
-
-### Configuration
-
-Add the following to your `.env` file:
+### ServiceNow Auto-Assignment Commands
 
 ```bash
-# LLM Provider (default: ollama)
-LLM_PROVIDER=ollama
+# Test ServiceNow and LMS connections
+lx-tool snow test
 
-# Ollama Configuration
-OLLAMA_MODEL=ministral-3:8b
-OLLAMA_COMMAND=/usr/local/bin/ollama
+# List unassigned tickets for a team
+lx-tool snow list-tickets t1
+lx-tool snow list-tickets t2 --limit 20
 
-# Your signature for responses
-SIGNATURE_NAME=Your Name
+# Run single auto-assignment cycle
+lx-tool snow assign t1
+lx-tool snow assign t2 --assignee "John Doe"
+
+# Run continuous auto-assignment
+lx-tool snow assign t1 --continuous
+lx-tool snow assign t2 --continuous --interval 120
 ```
-
-### CLI Commands
-
-```bash
-# Process all tickets in your feedback queue (wrapper command)
-snow-ai
-
-# Process specific tickets
-snow-ai -t RITM0123456 -t RITM0123457
-
-# Use Chrome instead of Firefox
-snow-ai --browser chrome
-
-# Run in a specific environment
-snow-ai --env factory
-```
-
-Opens a separate browser window per ticket with organized tabs for efficient processing.
-
-### How It Works
-
-The SNOW AI Processor follows this workflow for each ticket:
-
-1. **Ticket Retrieval**: Fetches ticket details from ServiceNow (description, course, chapter, section, URL)
-
-2. **Classification**: Uses the LLM to classify the ticket as:
-   - **Content Issue**: Typos, incorrect instructions, missing steps, outdated content
-   - **Environment Issue**: Lab script failures, stuck labs, platform limitations
-   - **Manual Review**: UI suggestions, complaints, complex issues
-
-3. **Language Detection & Translation**: Detects non-English feedback and translates it
-
-4. **Guide Text Extraction**: Navigates to the course section in ROL and extracts the relevant content
-
-5. **Analysis**: Uses the LLM to:
-   - Compare student feedback with the guide text
-   - Determine if the issue is valid
-   - Suggest corrections
-   - Generate a Jira-ready title
-
-6. **Response Generation**: Crafts a professional response to the student
-
-7. **Jira Preparation**: Opens a prefilled Jira ticket with:
-   - Course and section information
-   - Translated issue description
-   - Suggested workaround
-   - Component and version pre-selected
-
-### Browser Window Layout
-
-Each ticket gets its own browser window with 4 tabs:
-
-| Tab | Content |
-|-----|---------|
-| **Tab 1** | ServiceNow ticket (zoomed for readability) |
-| **Tab 2** | ROL course section (guide content) |
-| **Tab 3** | Jira search (find similar existing tickets) |
-| **Tab 4** | Jira create (prefilled new ticket form) |
-
-This layout enables quick context switching and manual review before submitting tickets.
-
-### Supported Issue Types
-
-**Content Issues** (automatically creates Jira):
-- Typos or grammatical errors
-- Incorrect or outdated instructions
-- Missing steps or commands
-- Mismatches between video and guide
-- Incomplete exercise information
-
-**Environment Issues** (suggests debugging steps):
-- Lab start/finish script failures
-- Labs stuck in starting/stopping state
-- Platform-specific limitations (e.g., vim visual mode)
-- OpenShift lab first-boot delays
-
-**Manual Review Required** (flags for human attention):
-- UI improvement suggestions
-- Platform complaints or praises
-- Content not appearing issues
-- Complex multi-faceted problems
-
-### Example Output
-
-```
-RITM0123456: Student reports typo in chapter 3 | content_issue=True env_issue=False
-✓ Opened windows/tabs. You can now work each ticket in its own window.
-```
-
 ## Project Structure
 
 ```
 lx-toolbox/
 ├── lx_toolbox/          # Main Python package
 │   ├── core/            # Core business logic
+│   │   ├── base_selenium_driver.py
+│   │   ├── jira_handler.py
 │   │   ├── lab_manager.py
-│   │   ├── link_checker.py
+│   │   ├── servicenow_autoassign.py
 │   │   ├── servicenow_handler.py
-│   │   ├── snow_ai_processor.py
-│   │   └── jira_handler.py (TODO)
+│   │   └── snow_ai_processor.py
 │   ├── utils/           # Utility modules
 │   │   ├── config_manager.py
-│   │   └── helpers.py
+│   │   ├── course_resolver.py
+│   │   ├── helpers.py
+│   │   └── keyboard_handler.py
 │   └── main.py          # CLI entry point
 ├── config/              # Configuration files
-│   ├── config.ini
-│   └── config.ini.example
+│   └── config.ini
 ├── scripts/             # Wrapper scripts
 │   └── lx-tool
-├── tests/               # Test files (TODO)
 ├── playbooks/           # Legacy Ansible files (to be removed)
-├── openshift/           # OpenShift deployment files
 ├── .env                 # Environment variables (credentials)
-├── env.template         # Template for .env file
-├── requirements.txt     # Python dependencies
-└── README.md           # This file
+└──  requirements.txt     # Python dependencies
 ```
 
 ## Troubleshooting
 
-If you encounter "Username or password not configured":
+If you encounter "Username not configured":
 1. Ensure `.env` file exists in the project root
 2. Check variable names are correct (case-sensitive)
 3. Verify no spaces around `=` in `.env` file
 4. Run `lx-tool config` to check configuration
 
-For ServiceNow issues:
-1. Test connections with `lx-tool snow test`
-2. Verify ServiceNow credentials and permissions
-3. Check that assignment group IDs are correct
 
 For SNOW AI Processor issues:
 1. Verify Ollama is running: `ollama list`
@@ -489,6 +466,11 @@ For SNOW AI Processor issues:
 3. Check `OLLAMA_COMMAND` path in `.env` is correct
 4. Ensure the model specified in `OLLAMA_MODEL` is downloaded
 5. For slow responses, consider a smaller model (e.g., `qwen3:8b`)
+
+For ServiceNow issues:
+1. Test connections with `lx-tool snow test`
+2. Verify ServiceNow credentials and permissions
+3. Check that assignment group IDs are correct
 
 ## Contributing
 
