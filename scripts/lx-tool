@@ -1,17 +1,31 @@
-#!/usr/bin/env python3
-"""
-LX Tool - Simple wrapper for lx_toolbox CLI
-"""
+#!/bin/bash
+# LX Tool - Shell wrapper for lx_toolbox CLI
+# Automatically uses the virtualenv Python without requiring activation
 
-import sys
-import os
+set -e
 
-# Add the parent directory to Python path so lx_toolbox can be imported as a package
-script_dir = os.path.dirname(os.path.realpath(__file__))
-parent_dir = os.path.dirname(script_dir)
-sys.path.insert(0, parent_dir)
+# Resolve the actual script location (follow symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    # If SOURCE is relative, resolve it relative to the symlink's directory
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+LX_TOOLBOX_DIR="$(dirname "$SCRIPT_DIR")"
 
-from lx_toolbox.main import main
+# Find the virtualenv Python interpreter (check both .venv and venv)
+if [[ -x "${LX_TOOLBOX_DIR}/.venv/bin/python3" ]]; then
+    VENV_PYTHON="${LX_TOOLBOX_DIR}/.venv/bin/python3"
+elif [[ -x "${LX_TOOLBOX_DIR}/venv/bin/python3" ]]; then
+    VENV_PYTHON="${LX_TOOLBOX_DIR}/venv/bin/python3"
+else
+    echo "Error: Virtual environment not found at ${LX_TOOLBOX_DIR}/.venv or ${LX_TOOLBOX_DIR}/venv" >&2
+    echo "Please run the setup playbook first: ansible-playbook playbooks/setup.yml -K" >&2
+    exit 1
+fi
 
-if __name__ == '__main__':
-    main() 
+# Add lx_toolbox to Python path and run as module
+export PYTHONPATH="${LX_TOOLBOX_DIR}:${PYTHONPATH}"
+exec "$VENV_PYTHON" -m lx_toolbox.main "$@"

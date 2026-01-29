@@ -28,7 +28,7 @@
     - name: Install Python dependencies in virtualenv
       ansible.builtin.pip:
         requirements: "{{ lx_toolbox_dir }}/requirements.txt"
-        virtualenv: "{{ lx_toolbox_dir }}/venv"
+        virtualenv: "{{ lx_toolbox_dir }}/.venv"
         virtualenv_command: python3 -m venv
       tags: install
 
