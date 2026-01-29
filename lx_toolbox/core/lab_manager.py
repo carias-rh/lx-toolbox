@@ -635,8 +635,8 @@ class LabManager:
                 self.logger("Lab start initiated")
             else:
                 # Check if lab is already running (second button is STOP)
-                _, _, _, second_text = self._get_lab_buttons_by_position()
-                if second_text in ("STOPPING"): 
+                _, first_text, _, second_text = self._get_lab_buttons_by_position()
+                if second_text == "STOPPING": 
                     logging.getLogger(__name__).info(f"Lab is stopping for course {course_id}.")
                     WebDriverWait(self.driver, 120).until(
                         lambda d: self._get_lab_buttons_by_position()[3] in ("START"),
@@ -645,7 +645,7 @@ class LabManager:
                     start_button, btn_text = self._get_lab_action_button(["Start"], position="second")
                     start_button.click()
                     self.logger("Lab start initiated")
-                elif first_text in ("DELETING"):
+                elif first_text == "DELETING":
                     logging.getLogger(__name__).info(f"Lab is deleting for course {course_id}.")
                     WebDriverWait(self.driver, 120).until(
                         lambda d: self._get_lab_buttons_by_position()[1] in ("CREATE"),
@@ -953,15 +953,20 @@ class LabManager:
         self.driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(0.5)
         
-        # Wait for workstation button using original XPath
-        workstation_button_xpath = "//*[text()='workstation']/../td[3]/button"
-        workstation_button = WebDriverWait(self.driver, 300).until(
-            EC.presence_of_element_located((By.XPATH, workstation_button_xpath))
-        )
+        # First wait for the workstation "Open Console" button to be available
+        # This indicates the workstation is fully started and ready
+        self.logger("Waiting for workstation 'Open Console' button to be available...")
+        workstation_open_console_xpath = "//*[text()='workstation']/../td[3]/button[text()='Open Console']"
+        try:
+            workstation_button = WebDriverWait(self.driver, 300).until(
+                EC.element_to_be_clickable((By.XPATH, workstation_open_console_xpath))
+            )
+        except TimeoutException:
+            raise TimeoutException(f"Timed out waiting for workstation 'Open Console' button for {course_id}")
         
         # Scroll the button into view and use JavaScript click to avoid interception
         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", workstation_button)
-        time.sleep(0.3)
+        time.sleep(0.5)
         self.driver.execute_script("arguments[0].click();", workstation_button)
         
         # Wait for new window/tab and switch to it
