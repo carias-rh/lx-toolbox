@@ -1,6 +1,6 @@
 # LX Toolbox
 
-Automation tools for various work tasks including lab operations, ServiceNow, and Jira.
+Automation tools for various work tasks including lab operations, ServiceNow, and Jira. 
 
 ## Features
 - **ServiceNow to Jira AI Processor**: LLM-powered ticket classification, analysis, and Jira ticket preparation using Ollama
@@ -19,6 +19,7 @@ Automation tools for various work tasks including lab operations, ServiceNow, an
 - Podman or Docker (for Link Checker - optional but recommended for faster link validation)
 
 ## Installation
+The scripts are intended to be installed on your local machine, not lab's workstation. Only tested for Fedora 42.
 
 1. Clone the repository:
    ```bash
