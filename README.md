@@ -22,7 +22,7 @@ Automation tools for various work tasks including lab operations, ServiceNow, an
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/carias-rh/lx-toolbox.git
    cd lx-toolbox
    ```
 
