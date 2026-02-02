@@ -19,7 +19,7 @@ else
 fi
 
 show_help() {
-    echo "Usage: qa <course> <chapter.section> [environment] [--commands-file FILE]"
+    echo "Usage: qa <course> <chapter.section> [environment] [options]"
     echo ""
     echo "Run QA automation for a specific course chapter/section."
     echo ""
@@ -29,12 +29,13 @@ show_help() {
     echo "  environment      Optional: rol (default), factory, china"
     echo ""
     echo "Options:"
-    echo "  --commands-file FILE  File containing commands to execute"
+    echo "  --tune                  Tune the workstation with custom tools/aliases"
     echo ""
     echo "Examples:"
     echo "  qa 199 2.3              # Run QA on rh199 chapter 2.3"
     echo "  qa do180 4.1            # Run QA on do180 chapter 4.1"
     echo "  qa do180 4.1 factory    # Run QA on Factory"
+    echo "  qa 199 2.3 --tune       # Run QA with tuned workstation"
     echo "  qa 199 2.3 --commands-file cmds.txt"
 }
 
@@ -54,6 +55,10 @@ EXTRA_ARGS=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --tune)
+            EXTRA_ARGS="$EXTRA_ARGS --tune"
+            shift
+            ;;
         --commands-file)
             EXTRA_ARGS="$EXTRA_ARGS --commands-file $2"
             shift 2
