@@ -343,9 +343,9 @@ def versions(ctx, course_name):
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in no-headless mode')
-@click.option('--setup-style', '-s', default=None, help='Environment setup style (e.g., rgdacosta)')
+@click.option('--tune', is_flag=True, default=False, help='Tune the workstation with Ricardo DaCosta\'s tools')
 @click.pass_context
-def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style):
+def qa(ctx, course_id, chapter_section, env, browser, headless, tune):
     """Run QA automation for all Guided Exercises and Labs in a course.
     
     COURSE_ID can be a short name (e.g., '199', 'do180') or full ID.
@@ -388,7 +388,7 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, setup_style):
         lab_mgr.increase_lifespan(course_id=course_id)
         
         # Open workstation console
-        lab_mgr.open_workstation_console(course_id=course_id, setup_environment_style=setup_style)
+        lab_mgr.open_workstation_console(course_id=course_id, tune_workstation=tune)
         
         # Run QA on exercises
         lab_mgr.run_full_course_qa(

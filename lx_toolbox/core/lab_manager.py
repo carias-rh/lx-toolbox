@@ -261,6 +261,7 @@ class LabManager:
         self.driver.execute_script("document.body.style.zoom = '0.70'")
         self.driver.execute_script("window.scrollTo(0, 0);")
         self.logger("Waiting for site to be ready...")
+        self.dismiss_active_alerts()
         
         # Define expected elements per environment
         ready_indicators = {
@@ -415,6 +416,9 @@ class LabManager:
         Selects a tab like 'index', 'course', or 'lab'.
         Uses detected interface type to select the appropriate method.
         """
+        # Dismiss any active alerts on the page
+        self.dismiss_active_alerts()
+
         # Map tab names to both old and new interface selectors
         tab_selectors = {
             "index": {"old": "1", "new": "Course"},
@@ -655,7 +659,7 @@ class LabManager:
                     create_button.click()
                     self.logger("Lab create initiated")
                 else:
-                    logging.getLogger(__name__).warning(
+                    logging.getLogger(__name__).debug(
                         f"Start button not available (second button: {btn_text or second_text})"
                     )
         except Exception as e:
@@ -830,9 +834,8 @@ class LabManager:
                 adj_button.click()
                 time.sleep(0.1) # Small pause between clicks
         except TimeoutException:
-            logging.getLogger(__name__).error(f"Timeout finding {description} button for {course_id}. Lab might not be ready or button not found.")
-            # self.selenium_driver.driver.save_screenshot(f"{description.lower().replace(' ','_')}_timeout_{course_id}.png")
-            # Pass for now as in original script
+            #logging.getLogger(__name__).error(f"Timeout finding {description} button for {course_id}. Lab might not be ready or button not found.")
+            pass
         except Exception as e:
             pass
 
@@ -934,13 +937,12 @@ class LabManager:
     _course_tab_handle = None
     _console_tab_handle = None
 
-    def open_workstation_console(self, course_id: str, setup_environment_style: str = None):
+    def open_workstation_console(self, course_id: str, tune_workstation: bool = False):
         """
         Opens the workstation console for a course and optionally sets up the environment.
         
         Args:
             course_id: The course identifier
-            setup_environment_style: Optional style for environment setup (e.g., "rgdacosta")
         """
         self.logger(f"Opening workstation console for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
@@ -979,12 +981,26 @@ class LabManager:
                 break
         self.driver.switch_to.window(self._console_tab_handle)
 
-        # Open virtual keyboard in the console
-        try:
-            show_keyboard_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="showKeyboard"]')))
-            show_keyboard_button.click()
-        except TimeoutException:
-            logging.getLogger(__name__).warning("Could not find 'Show Keyboard' button. Console UI might have changed.")
+        # Open virtual keyboard in the console (with retry and verification)
+        max_keyboard_retries = 3
+        
+        for attempt in range(max_keyboard_retries):
+            try:
+                show_keyboard_button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[@id="showKeyboard"]'))
+                )
+                show_keyboard_button.click()
+                time.sleep(2.5)
+                
+                # Verify keyboard is enabled by checking if Esc key is visible
+                self._click_virtual_keyboard_key("Esc")
+                break
+            except TimeoutException:
+                if attempt < max_keyboard_retries - 1:
+                    logging.getLogger(__name__).debug(f"Keyboard not enabled after attempt {attempt + 1}, retrying...")
+                    time.sleep(1)
+                else:
+                    logging.getLogger(__name__).error("Failed to enable virtual keyboard after multiple attempts. Enable manually in the qa console tab.")
 
         # Store the send text button reference for reuse
         try:
@@ -995,10 +1011,8 @@ class LabManager:
             self._send_text_option_button = None
             logging.getLogger(__name__).warning("Could not find 'Send Text' button.")
         
-        if setup_environment_style == "rgdacosta":
-            self._setup_environment_rgdacosta_style()
-        elif setup_environment_style:
-            logging.getLogger(__name__).warning(f"Unknown environment setup style: {setup_environment_style}")
+        if tune_workstation:
+            self._tune_workstation()
 
     def switch_to_course_tab(self):
         """Switch to the course page tab."""
@@ -1031,45 +1045,50 @@ class LabManager:
             timeout: Maximum time to wait for the key to be clickable
         """
         try:
-            key_xpath = f'//div[@id="keyboard"]//div[text()="{key_name}"]'
+            key_xpath = f'//div[@class="guac-keyboard-group"]//div[text()="{key_name}"]'
             key_element = WebDriverWait(self.driver, timeout).until(
                 EC.element_to_be_clickable((By.XPATH, key_xpath))
             )
             key_element.click()
             time.sleep(0.3)
         except TimeoutException:
-            logging.getLogger(__name__).error(f"Could not find virtual keyboard key: {key_name}")
+            logging.getLogger(__name__).debug(f"Could not find virtual keyboard key: {key_name}")
             raise
 
-    def _setup_environment_rgdacosta_style(self):
+    def _login_as_student(self):
         """
-        Sets up the lab environment in 'rgdacosta' style.
-        This involves logging in as student, opening a terminal, and running setup commands.
+        Logs in as student user.
         """
-        self.logger("Setting up lab environment 'rgdacosta' style!")
-        
-        # Wait for the console to fully load
-        time.sleep(60)
-        self.logger("Waiting for console to be ready...")
-        time.sleep(10)
-        
-        # Click enter to select student user
-        self._click_virtual_keyboard_key("Enter")
-        self._click_virtual_keyboard_key("Tab")
-        self._click_virtual_keyboard_key("Enter")
-        
-        # Enter password for student user and press enter
-        self.introduce_command_to_console('student', auto_enter=True)
-        time.sleep(17)
-        
-        # Open a terminal with ALT + F2
         self._click_virtual_keyboard_key("Esc")
-        self._click_virtual_keyboard_key("Alt")
-        self._click_virtual_keyboard_key("F2")
-        self._click_virtual_keyboard_key("Alt")
+        self._click_virtual_keyboard_key("Esc")
+        self._click_virtual_keyboard_key("Enter")
+        time.sleep(2.5)
+
+        self.introduce_command_to_console('student', auto_enter=True)
+
+    def _open_terminal(self):
+        """
+        Opens a terminal.
+        """
+        self._click_virtual_keyboard_key("Esc")
+        self._click_virtual_keyboard_key("Super")
+        self._click_virtual_keyboard_key("Super")
         time.sleep(0.5)
+        self.introduce_command_to_console('terminal', auto_enter=True)
+
+
+    def _tune_workstation(self):
+        """
+        Sets up the lab environment in 'tuned' style.
+        This involves logging in as student, opening a terminal, and running setup commands
+        to install plugins, aliases, and configs to make the workstation look cooler.
+        """
+        self.logger("Tunning the lab environment with Ricardo DaCosta's tools!")
         
-        self.introduce_command_to_console('gnome-terminal', auto_enter=True)
+        time.sleep(10) # Wait for the workstation to be ready
+        self._login_as_student()
+        
+        self._open_terminal()
         
         # Clone the rgdacosta repository
         time.sleep(1.5)
@@ -1078,17 +1097,15 @@ class LabManager:
         
         # Run the ansible playbook
         self.introduce_command_to_console('cd classroom_env; ansible-playbook playbook.yml', auto_enter=True)
-        time.sleep(20)
+        time.sleep(60)
+        # Confirm reboot request
+        self.introduce_command_to_console('yes', auto_enter=True)
+        time.sleep(60)
+
+        self._login_as_student()
+        self._open_terminal()
         
-        # Open another terminal with ALT + F2
-        self._click_virtual_keyboard_key("Esc")
-        self._click_virtual_keyboard_key("Alt")
-        self._click_virtual_keyboard_key("F2")
-        self._click_virtual_keyboard_key("Alt")
-        
-        self.introduce_command_to_console('gnome-terminal', auto_enter=True)
-        
-        self.logger("Lab environment 'rgdacosta' style setup completed.")
+        self.logger("Lab environment tuned!")
 
     def _wait_for_command_to_paste(self, command: str):
         """Wait a proportional time based on the command length for pasting to complete."""
@@ -1880,8 +1897,7 @@ class LabManager:
                        - "X.Y" format (e.g., "1.2", "2.7") which is auto-converted
                        If not provided, starts from the first guided exercise.
         """
-        self.logger(f"Starting full course QA for {course_id}")
-        print("\n[QA Interactive Controls] Press [P] to pause/resume, [Q] to quit\n")
+
         
         # Get list of exercises and labs (switches to course tab internally)
         exercises = self.get_guided_exercises_and_labs(course_id, start_from, environment)
@@ -1901,6 +1917,10 @@ class LabManager:
         
         self.logger(f"Found {len(exercises)} exercises/labs to QA")
         
+
+        self.logger(f"Starting full course QA for {course_id}")
+        print("\n[QA Interactive Controls] Press [P] to pause/resume, [Q] to quit\n")
+
         # Initialize keyboard handler for interactive control
         self._keyboard_handler = KeyboardHandler()
         self._qa_paused = False
