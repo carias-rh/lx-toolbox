@@ -6,7 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 # Assuming WebDriver exceptions like TimeoutException might be caught
-from selenium.common.exceptions import TimeoutException 
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException 
 
 from .base_selenium_driver import BaseSeleniumDriver
 from ..utils.config_manager import ConfigManager
@@ -1002,14 +1002,7 @@ class LabManager:
                 else:
                     logging.getLogger(__name__).error("Failed to enable virtual keyboard after multiple attempts. Enable manually in the qa console tab.")
 
-        # Store the send text button reference for reuse
-        try:
-            self._send_text_option_button = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="showSendTextDialog"]'))
-            )
-        except TimeoutException:
-            self._send_text_option_button = None
-            logging.getLogger(__name__).warning("Could not find 'Send Text' button.")
+
         
         if tune_workstation:
             self._tune_workstation()
@@ -1092,7 +1085,7 @@ class LabManager:
         
         # Clone the rgdacosta repository
         time.sleep(1.5)
-        self.introduce_command_to_console('git clone https://gitlab.com/rgdacosta/classroom_env.git', auto_enter=True)
+        self.introduce_command_to_console('git clone https://gitlab.com/carias-rh/classroom_env.git', auto_enter=True)
         time.sleep(3)
         
         # Run the ansible playbook
@@ -1107,9 +1100,15 @@ class LabManager:
         
         self.logger("Lab environment tuned!")
 
-    def _wait_for_command_to_paste(self, command: str):
-        """Wait a proportional time based on the command length for pasting to complete."""
-        time.sleep(len(command) * 0.1)
+    def _wait_for_command_to_paste(self, command: str, min_wait: float = 0.5):
+        """Wait a proportional time based on the command length for pasting to complete.
+        
+        Args:
+            command: The command being pasted
+            min_wait: Minimum wait time in seconds (default 0.5s to allow modal to close)
+        """
+        calculated_wait = len(command) * 0.1
+        time.sleep(max(calculated_wait, min_wait))
 
     def introduce_command_to_console(self, command: str, auto_enter: bool = True):
         """
@@ -1124,13 +1123,11 @@ class LabManager:
 
         try:
             # Open text dialog
-            if hasattr(self, '_send_text_option_button') and self._send_text_option_button:
-                self._send_text_option_button.click()
-            else:
-                send_text_dialog_button = self.wait.until(
+
+            send_text_dialog_button = self.wait.until(
                     EC.element_to_be_clickable((By.XPATH, '//*[@id="showSendTextDialog"]'))
-                )
-                send_text_dialog_button.click()
+            )
+            send_text_dialog_button.click()
 
             # Paste command into text box
             text_input_area = self.wait.until(
@@ -1149,6 +1146,15 @@ class LabManager:
 
             # Click Enter on virtual keyboard
             if auto_enter:
+                # Wait for modal backdrop to disappear before clicking Enter
+                try:
+                    WebDriverWait(self.driver, 5).until(
+                        EC.invisibility_of_element_located((By.CSS_SELECTOR, ".modal-backdrop"))
+                    )
+                except TimeoutException:
+                    # Modal may have already closed, continue
+                    pass
+
                 # Using the specific XPath from the original implementation
                 enter_key_xpath = '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'
                 try:
@@ -1157,7 +1163,7 @@ class LabManager:
                     )
                     enter_key.click()
                 except TimeoutException:
-                    # Fallback to generiCheckinc Enter key search
+                    # Fallback to generic Enter key search
                     try:
                         self._click_virtual_keyboard_key("Enter")
                     except Exception as e_enter:
@@ -1167,19 +1173,41 @@ class LabManager:
             self.logger(f"Error introducing command '{command[:50]}...': {e}")
 
     def click_on_show_solution_buttons(self):
-        """Click all 'Show Solution' buttons on the current page."""
+        """Click all 'Show Solution' buttons on the current page, starting from the bottom."""
         try:
+            # First scroll to the bottom of the page
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(0.5)
+            
             while True:
                 try:
-                    show_solution_button = WebDriverWait(self.driver, 1.5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[text()='Show Solution']"))
+                    # Find all Show Solution buttons
+                    buttons = self.driver.find_elements(By.XPATH, "//button[text()='Show Solution']")
+                    if not buttons:
+                        break
+                    
+                    # Get the last button (bottommost)
+                    last_button = buttons[-1]
+                    
+                    # Scroll the button into view
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", last_button)
+                    time.sleep(0.3)
+                    
+                    # Wait for it to be clickable and click
+                    WebDriverWait(self.driver, 1.5).until(
+                        EC.element_to_be_clickable(last_button)
                     )
-                    show_solution_button.click()
-                    time.sleep(0.5)
-                    # Scroll down a bit
-                    self.driver.execute_script("window.scrollBy(0, 500);")
-                except TimeoutException:
-                    # No more show solution buttons, break the loop
+                    last_button.click()
+                    time.sleep(0.3)
+                    
+                    # Scroll up a bit
+                    #self.driver.execute_script("window.scrollBy(0, -100);")
+                    #time.sleep(0.3)
+                    
+                except (TimeoutException, StaleElementReferenceException):
+                    # Button became stale or not clickable, continue to find remaining buttons
+                    continue
+                except Exception:
                     break
         except Exception:
             pass
