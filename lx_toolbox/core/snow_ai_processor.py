@@ -54,7 +54,7 @@ class SnowAIProcessor:
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "glm-4.7-flash:latest") # ministral-3:8b
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
@@ -125,13 +125,18 @@ class SnowAIProcessor:
                 )
             response = result.stdout or ""
 
-            if self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gpt-oss")):
+            if self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gpt-oss", "glm")):
                 response = re.sub(r'Thinking.*?done thinking\.', '', response, flags=re.DOTALL).strip()
                 response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
                 response = re.sub(r'</think>', '', response).strip()
                 response = re.sub(r'Thinking\.\.\.\s*', '', response)
                 response = re.sub(r'\.\.\.done thinking\.\s*', '', response)
                 response = re.sub(r'\.\.\.done thinking\.', '', response).strip()
+                # For glm and similar models that output thinking without clear end markers,
+                # extract JSON by finding the first '{' if response doesn't start with it
+                if not response.strip().startswith('{') and '{' in response:
+                    json_start = response.find('{')
+                    response = response[json_start:]
 
             response = re.sub(r'```json\s*', '', response)
             response = re.sub(r'```\s*$', '', response)
