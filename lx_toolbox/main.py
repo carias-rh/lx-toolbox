@@ -384,7 +384,11 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, tune):
             lab_mgr.start_lab(course_id=course_id)
         
         # Increase autostop and lifespan
-        lab_mgr.increase_autostop(course_id=course_id, max_hours=2)
+        if environment == "factory":
+            max_hours = 8
+        else:
+            max_hours = 2
+        lab_mgr.increase_autostop(course_id=course_id, max_hours=max_hours)
         lab_mgr.increase_lifespan(course_id=course_id)
         
         # Open workstation console
