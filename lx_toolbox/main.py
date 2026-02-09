@@ -394,6 +394,9 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, tune):
         # Open workstation console
         lab_mgr.open_workstation_console(course_id=course_id, tune_workstation=tune)
         
+        # Open a monitor window for the user to observe and intervene during QA
+        lab_mgr.open_monitor_window(course_id=course_id, environment=environment, chapter_section=chapter_section)
+        
         # Run QA on exercises
         lab_mgr.run_full_course_qa(
             course_id=course_id, 

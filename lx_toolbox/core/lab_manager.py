@@ -937,6 +937,10 @@ class LabManager:
     _course_tab_handle = None
     _console_tab_handle = None
 
+    # Tab handles for the monitor window (user observation only - script won't interact)
+    _monitor_course_tab_handle = None
+    _monitor_console_tab_handle = None
+
     def open_workstation_console(self, course_id: str, tune_workstation: bool = False):
         """
         Opens the workstation console for a course and optionally sets up the environment.
@@ -1006,6 +1010,101 @@ class LabManager:
         
         if tune_workstation:
             self._tune_workstation()
+
+    def open_monitor_window(self, course_id: str, environment: str = "rol", chapter_section: str = None):
+        """
+        Opens a new browser window with the course page and a workstation console
+        for the user to monitor the QA progress in real time.
+        
+        The script navigates to the course URL and opens the console in this new window,
+        but will NOT interact with the monitor console afterwards — it is left entirely
+        for the user to observe and intervene when needed.
+        
+        Args:
+            course_id: The course identifier (e.g., "rh124-9.3")
+            environment: The target environment (e.g., "rol", "factory")
+            chapter_section: Optional starting section (e.g., "ch01s02"). Defaults to "pr01".
+        """
+        self.logger("Opening monitor window for user observation...")
+
+        # Build the course URL with the correct chapter/section
+        base_url = self.config.get_lab_base_url(environment)
+        if not base_url:
+            raise ValueError(f"Base URL for environment '{environment}' not configured.")
+        section = chapter_section or "pr01"
+        course_url = f"{base_url}{course_id}/pages/{section}"
+
+        # --- Open a genuinely new browser window (not just a tab) ---
+        self.driver.switch_to.new_window('window')
+        self._monitor_course_tab_handle = self.driver.current_window_handle
+        self.driver.get(course_url)
+
+        # Wait for course page to load
+        self.wait_for_site_to_be_ready(environment)
+
+        # --- Open the workstation console in the monitor window ---
+        self.select_lab_environment_tab("lab-environment")
+
+        self.driver.execute_script("document.body.style.zoom = '0.70'")
+        self.driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(0.5)
+
+        workstation_open_console_xpath = "//*[text()='workstation']/../td[3]/button[text()='Open Console']"
+        try:
+            handles_before_console = set(self.driver.window_handles)
+
+            workstation_button = WebDriverWait(self.driver, 60).until(
+                EC.element_to_be_clickable((By.XPATH, workstation_open_console_xpath))
+            )
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", workstation_button)
+            time.sleep(0.5)
+            self.driver.execute_script("arguments[0].click();", workstation_button)
+
+            # Wait for the monitor console tab to open
+            WebDriverWait(self.driver, 30).until(
+                lambda d: len(d.window_handles) > len(handles_before_console)
+            )
+            new_console_handles = set(self.driver.window_handles) - handles_before_console
+            self._monitor_console_tab_handle = new_console_handles.pop()
+
+            self.logger("Monitor window ready — console tab available for user observation.")
+
+        except TimeoutException:
+            self.logger("Could not open monitor console. The monitor window will only show the course page.")
+
+        # --- Switch back to the automation console tab ---
+        self.switch_to_console_tab()
+
+    def _update_monitor_to_exercise(self, course_id: str, chapter_section: str, environment: str):
+        """
+        Navigate the monitor window's course tab to the current exercise and
+        click all 'Show Solution' buttons so the user can follow along.
+        
+        This is a best-effort operation — if anything fails the QA continues normally.
+        """
+        if not self._monitor_course_tab_handle:
+            return
+
+        try:
+            self.driver.switch_to.window(self._monitor_course_tab_handle)
+
+            base_url = self.config.get_lab_base_url(environment)
+            exercise_url = f"{base_url}{course_id}/pages/{chapter_section}"
+            self.driver.get(exercise_url)
+            time.sleep(2)
+
+            self.select_lab_environment_tab("course")
+            time.sleep(2)
+            self.toggle_video_player(state=False)
+
+            # Unroll all show solution buttons
+            self.click_on_show_solution_buttons()
+
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"Could not update monitor tab to {chapter_section}: {e}")
+        finally:
+            # Always return to the automation console tab
+            self.switch_to_console_tab()
 
     def switch_to_course_tab(self):
         """Switch to the course page tab."""
@@ -1999,6 +2098,9 @@ class LabManager:
         
         commands = self.get_exercise_commands(course_id, chapter_section, environment)
         filtered_commands = self.filter_commands_list(commands)
+
+        # Sync the monitor window to this exercise so the user can follow along
+        self._update_monitor_to_exercise(course_id, chapter_section, environment)
         
         if not filtered_commands:
             self.logger(f"No commands found for {chapter_section}, skipping to next exercise.")
