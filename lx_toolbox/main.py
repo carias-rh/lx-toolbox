@@ -14,6 +14,7 @@ from .utils.config_manager import ConfigManager
 from .utils.helpers import reset_step_counter
 from .utils.course_resolver import resolve_course, resolve_course_safe, list_course_versions, resolve_chapter_section
 from .core.lab_manager import LabManager
+from .core.qa_report import QAReport
 from .core.link_checker import LinkChecker
 from .core.servicenow_autoassign import ServiceNowAutoAssign
 from .core.snow_ai_processor import SnowAIProcessor
@@ -367,6 +368,14 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, tune):
         lab_mgr = LabManager(config=config, browser_name=browser, is_headless=headless)
         reset_step_counter()
         
+        # Initialize QA report (loads existing data from previous runs if any)
+        assignee = config.get("General", "assignee", "")
+        qa_report = QAReport(course_id=course_id, environment=environment, assignee=assignee)
+        lab_mgr._qa_report = qa_report
+        click.echo(f"QA report directory: {qa_report.report_dir}")
+        if qa_report.exercises:
+            click.echo(f"  Resuming with {len(qa_report.exercises)} exercise(s) from previous run")
+        
         # Login
         lab_mgr.login(environment=environment)
         
@@ -404,11 +413,14 @@ def qa(ctx, course_id, chapter_section, env, browser, headless, tune):
             start_from=chapter_section
         )
         
-        click.echo(f"✓ QA completed for {course_id} in {environment}.")
+        click.echo(f"\n✓ QA completed for {course_id} in {environment}.")
+        click.echo(f"  Reports: {qa_report.report_dir}")
         click.echo("Browser will remain open for interactive use. Close manually when done.")
         
     except Exception as e:
         click.echo(f"✗ Error running QA: {e}", err=True)
+        if 'qa_report' in locals():
+            click.echo(f"  Reports saved so far: {qa_report.report_dir}")
         sys.exit(1)
 
 @lab.command('check-links')
