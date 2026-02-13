@@ -28,6 +28,7 @@ class ExerciseResult:
     finish_screenshot: str = ""
     start_duration_secs: float = 0.0
     grade_duration_secs: float = 0.0
+    finish_duration_secs: float = 0.0
     notes: str = ""
 
 
@@ -199,18 +200,20 @@ class QAReport:
         # --- Summary table ---
         lines.append("== Summary")
         lines.append("")
-        lines.append('[cols="4,1,1,1", options="header"]')
+        lines.append('[cols="4,1,1,1,1", options="header"]')
         lines.append("|===")
-        lines.append("| Exercise | Result | Start time | Grade time")
+        lines.append("| Exercise | Result | Start time | Grade time | Finish time")
         lines.append("")
         for ex in self.exercises:
             result_str = ex.grade_result if ex.grade_result else "-"
             start_str = self._format_duration(ex.start_duration_secs) or "-"
             grade_str = self._format_duration(ex.grade_duration_secs) or "-"
+            finish_str = self._format_duration(ex.finish_duration_secs) or "-"
             lines.append(f"| {ex.title}")
             lines.append(f"| {result_str}")
             lines.append(f"| {start_str}")
             lines.append(f"| {grade_str}")
+            lines.append(f"| {finish_str}")
             lines.append("")
         lines.append("|===")
         lines.append("")
@@ -233,6 +236,8 @@ class QAReport:
                 lines.append(f"Start script time:: {self._format_duration(ex.start_duration_secs)}")
             if ex.grade_duration_secs > 0:
                 lines.append(f"Grade script time:: {self._format_duration(ex.grade_duration_secs)}")
+            if ex.finish_duration_secs > 0:
+                lines.append(f"Finish script time:: {self._format_duration(ex.finish_duration_secs)}")
             if ex.notes:
                 lines.append(f"Notes:: {ex.notes}")
             lines.append("")
@@ -272,7 +277,8 @@ class QAReport:
             "Guided Exercise/Lab Name",
             "PASS/FAIL",
             "start script time",
-            "finish + grade script time",
+            "grade script time",
+            "finish script time",
             "Notes and Concerns",
         ]
 
@@ -284,7 +290,8 @@ class QAReport:
                     "Guided Exercise/Lab Name": ex.title,
                     "PASS/FAIL": ex.grade_result,
                     "start script time": self._format_duration(ex.start_duration_secs),
-                    "finish + grade script time": self._format_duration(ex.grade_duration_secs),
+                    "grade script time": self._format_duration(ex.grade_duration_secs),
+                    "finish script time": self._format_duration(ex.finish_duration_secs),
                     "Notes and Concerns": ex.notes,
                 })
 

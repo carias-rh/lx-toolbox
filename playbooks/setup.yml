@@ -22,6 +22,8 @@
           - firefox
           - chromium
           - chromedriver
+          - asciidoctor
+          - pandoc
         state: present
       tags: install
 

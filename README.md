@@ -139,8 +139,8 @@ SIGNATURE_NAME=Your Name
 ```
 Configure ServiceNow url path in the `config/config.ini` file:
 ```bash
-SNOW_BASE_URL = <ask to carias>
-SNOW_FEEDBACK_QUEUE_PATH = <ask to carias>
+SNOW_BASE_URL = <ask to Carlos Arias>
+SNOW_FEEDBACK_QUEUE_PATH = <ask to Carlos Ariass>
 ```
 ### CLI Commands
 
@@ -227,6 +227,61 @@ This layout enables quick context switching and manual review before submitting 
 
 
 
+
+## QA Reports
+
+The QA automation generates reports incrementally as you work through exercises. Reports are saved to `qa_reports/<environment>/<course_id>/` and include:
+
+- **`qa_data.json`**: Source of truth, loaded automatically on subsequent runs
+- **`qa_report_<course>.adoc`**: AsciiDoc report with summary table, per-exercise details, and embedded screenshots
+- **`qa_results_<course>.csv`**: CSV matching the Google Sheets tracking format
+- **`screenshots/`**: Console screenshots for each lab start/grade/finish
+
+Reports persist across runs. If you stop midway and resume later, previous results are preserved. Re-running an exercise overwrites its old data.
+
+### Converting Reports
+
+Use the `qa-report` wrapper to convert the AsciiDoc report for sharing:
+
+```bash
+# Convert to DOCX (upload to Google Drive → open as Google Doc)
+qa-report do280-4.14                   # defaults to factory environment
+
+# Specify environment
+qa-report do280-4.14 rol
+
+# Convert to HTML (viewable in any browser)
+qa-report do280-4.14 factory html
+
+# Convert to PDF
+qa-report do280-4.14 factory pdf
+```
+
+**Requirements for conversion:**
+- `asciidoctor` — `sudo dnf install rubygem-asciidoctor`
+- `pandoc` — `sudo dnf install pandoc` (for DOCX output)
+- `asciidoctor-pdf` — `sudo dnf install rubygem-asciidoctor-pdf` (for PDF output)
+
+### Report Directory Structure
+
+```
+qa_reports/
+├── factory/
+│   └── do280-4.14/
+│       ├── qa_data.json
+│       ├── qa_report_do280-4.14.adoc
+│       ├── qa_results_do280-4.14.csv
+│       └── screenshots/
+│           ├── ch01s02_start.png
+│           ├── ch01s02_grade.png
+│           ├── ch01s02_finish.png
+│           └── ...
+├── rol/
+│   └── rh124-9.3/
+│       └── ...
+└── china/
+    └── ...
+```
 
 ## Link Checker Commands
 
@@ -434,6 +489,7 @@ lx-toolbox/
 │   │   ├── base_selenium_driver.py
 │   │   ├── jira_handler.py
 │   │   ├── lab_manager.py
+│   │   ├── qa_report.py
 │   │   ├── servicenow_autoassign.py
 │   │   ├── servicenow_handler.py
 │   │   └── snow_ai_processor.py

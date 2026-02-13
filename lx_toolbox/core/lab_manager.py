@@ -1139,6 +1139,11 @@ class LabManager:
             # Unroll all show solution buttons
             self.click_on_show_solution_buttons()
 
+            # scroll to the top of the page and restore the zoom level
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            self.driver.execute_script("document.body.style.zoom = '1.0';")
+            time.sleep(0.5)
+
         except Exception as e:
             logging.getLogger(__name__).debug(f"Could not update monitor tab to {chapter_section}: {e}")
         finally:
@@ -1883,11 +1888,14 @@ class LabManager:
         
         # Lab start/setup commands
         if re.match(r"lab .*start", command) or re.match(r"lab .*setup", command):
-            t0 = time.time()
-            self.introduce_command_to_console("clear", auto_enter=True)
+            # Ctrl+L to clear the terminal screen via the virtual keyboard
+            self._click_virtual_keyboard_key("Ctrl")
+            self._click_virtual_keyboard_key("l")
+            self._click_virtual_keyboard_key("Ctrl")  # Release Ctrl
             time.sleep(0.5)
             command = "date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
+            t0 = time.time()  # Start timing when the script begins running
             self._prompt_user_to_continue("when the start script has finished.")
             duration = time.time() - t0
 
@@ -1904,9 +1912,9 @@ class LabManager:
             
         # Lab grade commands
         if re.match(r"lab .*grade", command):
-            t0 = time.time()
             command = "date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
+            t0 = time.time()  # Start timing when the script begins running
             self._prompt_user_to_continue("when the grade script has finished.")
             duration = time.time() - t0
 
@@ -1934,7 +1942,9 @@ class LabManager:
         if re.match(r"lab .*finish", command):
             command = "date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
+            t0 = time.time()  # Start timing when the script begins running
             self._prompt_user_to_continue("when the finish script has completed.")
+            duration = time.time() - t0
 
             # Screenshot + report
             if self._qa_report and self._current_exercise_section:
@@ -1943,6 +1953,14 @@ class LabManager:
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
                     ex.finish_screenshot = path
+                    ex.finish_duration_secs = duration
+
+                    # Guided Exercises have no grade script — prompt for PASS/FAIL here
+                    if not ex.grade_result:
+                        grade_input = input("Exercise result? [P]ass / [F]ail (default: Pass): ").strip().lower()
+                        ex.grade_result = "FAIL" if grade_input.startswith("f") else "PASS"
+                        print(f"  Recorded: {ex.grade_result}")
+
                 self._qa_report.save()
 
             print("##############  Exercise completed ##############")
@@ -2227,7 +2245,7 @@ class LabManager:
             
             # Display status and command
             print_status(command_num, total_commands, self._qa_paused)
-            print(f"\nIntroducing: {command}")
+            print(f"\n$ {command}")
             if command_num < total_commands:
                 print('-------------------------------------------------')
             
