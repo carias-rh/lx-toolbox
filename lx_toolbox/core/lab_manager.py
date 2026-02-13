@@ -941,6 +941,45 @@ class LabManager:
     _monitor_course_tab_handle = None
     _monitor_console_tab_handle = None
 
+    # QA report tracking (set externally before run_full_course_qa)
+    _qa_report = None                  # QAReport instance (or None to skip reporting)
+    _current_exercise_section = None   # chapter_section being executed right now
+    _current_exercise_title = None     # human-readable title of current exercise
+
+    def _screenshot_monitor_console(self, path: str):
+        """
+        Take a screenshot of the VNC canvas in the monitor console tab.
+        
+        Captures only the first ``<canvas>`` element (the Guacamole VNC
+        display) so the image is tightly cropped to the console output.
+        Falls back to a full-page screenshot if the canvas cannot be found.
+        
+        Best-effort: silently skips if the monitor console is unavailable or
+        any error occurs, so QA is never interrupted by a screenshot failure.
+        """
+        if not self._monitor_console_tab_handle:
+            return
+        try:
+            self.driver.switch_to.window(self._monitor_console_tab_handle)
+            time.sleep(0.5)
+
+            # Screenshot just the VNC canvas (first <canvas> on the page)
+            try:
+                canvas = self.driver.find_element(By.CSS_SELECTOR, "canvas")
+                canvas.screenshot(path)
+            except Exception:
+                # Fall back to full-page screenshot
+                self.driver.save_screenshot(path)
+
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"Monitor console screenshot failed: {e}")
+        finally:
+            # Always return to the automation console tab
+            try:
+                self.switch_to_console_tab()
+            except Exception:
+                pass
+
     def open_workstation_console(self, course_id: str, tune_workstation: bool = False):
         """
         Opens the workstation console for a course and optionally sets up the environment.
@@ -1099,6 +1138,11 @@ class LabManager:
 
             # Unroll all show solution buttons
             self.click_on_show_solution_buttons()
+
+            # scroll to the top of the page and restore the zoom level
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            self.driver.execute_script("document.body.style.zoom = '1.0';")
+            time.sleep(0.5)
 
         except Exception as e:
             logging.getLogger(__name__).debug(f"Could not update monitor tab to {chapter_section}: {e}")
@@ -1844,22 +1888,81 @@ class LabManager:
         
         # Lab start/setup commands
         if re.match(r"lab .*start", command) or re.match(r"lab .*setup", command):
+            # Ctrl+L to clear the terminal screen via the virtual keyboard
+            self._click_virtual_keyboard_key("Ctrl")
+            self._click_virtual_keyboard_key("l")
+            self._click_virtual_keyboard_key("Ctrl")  # Release Ctrl
+            time.sleep(0.5)
             command = "date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
-            self._prompt_user_to_continue("with the exercise.")
+            t0 = time.time()  # Start timing when the script begins running
+            self._prompt_user_to_continue("when the start script has finished.")
+            duration = time.time() - t0
+
+            # Screenshot + report
+            if self._qa_report and self._current_exercise_section:
+                path = self._qa_report.screenshot_path(self._current_exercise_section, "start")
+                self._screenshot_monitor_console(path)
+                ex = self._qa_report.get_exercise(self._current_exercise_section)
+                if ex:
+                    ex.start_screenshot = path
+                    ex.start_duration_secs = duration
+                self._qa_report.save()
             return True
             
         # Lab grade commands
         if re.match(r"lab .*grade", command):
             command = "date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
-            self._prompt_user_to_continue("with the exercise.")
+            t0 = time.time()  # Start timing when the script begins running
+            self._prompt_user_to_continue("when the grade script has finished.")
+            duration = time.time() - t0
+
+            # Screenshot + report
+            if self._qa_report and self._current_exercise_section:
+                path = self._qa_report.screenshot_path(self._current_exercise_section, "grade")
+                self._screenshot_monitor_console(path)
+                ex = self._qa_report.get_exercise(self._current_exercise_section)
+                if ex:
+                    ex.grade_screenshot = path
+                    ex.grade_duration_secs = duration
+
+            # Prompt for PASS/FAIL (default: PASS)
+            grade_input = input("Grade result? [P]ass / [F]ail (default: Pass): ").strip().lower()
+            grade_result = "FAIL" if grade_input.startswith("f") else "PASS"
+            if self._qa_report and self._current_exercise_section:
+                ex = self._qa_report.get_exercise(self._current_exercise_section)
+                if ex:
+                    ex.grade_result = grade_result
+                self._qa_report.save()
+            print(f"  Recorded: {grade_result}")
             return True
             
         # Lab finish commands
         if re.match(r"lab .*finish", command):
             command = "date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
+            t0 = time.time()  # Start timing when the script begins running
+            self._prompt_user_to_continue("when the finish script has completed.")
+            duration = time.time() - t0
+
+            # Screenshot + report
+            if self._qa_report and self._current_exercise_section:
+                path = self._qa_report.screenshot_path(self._current_exercise_section, "finish")
+                self._screenshot_monitor_console(path)
+                ex = self._qa_report.get_exercise(self._current_exercise_section)
+                if ex:
+                    ex.finish_screenshot = path
+                    ex.finish_duration_secs = duration
+
+                    # Guided Exercises have no grade script — prompt for PASS/FAIL here
+                    if not ex.grade_result:
+                        grade_input = input("Exercise result? [P]ass / [F]ail (default: Pass): ").strip().lower()
+                        ex.grade_result = "FAIL" if grade_input.startswith("f") else "PASS"
+                        print(f"  Recorded: {ex.grade_result}")
+
+                self._qa_report.save()
+
             print("##############  Exercise completed ##############")
             return True
             
@@ -2026,12 +2129,16 @@ class LabManager:
         """
 
         
-        # Get list of exercises and labs (switches to course tab internally)
-        exercises = self.get_guided_exercises_and_labs(course_id, start_from, environment)
+        # Get list of exercises and labs WITH titles (switches to course tab internally)
+        sections = self.get_course_sections(course_id, environment, section_type="exercises")
         
-        if not exercises:
+        if not sections:
             self.logger("No exercises or labs found for this course.")
             return
+
+        # Build a title lookup and an ordered list of chapter_sections
+        title_map = {s['chapter_section']: s['title'] for s in sections}
+        exercises = [s['chapter_section'] for s in sections]
         
         # Filter exercises to start from the specified chapter_section
         if start_from:
@@ -2064,7 +2171,8 @@ class LabManager:
                     break
                     
                 try:
-                    self._run_qa_on_exercise(course_id, chapter_section, environment)
+                    title = title_map.get(chapter_section, chapter_section)
+                    self._run_qa_on_exercise(course_id, chapter_section, environment, title=title)
                 except QAQuitException:
                     self.logger("QA quit requested by user.")
                     break
@@ -2082,7 +2190,7 @@ class LabManager:
             self._keyboard_handler = None
             clear_status_line()
 
-    def _run_qa_on_exercise(self, course_id: str, chapter_section: str, environment: str):
+    def _run_qa_on_exercise(self, course_id: str, chapter_section: str, environment: str, title: str = ""):
         """
         Internal method to run QA on a specific exercise by executing commands.
         
@@ -2090,10 +2198,24 @@ class LabManager:
             course_id: The course identifier (e.g., "rh124-9.3")
             chapter_section: The chapter and section (e.g., "ch01s02")
             environment: The target environment
+            title: Human-readable exercise title (e.g., "Section 1.2: Guided Exercise: ...")
             
         Raises:
             QAQuitException: If user requests to quit during execution
         """
+        # Set current exercise context (used by _handle_special_command for screenshots)
+        self._current_exercise_section = chapter_section
+        self._current_exercise_title = title or chapter_section
+
+        # Register this exercise in the QA report
+        if self._qa_report:
+            from .qa_report import ExerciseResult
+            result = ExerciseResult(
+                chapter_section=chapter_section,
+                title=self._current_exercise_title,
+            )
+            self._qa_report.add_exercise(result)
+
         self.logger(f"Starting QA for {course_id} - {chapter_section}")
         
         commands = self.get_exercise_commands(course_id, chapter_section, environment)
@@ -2111,6 +2233,9 @@ class LabManager:
         self._prompt_user_to_continue(f"Press enter to run the lab start script for {chapter_section}.")
 
         total_commands = len(filtered_commands)
+        mid_command_index = total_commands // 2
+        mid_screenshot_taken = False
+
         for i, command in enumerate(filtered_commands):
             if command == '':
                 continue
@@ -2123,7 +2248,7 @@ class LabManager:
             
             # Display status and command
             print_status(command_num, total_commands, self._qa_paused)
-            print(f"\nIntroducing: {command}")
+            print(f"\n$ {command}")
             if command_num < total_commands:
                 print('-------------------------------------------------')
             
@@ -2131,6 +2256,16 @@ class LabManager:
             if not self._handle_special_command(command):
                 # Regular command - just execute it
                 self.introduce_command_to_console(command, auto_enter=True)
+
+            # Mid-exercise screenshot (proof of QA execution)
+            if not mid_screenshot_taken and i >= mid_command_index and self._qa_report and self._current_exercise_section:
+                path = self._qa_report.screenshot_path(self._current_exercise_section, "mid")
+                self._screenshot_monitor_console(path)
+                ex = self._qa_report.get_exercise(self._current_exercise_section)
+                if ex:
+                    ex.mid_screenshot = path
+                self._qa_report.save()
+                mid_screenshot_taken = True
 
             # Interactive delay with keyboard checking
             command_delay = self.config.get("QA", "command_delay_seconds", 3)

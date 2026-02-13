@@ -1,0 +1,95 @@
+#!/bin/bash
+# LX Toolbox Wrapper - QA Report Converter
+# Converts the AsciiDoc QA report to DOCX (for Google Docs import)
+# Usage: qa-report <course_id> [environment] [format]
+# Example: qa-report do280-4.14
+#          qa-report do280-4.14 factory html
+
+set -e
+
+# Auto-detect lx-toolbox directory
+if [[ -n "${LX_TOOLBOX_DIR}" ]]; then
+    TOOLBOX_DIR="${LX_TOOLBOX_DIR}"
+elif [[ -d "/opt/lx-toolbox" ]]; then
+    TOOLBOX_DIR="/opt/lx-toolbox"
+else
+    # Try to find it relative to this script
+    SOURCE="${BASH_SOURCE[0]}"
+    while [[ -L "$SOURCE" ]]; do
+        DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+        SOURCE="$(readlink "$SOURCE")"
+        [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+    done
+    SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    TOOLBOX_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+fi
+
+show_help() {
+    echo "Usage: qa-report <course_id> [environment] [format]"
+    echo ""
+    echo "Convert the QA AsciiDoc report to DOCX, HTML, or PDF."
+    echo ""
+    echo "Arguments:"
+    echo "  course_id     Full course ID (e.g., do280-4.14, rh124-9.3)"
+    echo "  environment   Lab environment: factory (default), rol, china"
+    echo "  format        Output format: docx (default), html, pdf"
+    echo ""
+    echo "The source report is read from:"
+    echo "  qa_reports/<environment>/<course_id>/qa_report_<course_id>.adoc"
+    echo ""
+    echo "Examples:"
+    echo "  qa-report do280-4.14                   # DOCX from factory (default)"
+    echo "  qa-report do280-4.14 rol               # DOCX from rol"
+    echo "  qa-report do280-4.14 factory html      # HTML"
+    echo "  qa-report do280-4.14 factory pdf       # PDF"
+}
+
+if [[ $# -lt 1 ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+    show_help
+    [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]] && exit 0
+    exit 1
+fi
+
+COURSE="$1"
+ENV="${2:-factory}"
+FORMAT="${3:-docx}"
+
+REPORT_DIR="${TOOLBOX_DIR}/qa_reports/${ENV}/${COURSE}"
+ADOC_FILE="${REPORT_DIR}/qa_report_${COURSE}.adoc"
+
+if [[ ! -f "$ADOC_FILE" ]]; then
+    echo "Error: Report not found: $ADOC_FILE" >&2
+    echo "Run a QA session first: qa ${COURSE} <chapter.section> ${ENV}" >&2
+    exit 1
+fi
+
+case "$FORMAT" in
+    docx)
+        OUTPUT="${REPORT_DIR}/qa_report_${COURSE}.docx"
+        echo "Converting to DOCX..."
+        cd "$REPORT_DIR"
+        asciidoctor -b docbook "qa_report_${COURSE}.adoc" -o - | \
+            pandoc -f docbook -t docx -o "qa_report_${COURSE}.docx"
+        echo "Done: $OUTPUT"
+        echo ""
+        echo "Upload to Google Drive and open with Google Docs to edit."
+        ;;
+    html)
+        OUTPUT="${REPORT_DIR}/qa_report_${COURSE}.html"
+        echo "Converting to HTML..."
+        cd "$REPORT_DIR"
+        asciidoctor "qa_report_${COURSE}.adoc"
+        echo "Done: $OUTPUT"
+        ;;
+    pdf)
+        OUTPUT="${REPORT_DIR}/qa_report_${COURSE}.pdf"
+        echo "Converting to PDF..."
+        cd "$REPORT_DIR"
+        asciidoctor-pdf "qa_report_${COURSE}.adoc"
+        echo "Done: $OUTPUT"
+        ;;
+    *)
+        echo "Error: Unknown format '$FORMAT'. Use docx, html, or pdf." >&2
+        exit 1
+        ;;
+esac
