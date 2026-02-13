@@ -2233,6 +2233,9 @@ class LabManager:
         self._prompt_user_to_continue(f"Press enter to run the lab start script for {chapter_section}.")
 
         total_commands = len(filtered_commands)
+        mid_command_index = total_commands // 2
+        mid_screenshot_taken = False
+
         for i, command in enumerate(filtered_commands):
             if command == '':
                 continue
@@ -2253,6 +2256,16 @@ class LabManager:
             if not self._handle_special_command(command):
                 # Regular command - just execute it
                 self.introduce_command_to_console(command, auto_enter=True)
+
+            # Mid-exercise screenshot (proof of QA execution)
+            if not mid_screenshot_taken and i >= mid_command_index and self._qa_report and self._current_exercise_section:
+                path = self._qa_report.screenshot_path(self._current_exercise_section, "mid")
+                self._screenshot_monitor_console(path)
+                ex = self._qa_report.get_exercise(self._current_exercise_section)
+                if ex:
+                    ex.mid_screenshot = path
+                self._qa_report.save()
+                mid_screenshot_taken = True
 
             # Interactive delay with keyboard checking
             command_delay = self.config.get("QA", "command_delay_seconds", 3)

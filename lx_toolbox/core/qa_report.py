@@ -24,6 +24,7 @@ class ExerciseResult:
     title: str                    # e.g. "Section 1.2: Guided Exercise: Resource Manifests"
     grade_result: str = ""        # "PASS" / "FAIL" / "" (not yet graded)
     start_screenshot: str = ""    # absolute path to screenshot file
+    mid_screenshot: str = ""      # screenshot taken mid-exercise as proof of QA
     grade_screenshot: str = ""
     finish_screenshot: str = ""
     start_duration_secs: float = 0.0
@@ -141,7 +142,7 @@ class QAReport:
 
         Args:
             chapter_section: e.g. "ch01s02"
-            phase: "start", "grade", or "finish"
+            phase: "start", "mid", "grade", or "finish"
         """
         return str(self.screenshots_dir / f"{chapter_section}_{phase}.png")
 
@@ -244,6 +245,7 @@ class QAReport:
 
             # Screenshots
             for phase, path in [("Lab Start", ex.start_screenshot),
+                                ("Mid-Exercise", ex.mid_screenshot),
                                 ("Lab Grade", ex.grade_screenshot),
                                 ("Lab Finish", ex.finish_screenshot)]:
                 if path and os.path.isfile(path):
