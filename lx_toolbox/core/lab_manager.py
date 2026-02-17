@@ -1912,7 +1912,7 @@ class LabManager:
             
         # Lab grade commands
         if re.match(r"lab .*grade", command):
-            command = "date; time " + command
+            command = "cd; date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
             t0 = time.time()  # Start timing when the script begins running
             self._prompt_user_to_continue("when the grade script has finished.")
@@ -1940,7 +1940,7 @@ class LabManager:
             
         # Lab finish commands
         if re.match(r"lab .*finish", command):
-            command = "date; time " + command
+            command = "cd; date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
             t0 = time.time()  # Start timing when the script begins running
             self._prompt_user_to_continue("when the finish script has completed.")
