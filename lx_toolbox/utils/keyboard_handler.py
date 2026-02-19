@@ -7,6 +7,7 @@ Uses select/termios on Unix and msvcrt on Windows.
 
 import sys
 import os
+from contextlib import contextmanager
 
 # Platform-specific imports
 if os.name == 'nt':  # Windows
@@ -117,6 +118,31 @@ class KeyboardHandler:
                 if valid_keys is None or key in valid_keys:
                     return key
     
+    @contextmanager
+    def pause(self):
+        """Temporarily restore normal terminal settings so input() echoes keys.
+
+        Usage::
+
+            answer = None
+            with handler.pause():
+                answer = input("Prompt: ")
+        """
+        if os.name != 'nt' and self._old_settings is not None and self._is_active:
+            try:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._old_settings)
+            except termios.error:
+                pass
+            try:
+                yield
+            finally:
+                try:
+                    tty.setcbreak(sys.stdin.fileno())
+                except termios.error:
+                    pass
+        else:
+            yield
+
     def __enter__(self):
         self.start()
         return self

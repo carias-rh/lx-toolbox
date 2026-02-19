@@ -1228,7 +1228,7 @@ class LabManager:
         
         # Clone the rgdacosta repository
         time.sleep(1.5)
-        self.introduce_command_to_console('git clone https://gitlab.com/carias-rh/classroom_env.git', auto_enter=True)
+        self.introduce_command_to_console('cd /tmp; git clone https://gitlab.com/carias-rh/classroom_env.git', auto_enter=True)
         time.sleep(3)
         
         # Run the ansible playbook
@@ -1873,7 +1873,11 @@ class LabManager:
             custom_message: Optional message to display to the user
         """
         print("")
-        input(f"Press Enter to continue {custom_message}\n")
+        if self._keyboard_handler:
+            with self._keyboard_handler.pause():
+                input(f"Press Enter to continue {custom_message}\n")
+        else:
+            input(f"Press Enter to continue {custom_message}\n")
 
     def _handle_special_command(self, command: str) -> bool:
         """
@@ -1893,7 +1897,7 @@ class LabManager:
             self._click_virtual_keyboard_key("l")
             self._click_virtual_keyboard_key("Ctrl")  # Release Ctrl
             time.sleep(0.5)
-            command = "date; time " + command
+            command = "cd; date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
             t0 = time.time()  # Start timing when the script begins running
             self._prompt_user_to_continue("when the start script has finished.")
@@ -1928,7 +1932,11 @@ class LabManager:
                     ex.grade_duration_secs = duration
 
             # Prompt for PASS/FAIL (default: PASS)
-            grade_input = input("Grade result? [P]ass / [F]ail (default: Pass): ").strip().lower()
+            if self._keyboard_handler:
+                with self._keyboard_handler.pause():
+                    grade_input = input("Grade result? [P]ass / [F]ail (default: Pass): ").strip().lower()
+            else:
+                grade_input = input("Grade result? [P]ass / [F]ail (default: Pass): ").strip().lower()
             grade_result = "FAIL" if grade_input.startswith("f") else "PASS"
             if self._qa_report and self._current_exercise_section:
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
@@ -1957,7 +1965,11 @@ class LabManager:
 
                     # Guided Exercises have no grade script — prompt for PASS/FAIL here
                     if not ex.grade_result:
-                        grade_input = input("Exercise result? [P]ass / [F]ail (default: Pass): ").strip().lower()
+                        if self._keyboard_handler:
+                            with self._keyboard_handler.pause():
+                                grade_input = input("Exercise result? [P]ass / [F]ail (default: Pass): ").strip().lower()
+                        else:
+                            grade_input = input("Exercise result? [P]ass / [F]ail (default: Pass): ").strip().lower()
                         ex.grade_result = "FAIL" if grade_input.startswith("f") else "PASS"
                         print(f"  Recorded: {ex.grade_result}")
 
@@ -1973,7 +1985,7 @@ class LabManager:
             return True
             
         # Ansible commands
-        if "ansible-playbook" in command or "ansible-navigator" in command:
+        if "ansible-playbook" in command or ("ansible-navigator" in command and not "ansible-navigator.yml" in command):
             self._prompt_user_to_continue("if you did review/create the playbook.")
             self.introduce_command_to_console(command, auto_enter=True)
             self._prompt_user_to_continue("if playbook finished")
@@ -2147,7 +2159,14 @@ class LabManager:
                 exercises = exercises[start_index:]
                 self.logger(f"Starting from {start_from} ({len(exercises)} exercises/labs remaining)")
             else:
-                self.logger(f"Warning: {start_from} not found in exercises list. Starting from the beginning.")
+                next_exercises = [e for e in exercises if e > start_from]
+                if next_exercises:
+                    start_index = exercises.index(next_exercises[0])
+                    exercises = exercises[start_index:]
+                    self.logger(f"Warning: {start_from} not found. Starting from next available: {next_exercises[0]} ({len(exercises)} exercises/labs remaining)")
+                else:
+                    self.logger(f"Warning: {start_from} not found and no later exercises available.")
+                    return
         
         self.logger(f"Found {len(exercises)} exercises/labs to QA")
         
