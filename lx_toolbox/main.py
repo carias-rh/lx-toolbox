@@ -575,6 +575,88 @@ def check_links(ctx, course, env, browser, headless, screenshots, screenshots_di
     except Exception as e:
         click.echo(f"✗ Error checking links: {e}", err=True)
 
+@lab.command('update-courses')
+@click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
+@click.option('--browser', '-b', default='chrome', help='Browser to use (firefox, chrome)')
+@click.option('--headless/--no-headless', default=True, help='Run browser in headless/headful mode')
+@click.option('--commit', is_flag=True, default=False, help='Git commit and push after updating')
+@click.pass_context
+def update_courses(ctx, env, browser, headless, commit):
+    """Scrape the ROL catalog and update courses-list.txt with all courses and versions.
+
+    Navigates through the full catalog, collects every available version for
+    each course, and rewrites courses-list.txt.  With --commit the change is
+    automatically committed and pushed to the remote repository.
+
+    Examples:
+
+        lx-tool lab update-courses
+
+        lx-tool lab update-courses --commit
+
+        lx-tool lab update-courses --env factory --no-headless
+    """
+    import subprocess
+
+    config = ctx.obj['config']
+    environment = env or config.get("General", "default_lab_environment", "rol")
+
+    click.echo(f"{'=' * 60}")
+    click.echo(f" {'UPDATE COURSES LIST':^58}")
+    click.echo(f"{'=' * 60}")
+    click.echo(f"Environment: {environment}")
+    click.echo()
+
+    lab_mgr = None
+    try:
+        lab_mgr = LabManager(
+            config=config,
+            browser_name=browser,
+            is_headless=headless,
+        )
+        reset_step_counter()
+
+        lab_mgr.login(environment=environment)
+        output_path = lab_mgr.update_courses_list(environment)
+
+        click.echo(f"\n✓ courses-list.txt updated: {output_path}")
+
+        if commit:
+            click.echo("\nCommitting and pushing changes…")
+            repo_dir = str(output_path.parent)
+            try:
+                subprocess.run(
+                    ["git", "add", str(output_path)],
+                    cwd=repo_dir, check=True,
+                )
+                result = subprocess.run(
+                    ["git", "diff", "--cached", "--quiet"],
+                    cwd=repo_dir,
+                )
+                if result.returncode == 0:
+                    click.echo("No changes to commit – courses-list.txt is already up to date.")
+                else:
+                    subprocess.run(
+                        ["git", "commit", "-m",
+                         "chore: update courses-list.txt with latest catalog versions"],
+                        cwd=repo_dir, check=True,
+                    )
+                    subprocess.run(
+                        ["git", "push"],
+                        cwd=repo_dir, check=True,
+                    )
+                    click.echo("✓ Changes committed and pushed.")
+            except subprocess.CalledProcessError as exc:
+                click.echo(f"✗ Git operation failed: {exc}", err=True)
+                sys.exit(1)
+
+    except KeyboardInterrupt:
+        click.echo("\n\nInterrupted by user.")
+    except Exception as e:
+        click.echo(f"✗ Error updating courses list: {e}", err=True)
+        sys.exit(1)
+
+
 @lab.command('create-jiras')
 @click.argument('reports_dir', type=click.Path(exists=True))
 @click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')

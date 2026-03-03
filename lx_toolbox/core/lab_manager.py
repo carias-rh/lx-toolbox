@@ -2,11 +2,13 @@ import time
 import os
 import re
 import logging
+from pathlib import Path
+from typing import Optional
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 # Assuming WebDriver exceptions like TimeoutException might be caught
-from selenium.common.exceptions import TimeoutException, StaleElementReferenceException 
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, NoSuchElementException
 
 from .base_selenium_driver import BaseSeleniumDriver
 from ..utils.config_manager import ConfigManager
@@ -2340,6 +2342,363 @@ class LabManager:
             if not self._qa_paused:
                 elapsed += check_interval
 
+
+    # ── Catalog, versions, and course-list management ──────────────
+
+    def _parse_course_id(self, course_id: str) -> tuple[str, str]:
+        """
+        Parse a course ID into course name and version.
+        Examples:
+            'do280-4.18' -> ('do280', '4.18')
+            'rh124-9.3' -> ('rh124', '9.3')
+            'ad141-9.0' -> ('ad141', '9.0')
+        """
+        match = re.match(r'^([a-zA-Z]+\d*)[-_](\d+\.\d+.*)$', course_id)
+        if match:
+            return match.group(1), match.group(2)
+
+        if '-' in course_id:
+            parts = course_id.rsplit('-', 1)
+            return parts[0], parts[1]
+
+        return course_id, "unknown"
+
+    def go_to_catalog(self, environment: str):
+        """Navigate to the ROL catalog page."""
+        self.logger("Navigating to course catalog...")
+        base_url = self.config.get_lab_base_url(environment)
+        catalog_url = base_url.replace('/courses/', '/catalog')
+        self.selenium_driver.go_to_url(catalog_url)
+        time.sleep(2)
+
+    def filter_by_courses(self):
+        """Filter the catalog to show only courses."""
+        self.logger("Filtering catalog by 'Course' delivery format...")
+        try:
+            delivery_formats_btn = self.wait.until(EC.element_to_be_clickable(
+                (By.XPATH, '//button[contains(text(), "Delivery formats")]')
+            ))
+            delivery_formats_btn.click()
+            time.sleep(0.5)
+
+            course_checkbox = self.wait.until(EC.element_to_be_clickable(
+                (By.XPATH, '//input[@id="course_checkbox"]')
+            ))
+
+            if not course_checkbox.is_selected():
+                course_checkbox.click()
+                time.sleep(1)
+
+            self.logger("Filter applied: Showing courses only")
+
+        except TimeoutException:
+            self.logger("Could not apply course filter. Proceeding with current view.")
+
+    def _get_courses_from_current_page(self) -> list[dict]:
+        """
+        Extract courses from the current catalog page.
+        Returns a list of dicts with 'id', 'title', and 'url'.
+        """
+        courses = []
+
+        course_links = self.driver.find_elements(
+            By.XPATH,
+            '//a[contains(@href, "/rol/app/courses/") and (text()="Launch" or text()="View" or text()="Access" or text()="LAUNCH")]'
+        )
+
+        for link in course_links:
+            try:
+                url = link.get_attribute('href')
+                if url and '/rol/app/courses/' in url:
+                    parts = url.split('/rol/app/courses/')
+                    if len(parts) > 1:
+                        course_id = parts[1].split('/')[0]
+
+                        try:
+                            parent = link.find_element(By.XPATH, './ancestor::div[contains(@class, "pf-")]')
+                            title_elem = parent.find_element(By.XPATH, './/h4')
+                            title = title_elem.text
+                        except:
+                            title = course_id
+
+                        if not any(c['id'] == course_id for c in courses):
+                            courses.append({
+                                'id': course_id,
+                                'title': title,
+                                'url': f"/rol/app/courses/{course_id}"
+                            })
+            except Exception as e:
+                logging.debug(f"Error processing course link: {e}")
+                continue
+
+        return courses
+
+    def _get_total_pages(self) -> int:
+        """
+        Get the total number of pagination pages.
+        Returns 1 if no pagination is found.
+        """
+        try:
+            pagination = self.driver.find_elements(
+                By.XPATH,
+                '//ul[contains(@class, "pagination")]//li[not(contains(., "«")) and not(contains(., "»")) and not(contains(., "‹")) and not(contains(., "›"))]//a'
+            )
+
+            if pagination:
+                page_numbers = []
+                for page_link in pagination:
+                    try:
+                        page_num = int(page_link.text.strip())
+                        page_numbers.append(page_num)
+                    except ValueError:
+                        continue
+
+                if page_numbers:
+                    return max(page_numbers)
+
+            return 1
+        except Exception:
+            return 1
+
+    def _go_to_page(self, page_number: int) -> bool:
+        """
+        Navigate to a specific page in the pagination.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            page_link = self.driver.find_element(
+                By.XPATH,
+                f'//ul[contains(@class, "pagination")]//li//a[text()="{page_number}"]'
+            )
+
+            self.driver.execute_script("arguments[0].click();", page_link)
+            time.sleep(2)
+
+            return True
+        except NoSuchElementException:
+            return False
+        except Exception as e:
+            logging.debug(f"Error navigating to page {page_number}: {e}")
+            return False
+
+    def _click_next_page(self) -> bool:
+        """
+        Click the "next" (›) button to go to the next page.
+        Returns True if successful, False if no next page.
+        """
+        try:
+            next_button = self.driver.find_element(
+                By.XPATH,
+                '//ul[contains(@class, "pagination")]//li//a[contains(text(), "›")]'
+            )
+
+            parent_li = next_button.find_element(By.XPATH, './..')
+            if 'disabled' in parent_li.get_attribute('class') or '':
+                return False
+
+            self.driver.execute_script("arguments[0].click();", next_button)
+            time.sleep(2)
+
+            return True
+        except NoSuchElementException:
+            return False
+        except Exception as e:
+            logging.debug(f"Error clicking next page: {e}")
+            return False
+
+    def get_all_courses(self) -> list[dict]:
+        """
+        Get all courses from the catalog, navigating through all pagination pages.
+        Returns a list of dicts with 'id', 'title', and 'url'.
+        """
+        self.logger("Getting list of all courses from catalog...")
+        all_courses = []
+
+        try:
+            self.wait.until(EC.presence_of_element_located(
+                (By.XPATH, '//a[contains(@href, "/rol/app/courses/")]')
+            ))
+
+            total_pages = self._get_total_pages()
+            self.logger(f"  Found {total_pages} page(s) of courses")
+
+            current_page = 1
+            while True:
+                self.logger(f"  Fetching courses from page {current_page}/{total_pages}...")
+
+                page_courses = self._get_courses_from_current_page()
+
+                for course in page_courses:
+                    if not any(c['id'] == course['id'] for c in all_courses):
+                        all_courses.append(course)
+
+                self.logger(f"    Found {len(page_courses)} courses on page {current_page}")
+
+                if current_page >= total_pages:
+                    break
+
+                if not self._click_next_page():
+                    current_page += 1
+                    if not self._go_to_page(current_page):
+                        self.logger(f"    Could not navigate to page {current_page}, stopping.")
+                        break
+                else:
+                    current_page += 1
+
+                time.sleep(1)
+
+            self.logger(f"Found {len(all_courses)} total courses across {current_page} page(s)")
+
+        except TimeoutException:
+            self.logger("Timeout waiting for course list. Catalog might be empty or slow to load.")
+        except Exception as e:
+            self.logger(f"Error getting courses: {e}")
+
+        return all_courses
+
+    def get_available_versions(self, course_id: str, environment: str) -> list[str]:
+        """
+        Get all available versions for a course by checking the settings panel.
+        Returns a list of version strings (e.g., ['10.0', '9.3', '8.2']).
+        """
+        versions = []
+
+        try:
+            course_url = self.config.get_lab_base_url(environment) + course_id
+            self.logger(f"Getting available versions for {course_id}...")
+            self.driver.get(course_url)
+            time.sleep(3)
+
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, ".pf-v5-c-backdrop"))
+                )
+            except:
+                pass
+
+            settings_btn = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "HUD__dock-item__btn--settings"))
+            )
+            self.driver.execute_script("arguments[0].click();", settings_btn)
+            time.sleep(1)
+
+            version_dropdown = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((
+                    By.XPATH,
+                    "//div[contains(@class, 'settings-panel-version-selector')]//button[contains(@class, 'menu-toggle')]"
+                ))
+            )
+            self.driver.execute_script("arguments[0].click();", version_dropdown)
+            time.sleep(0.5)
+
+            version_items = self.driver.find_elements(
+                By.XPATH,
+                "//div[contains(@class, 'settings-panel-version-selector')]//ul[@role='menu']//button[@role='menuitem']"
+            )
+
+            for item in version_items:
+                try:
+                    version_text = item.find_element(
+                        By.XPATH, ".//span[contains(@class, 'menu__item-text')]"
+                    ).text.strip()
+                    if version_text:
+                        versions.append(version_text)
+                except:
+                    pass
+
+            self.driver.find_element(By.TAG_NAME, "body").click()
+            time.sleep(0.3)
+
+            try:
+                settings_btn = self.driver.find_element(By.ID, "HUD__dock-item__btn--settings")
+                self.driver.execute_script("arguments[0].click();", settings_btn)
+            except:
+                pass
+
+        except Exception as e:
+            self.logger(f"Error getting versions for {course_id}: {e}")
+
+        return versions
+
+    def update_courses_list(self, environment: str, output_path: Optional[Path] = None) -> Path:
+        """
+        Scrape the ROL catalog to build a complete courses-list.txt with all
+        courses and their available versions.
+
+        Steps:
+            1. Navigate to the catalog and collect every course entry.
+            2. For each unique course base name, open the course settings panel
+               and retrieve all published versions.
+            3. Write sorted ``coursename-version`` entries to *output_path*
+               (defaults to the project-root ``courses-list.txt``).
+
+        Returns the Path that was written.
+        """
+        from ..utils.course_resolver import get_courses_list_path
+
+        if output_path is None:
+            try:
+                output_path = get_courses_list_path()
+            except FileNotFoundError:
+                output_path = Path(__file__).resolve().parent.parent.parent / "courses-list.txt"
+
+        self.logger("=" * 60)
+        self.logger("UPDATING COURSES LIST")
+        self.logger("=" * 60)
+
+        self.go_to_catalog(environment)
+        self.filter_by_courses()
+        catalog_courses = self.get_all_courses()
+
+        if not catalog_courses:
+            self.logger("No courses found in catalog – aborting update.")
+            return output_path
+
+        self.logger(f"Catalog returned {len(catalog_courses)} course(s). "
+                     "Fetching versions for each…")
+
+        all_entries: list[str] = []
+        failed_courses: list[str] = []
+
+        for idx, course in enumerate(catalog_courses):
+            course_id = course["id"]
+            course_name, _ = self._parse_course_id(course_id)
+
+            self.logger(f"  [{idx + 1}/{len(catalog_courses)}] {course_id} – "
+                         "fetching versions…")
+
+            try:
+                versions = self.get_available_versions(course_id, environment)
+            except Exception as exc:
+                self.logger(f"    ⚠ Failed to get versions for {course_id}: {exc}")
+                failed_courses.append(course_id)
+                all_entries.append(course_id)
+                continue
+
+            if versions:
+                for ver in versions:
+                    entry = f"{course_name}-{ver}"
+                    all_entries.append(entry)
+                self.logger(f"    Found {len(versions)} version(s): "
+                             f"{', '.join(versions)}")
+            else:
+                all_entries.append(course_id)
+                self.logger(f"    No version dropdown – keeping catalog entry")
+
+        unique_entries = sorted(set(all_entries))
+
+        output_path = Path(output_path)
+        output_path.write_text("\n".join(unique_entries) + "\n")
+
+        self.logger(f"\n{'=' * 60}")
+        self.logger(f"Wrote {len(unique_entries)} entries to {output_path}")
+        if failed_courses:
+            self.logger(f"⚠ Failed to fetch versions for "
+                         f"{len(failed_courses)} course(s): "
+                         f"{', '.join(failed_courses)}")
+        self.logger("=" * 60)
+
+        return output_path
 
     def close_browser(self):
         self.logger("Closing browser.")
