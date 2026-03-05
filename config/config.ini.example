@@ -31,6 +31,10 @@ SNOW_FEEDBACK_QUEUE_PATH = <ask to carias@redhat.com>
 # QA command execution settings
 command_delay_seconds = 3
 install_command_delay_seconds = 30
+# Seconds to wait per character when pasting commands (increase for slow connections)
+paste_delay_per_char = 0.01
+# Default WebDriverWait timeout in seconds (increase for slow connections)
+driver_wait_seconds = 2
 
 [Jira]
 # Add any non-sensitive Jira configurations here

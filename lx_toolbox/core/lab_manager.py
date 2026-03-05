@@ -1260,7 +1260,8 @@ class LabManager:
             command: The command being pasted
             min_wait: Minimum wait time in seconds (default 0.5s to allow modal to close)
         """
-        calculated_wait = len(command) * 0.01
+        delay_per_char = self.config.get("QA", "paste_delay_per_char", 0.01)
+        calculated_wait = len(command) * delay_per_char
         time.sleep(max(calculated_wait, min_wait))
 
     def introduce_command_to_console(self, command: str, auto_enter: bool = True):
