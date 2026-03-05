@@ -1260,7 +1260,7 @@ class LabManager:
             command: The command being pasted
             min_wait: Minimum wait time in seconds (default 0.5s to allow modal to close)
         """
-        calculated_wait = len(command) * 0.1
+        calculated_wait = len(command) * 0.01
         time.sleep(max(calculated_wait, min_wait))
 
     def introduce_command_to_console(self, command: str, auto_enter: bool = True):
@@ -1324,18 +1324,12 @@ class LabManager:
                     pass
 
                 # Using the specific XPath from the original implementation
-                enter_key_xpath = '/html/body/div/div/div[3]/div[2]/div/div[4]/button[13]'
-                try:
-                    enter_key = WebDriverWait(self.driver, 10).until(
+                enter_key_xpath = '//button[text()="↵"]'
+                enter_key = WebDriverWait(self.driver, 1).until(
                         EC.element_to_be_clickable((By.XPATH, enter_key_xpath))
                     )
-                    enter_key.click()
-                except TimeoutException:
-                    # Fallback to generic Enter key search
-                    try:
-                        self._click_virtual_keyboard_key("↵")
-                    except Exception as e_enter:
-                        self.logger(f"Could not press Enter key: {e_enter}")
+                enter_key.click()
+                
 
         except Exception as e:
             self.logger(f"Error introducing command '{command[:50]}...': {e}")
@@ -1920,7 +1914,6 @@ class LabManager:
             # Ctrl+L to clear the terminal screen via the virtual keyboard
             self._click_virtual_keyboard_key("Ctrl")
             self._click_virtual_keyboard_key("l")
-            self._click_virtual_keyboard_key("Ctrl")  # Release Ctrl
             time.sleep(0.5)
             command = "cd; date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
