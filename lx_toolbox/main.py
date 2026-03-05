@@ -342,7 +342,7 @@ def versions(ctx, course_name):
 @click.argument('course_id')
 @click.argument('chapter_section', required=False, default=None)
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
-@click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
+@click.option('--browser', '-b', default='chrome', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=False, help='Run browser in no-headless mode')
 @click.option('--tune', is_flag=True, default=False, help='Tune the workstation with Ricardo DaCosta\'s tools')
 @click.pass_context

@@ -9,6 +9,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 # Assuming WebDriver exceptions like TimeoutException might be caught
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, NoSuchElementException
+from selenium.webdriver.common.keys import Keys
 
 from .base_selenium_driver import BaseSeleniumDriver
 from ..utils.config_manager import ConfigManager
@@ -1015,6 +1016,7 @@ class LabManager:
         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", workstation_button)
         time.sleep(0.5)
         self.driver.execute_script("arguments[0].click();", workstation_button)
+        self.driver.execute_script("document.body.style.zoom = '0.75'")
         
         # Wait for new window/tab and switch to it
         WebDriverWait(self.driver, 30).until(EC.number_of_windows_to_be(2))
@@ -1031,8 +1033,14 @@ class LabManager:
         
         for attempt in range(max_keyboard_retries):
             try:
+                settings_button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Settings"]'))
+                )
+                settings_button.click()
+                time.sleep(0.5)
+
                 show_keyboard_button = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="showKeyboard"]'))
+                    EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Show")]'))
                 )
                 show_keyboard_button.click()
                 time.sleep(2.5)
@@ -1183,7 +1191,7 @@ class LabManager:
             timeout: Maximum time to wait for the key to be clickable
         """
         try:
-            key_xpath = f'//div[@class="guac-keyboard-group"]//div[text()="{key_name}"]'
+            key_xpath = f'/html/body/div/div/div/div[2]/div//button[text()="{key_name}"]'
             key_element = WebDriverWait(self.driver, timeout).until(
                 EC.element_to_be_clickable((By.XPATH, key_xpath))
             )
@@ -1199,7 +1207,7 @@ class LabManager:
         """
         self._click_virtual_keyboard_key("Esc")
         self._click_virtual_keyboard_key("Esc")
-        self._click_virtual_keyboard_key("Enter")
+        self._click_virtual_keyboard_key("↵")
         time.sleep(2.5)
 
         self.introduce_command_to_console('student', auto_enter=True)
@@ -1268,23 +1276,38 @@ class LabManager:
 
         try:
             # Open text dialog
+            settings_button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Settings"]'))
+                )
+            settings_button.click()
+            time.sleep(0.5)
 
-            send_text_dialog_button = self.wait.until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="showSendTextDialog"]'))
+            show_keyboard_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Send Text")]'))
             )
-            send_text_dialog_button.click()
+            show_keyboard_button.click()
+            time.sleep(0.5)
+
 
             # Paste command into text box
             text_input_area = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="sendTextInput"]'))
+                EC.element_to_be_clickable((By.XPATH, '//textarea'))
             )
             text_input_area.send_keys(command)
 
             # Click Send button to send the command
-            send_text_button = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="sendTextButton"]'))
-            )
-            send_text_button.click()
+            try:
+                text_input_area.send_keys(Keys.CONTROL + Keys.ENTER)
+            except Exception as e:
+                self.logger(f"Error sending command: {e}")
+                try:
+                    send_text_button = self.wait.until(
+                        EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "Send")]'))
+                    )
+                    send_text_button.click()
+                except Exception as e:
+                    self.logger(f"Error sending command: {e}")
+
             
             # Wait proportional to command length
             self._wait_for_command_to_paste(command)
@@ -1301,7 +1324,7 @@ class LabManager:
                     pass
 
                 # Using the specific XPath from the original implementation
-                enter_key_xpath = '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'
+                enter_key_xpath = '/html/body/div/div/div[3]/div[2]/div/div[4]/button[13]'
                 try:
                     enter_key = WebDriverWait(self.driver, 10).until(
                         EC.element_to_be_clickable((By.XPATH, enter_key_xpath))
@@ -1310,7 +1333,7 @@ class LabManager:
                 except TimeoutException:
                     # Fallback to generic Enter key search
                     try:
-                        self._click_virtual_keyboard_key("Enter")
+                        self._click_virtual_keyboard_key("↵")
                     except Exception as e_enter:
                         self.logger(f"Could not press Enter key: {e_enter}")
 
