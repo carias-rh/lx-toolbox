@@ -46,6 +46,7 @@ class TeamConfig:
     auto_resolve_reporters: List[str] = None
     acknowledgment_template: str = ""
     frontend_shift_manager_url: Optional[str] = None
+    frontend_group_param: Optional[str] = None
     
     def __post_init__(self):
         # Normalize assignment_group_id to a list of strings
@@ -197,6 +198,64 @@ Red Hat Training Support
 Please note: If your request was submitted over the weekend, we will review it on the next working day.
 """
         )
+
+        # GLS Customer Experience — per-group sub-teams
+        # Each sub-region is a first-class team sharing the region's frontend.
+        # The frontend_group_param tells who_is_on_shift to pass ?group=<slug>.
+        # Replace PLACEHOLDER sys_ids with real SNOW assignment_group sys_ids.
+        _gls_cx_ack = """Hi {customer_name},
+
+Thank you for contacting the RHLS Support Team.
+
+We've received your request and shall get back to you at the earliest.
+
+Best Regards,
+{assignee_name}
+Red Hat Training Support
+
+Please note: If your request was submitted over the weekend, we will review it on the next working day.
+"""
+        _gls_cx_regions = {
+            "gls-cx-apac": {
+                "url_key": ("GLS_CX_APAC", "FRONTEND_OPENSHIFT_ROUTE"),
+                "groups": {
+                    "anz":   "PLACEHOLDER-anz-sys-id",
+                    "asean": "PLACEHOLDER-asean-sys-id",
+                    "gcg":   "PLACEHOLDER-gcg-sys-id",
+                    "india": "PLACEHOLDER-india-sys-id",
+                    "japan": "PLACEHOLDER-japan-sys-id",
+                    "korea": "PLACEHOLDER-korea-sys-id",
+                },
+            },
+            "gls-cx-emea": {
+                "url_key": ("GLS_CX_EMEA", "FRONTEND_OPENSHIFT_ROUTE"),
+                "groups": {
+                    # TODO: fill with EMEA sub-region slugs → assignment_group sys_ids
+                },
+            },
+            "gls-cx-namer": {
+                "url_key": ("GLS_CX_NAMER", "FRONTEND_OPENSHIFT_ROUTE"),
+                "groups": {
+                    # TODO: fill with NAMER sub-region slugs → assignment_group sys_ids
+                },
+            },
+            "gls-cx-latam": {
+                "url_key": ("GLS_CX_LATAM", "FRONTEND_OPENSHIFT_ROUTE"),
+                "groups": {
+                    # TODO: fill with LATAM sub-region slugs → assignment_group sys_ids
+                },
+            },
+        }
+        for region_prefix, region_cfg in _gls_cx_regions.items():
+            frontend_url = self.config.get(*region_cfg["url_key"])
+            for group_slug, agid in region_cfg["groups"].items():
+                teams[f"{region_prefix}-{group_slug}"] = TeamConfig(
+                    team_name=f"GLS CX {region_prefix.split('-')[-1].upper()} - {group_slug.upper()}",
+                    assignment_group_id=agid,
+                    frontend_shift_manager_url=frontend_url,
+                    frontend_group_param=group_slug,
+                    acknowledgment_template=_gls_cx_ack,
+                )
 
         # Remote Exam - Readiness Support 962d0c0d1b740a504cec766dcc4bcb7a
         teams["remote-exam-readiness-support"] = TeamConfig(
@@ -727,6 +786,46 @@ Best Regards,
             return False
 
 
+    def process_gls_cx_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str) -> bool:
+        """Process a GLS Customer Experience ticket: ACK + assign."""
+        try:
+            assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_config.team_name)
+            if not assignee_sys_id:
+                logger.error(f"Could not find sys_id for assignee: {assignee_name}")
+                return False
+
+            contact_source = ticket.get('contact_source', '')
+            if contact_source:
+                name_parts = contact_source.split()
+                customer_name = f"{name_parts[0]} {name_parts[1] if len(name_parts) > 1 else ''}".strip()
+            else:
+                customer_name = ""
+
+            # Phase 1: ACK
+            updates = {'state': TicketState.IN_PROGRESS.value}
+            primary_group_id = team_config.get_primary_assignment_group_id()
+            if primary_group_id:
+                updates['assignment_group'] = primary_group_id
+            ack_message = team_config.acknowledgment_template.format(
+                customer_name=customer_name,
+                assignee_name=assignee_name,
+                team_name=team_config.team_name,
+            )
+            updates['comments'] = ack_message
+            if not self.update_ticket(ticket['sys_id'], updates):
+                logger.error(f"Failed to ACK ticket {ticket['number']}")
+                return False
+            time.sleep(1)
+
+            # Phase 2: Assign
+            if not self.update_ticket(ticket['sys_id'], {'assigned_to': assignee_sys_id}):
+                logger.error(f"Failed to assign ticket {ticket['number']} to {assignee_name}")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Error processing GLS CX ticket {ticket.get('number', 'unknown')}: {e}")
+            return False
+
     def process_exam_readiness_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str) -> bool:
         """Process a Remote Exam - Readiness Support ticket with ACK only."""
         try:
@@ -832,6 +931,11 @@ Best Regards,
 
     def who_is_on_shift(self, team_config: TeamConfig) -> Optional[str]:
         is_round_robin_enabled = False
+        # Extra query params forwarded to /api/shift and /api/round_robin
+        # (used by the gls-cx frontend to resolve the right sub-group)
+        group_params = {}
+        if team_config.frontend_group_param:
+            group_params["group"] = team_config.frontend_group_param
         try:
             if team_config.frontend_shift_manager_url != None:
                 # Check if round-robin is enabled
@@ -845,7 +949,7 @@ Best Regards,
             
             if is_round_robin_enabled:
                 # Get next assignee from round-robin
-                round_robin_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin")
+                round_robin_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin", params=group_params)
                 round_robin_response.raise_for_status()
                 round_robin_data = round_robin_response.json()
                 assignee_name = round_robin_data.get("name")
@@ -853,7 +957,7 @@ Best Regards,
                 return assignee_name
             else:
                 # Get assignee from shift endpoint
-                shift_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/shift")
+                shift_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/shift", params=group_params)
                 shift_response.raise_for_status()
                 shift_data = shift_response.json()
                 shift_name = shift_data.get("name")
@@ -916,6 +1020,11 @@ Best Regards,
 #                            logger.debug("No one is on shift, stopping ticket processing")
 #                            break
                     success = self.process_gls_rhls_engagement_ticket(ticket, team_config, assignee_name)
+                elif "gls-cx" in team_key:
+                    if assignee_name == "None":
+                        logger.debug("No one is on shift, stopping ticket processing")
+                        break
+                    success = self.process_gls_cx_ticket(ticket, team_config, assignee_name)
                 elif "exam" in team_key:
                     if assignee_name == "None":
                         logger.debug("No one is on shift, stopping ticket processing")
@@ -931,7 +1040,7 @@ Best Regards,
                         updates = {
                             'state': TicketState.IN_PROGRESS.value,
                             'category': team_config.category,
-                            'assigned_to': assignee_sys_id,  # Use sys_id instead of display name
+                            'assigned_to': assignee_sys_id,
                             'time_worked': '60'
                         }
                         primary_group_id = team_config.get_primary_assignment_group_id()
@@ -951,19 +1060,36 @@ Best Regards,
                 
         return stats
 
+    def _resolve_team_keys(self, team_key: str) -> List[str]:
+        """Resolve *team_key* to a list of concrete team keys.
+
+        If *team_key* matches a registered team directly, return it as-is.
+        Otherwise treat it as a prefix and return all teams whose key starts
+        with ``team_key + "-"``.  This lets a single worker handle a family
+        of sub-teams (e.g. ``gls-cx-apac`` expands to ``gls-cx-apac-anz``,
+        ``gls-cx-apac-asean``, etc.).
+        """
+        if team_key in self.teams:
+            return [team_key]
+        prefix = team_key + "-"
+        sub = sorted(k for k in self.teams if k.startswith(prefix))
+        return sub if sub else [team_key]
+
     def run_continuous_assignment(self, team_key: str, assignee_name: str = None, interval_seconds: int = 60):
-        """Run continuous auto-assignment for a team"""
-        logger.info(f"Starting continuous auto-assignment for team {team_key}")
+        """Run continuous auto-assignment for a team (or team group)"""
+        sub_teams = self._resolve_team_keys(team_key)
+        logger.info(f"Starting continuous auto-assignment for: {sub_teams}")
         
         # Preload team data once at the start for efficient lookups
-        self.preload_team_data([team_key])
+        self.preload_team_data(sub_teams)
         
         while True:
-            try:
-                stats = self.run_auto_assignment(team_key, assignee_name)
-                if stats["assigned"] > 0 or stats["resolved"] > 0:
-                    logger.debug(f"Assignment cycle complete: {stats}")
-            except Exception as e:
-                logger.error(f"Error in assignment cycle: {e}")
+            for sub_key in sub_teams:
+                try:
+                    stats = self.run_auto_assignment(sub_key, assignee_name)
+                    if stats["assigned"] > 0 or stats["resolved"] > 0:
+                        logger.debug(f"Assignment cycle complete for {sub_key}: {stats}")
+                except Exception as e:
+                    logger.error(f"Error in assignment cycle for {sub_key}: {e}")
                 
             time.sleep(interval_seconds) 

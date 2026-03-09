@@ -1,0 +1,256 @@
+{
+  "groups": [
+    {
+      "id": "anz",
+      "name": "ANZ",
+      "snow_queue": "ANZ GLS Support",
+      "assignment_group_ids": [
+        "PLACEHOLDER-anz-sys-id"
+      ]
+    },
+    {
+      "id": "asean",
+      "name": "ASEAN",
+      "snow_queue": "ASEAN GLS Support",
+      "assignment_group_ids": [
+        "PLACEHOLDER-asean-sys-id"
+      ]
+    },
+    {
+      "id": "gcg",
+      "name": "GCG",
+      "snow_queue": "GCG GLS Support",
+      "assignment_group_ids": [
+        "PLACEHOLDER-gcg-sys-id"
+      ]
+    },
+    {
+      "id": "india",
+      "name": "India",
+      "snow_queue": "India GLS Support",
+      "assignment_group_ids": [
+        "PLACEHOLDER-india-sys-id"
+      ]
+    },
+    {
+      "id": "japan",
+      "name": "Japan",
+      "snow_queue": "Japan GLS Support",
+      "assignment_group_ids": [
+        "PLACEHOLDER-japan-sys-id"
+      ]
+    },
+    {
+      "id": "korea",
+      "name": "Korea",
+      "snow_queue": "KR GLS Support",
+      "assignment_group_ids": [
+        "PLACEHOLDER-korea-sys-id"
+      ]
+    }
+  ],
+  "members": [
+    {
+      "id": "m-nisha",
+      "name": "Nisha",
+      "timezone": "Asia/Kolkata",
+      "working_hours_start": "09:00",
+      "working_hours_end": "17:30",
+      "working_days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "m-sayuri",
+      "name": "Sayuri Tanioka",
+      "timezone": "Asia/Tokyo",
+      "working_hours_start": "09:00",
+      "working_hours_end": "17:30",
+      "working_days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "m-jennifer",
+      "name": "Jennifer Jin",
+      "timezone": "Asia/Seoul",
+      "working_hours_start": "09:00",
+      "working_hours_end": "17:30",
+      "working_days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "m-linda",
+      "name": "Linda Yang",
+      "timezone": "Asia/Shanghai",
+      "working_hours_start": "09:00",
+      "working_hours_end": "17:30",
+      "working_days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "m-nadeem",
+      "name": "Nadeem V",
+      "timezone": "Asia/Kolkata",
+      "working_hours_start": "09:00",
+      "working_hours_end": "17:30",
+      "working_days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "m-maninder",
+      "name": "Maninder Pal Jolly",
+      "timezone": "Asia/Kolkata",
+      "working_hours_start": "09:00",
+      "working_hours_end": "17:30",
+      "working_days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "m-malini",
+      "name": "Malini Aloysius",
+      "timezone": "Asia/Kolkata",
+      "working_hours_start": "09:00",
+      "working_hours_end": "17:30",
+      "working_days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "m-pallavi",
+      "name": "Pallavi Singh",
+      "timezone": "Asia/Kolkata",
+      "working_hours_start": "09:00",
+      "working_hours_end": "17:30",
+      "working_days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  ],
+  "group_priorities": [
+    {
+      "group_id": "anz",
+      "priority": 1,
+      "member_ids": [
+        "m-nisha"
+      ]
+    },
+    {
+      "group_id": "anz",
+      "priority": 2,
+      "member_ids": [
+        "m-sayuri",
+        "m-jennifer"
+      ]
+    },
+    {
+      "group_id": "asean",
+      "priority": 1,
+      "member_ids": [
+        "m-nisha"
+      ]
+    },
+    {
+      "group_id": "asean",
+      "priority": 2,
+      "member_ids": [
+        "m-sayuri",
+        "m-jennifer"
+      ]
+    },
+    {
+      "group_id": "gcg",
+      "priority": 1,
+      "member_ids": [
+        "m-linda"
+      ]
+    },
+    {
+      "group_id": "gcg",
+      "priority": 2,
+      "member_ids": [
+        "m-nisha"
+      ]
+    },
+    {
+      "group_id": "india",
+      "priority": 1,
+      "member_ids": [
+        "m-nadeem",
+        "m-maninder"
+      ]
+    },
+    {
+      "group_id": "india",
+      "priority": 2,
+      "member_ids": [
+        "m-malini"
+      ]
+    },
+    {
+      "group_id": "japan",
+      "priority": 1,
+      "member_ids": [
+        "m-sayuri"
+      ]
+    },
+    {
+      "group_id": "japan",
+      "priority": 2,
+      "member_ids": [
+        "m-pallavi"
+      ]
+    },
+    {
+      "group_id": "korea",
+      "priority": 1,
+      "member_ids": [
+        "m-jennifer"
+      ]
+    },
+    {
+      "group_id": "korea",
+      "priority": 2,
+      "member_ids": [
+        "m-sayuri"
+      ]
+    }
+  ],
+  "rr": {}
+}

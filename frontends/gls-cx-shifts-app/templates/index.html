@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GLS CX Shift Manager</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <header>
+    <h1>GLS CX &mdash; Shift Manager</h1>
+    <p class="timestamp">UTC now: <strong>{{ now_utc.strftime('%Y-%m-%d %H:%M:%S') }}</strong></p>
+  </header>
+
+  {# ── Status Dashboard ────────────────────────────────────────── #}
+  <section id="status">
+    <h2>Current Status</h2>
+    <div class="status-grid">
+      {% for g in groups %}
+      {% set info = group_assignees.get(g.id, {}) %}
+      {% set m = info.get('member') %}
+      <div class="status-card {{ 'active' if m else 'inactive' }}">
+        <div class="card-header">{{ g.name }}</div>
+        <div class="card-body">
+          {% if m %}
+            <span class="assignee-name">{{ m.name }}</span>
+            <span class="badge priority-badge">P{{ info.priority }}</span>
+            {% if info.round_robin %}<span class="badge rr-badge">RR</span>{% endif %}
+          {% else %}
+            <span class="no-one">No one available</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {# ── Priority Configuration ──────────────────────────────────── #}
+  <section id="priorities">
+    <h2>Priority Configuration</h2>
+    {% for g in groups %}
+    <div class="group-priority-block">
+      <h3>{{ g.name }}
+        {% if g.snow_queue %}<small class="queue-label">({{ g.snow_queue }})</small>{% endif %}
+      </h3>
+      <table class="priority-table">
+        <thead><tr><th>Priority</th><th>Members</th><th></th></tr></thead>
+        <tbody>
+          {% set ns = namespace(found=false) %}
+          {% for p in group_priorities|sort(attribute='priority') %}
+          {% if p.group_id == g.id %}
+          {% set ns.found = true %}
+          <tr>
+            <td class="priority-level">P{{ p.priority }}</td>
+            <td>
+              {% for mid in p.member_ids %}
+                {% set mbr = member_map.get(mid) %}
+                {% if mbr %}
+                <span class="member-chip {{ 'available' if member_availability.get(mid) else 'unavailable' }}">
+                  {{ mbr.name }}
+                  <form method="post" action="{{ url_for('remove_priority') }}" class="inline-form">
+                    <input type="hidden" name="group_id" value="{{ g.id }}">
+                    <input type="hidden" name="priority" value="{{ p.priority }}">
+                    <input type="hidden" name="member_id" value="{{ mid }}">
+                    <button type="submit" class="btn-chip-remove" title="Remove">&times;</button>
+                  </form>
+                </span>
+                {% endif %}
+              {% endfor %}
+            </td>
+            <td></td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+          {% if not ns.found %}
+          <tr><td colspan="3" class="muted">No priorities configured yet.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+
+      <form method="post" action="{{ url_for('add_priority') }}" class="inline-add-form">
+        <input type="hidden" name="group_id" value="{{ g.id }}">
+        <select name="member_id" required>
+          <option value="">-- member --</option>
+          {% for m in members %}
+          <option value="{{ m.id }}">{{ m.name }}</option>
+          {% endfor %}
+        </select>
+        <label>Priority:
+          <input type="number" name="priority" value="1" min="1" max="9" style="width:3.5em">
+        </label>
+        <button type="submit" class="btn btn-sm">+ Assign</button>
+      </form>
+    </div>
+    {% endfor %}
+  </section>
+
+  {# ── Members ─────────────────────────────────────────────────── #}
+  <section id="members">
+    <h2>Members</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th><th>Timezone</th><th>Working Hours</th><th>Days</th><th>Available</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set day_names = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+        {% for m in members %}
+        <tr>
+          <td>{{ m.name }}</td>
+          <td>{{ m.timezone }}</td>
+          <td>{{ m.working_hours_start }}&ndash;{{ m.working_hours_end }}</td>
+          <td class="days-cell">
+            {% for d in m.working_days|sort %}{{ day_names[d] }}{% if not loop.last %}, {% endif %}{% endfor %}
+          </td>
+          <td>
+            {% if member_availability.get(m.id) %}
+              <span class="dot green"></span> Yes
+            {% else %}
+              <span class="dot red"></span> No
+            {% endif %}
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('delete_member', member_id=m.id) }}">
+              <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete {{ m.name }}?')">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <details class="add-form-details">
+      <summary>+ Add Member</summary>
+      <form method="post" action="{{ url_for('add_member') }}" class="add-form">
+        <label>Name <input type="text" name="name" required></label>
+        <label>Timezone <input type="text" name="timezone" value="UTC" required></label>
+        <label>Start <input type="time" name="working_hours_start" value="09:00" required></label>
+        <label>End <input type="time" name="working_hours_end" value="17:30" required></label>
+        <fieldset class="days-fieldset">
+          <legend>Working Days</legend>
+          {% for i, d in [(0,'Mon'),(1,'Tue'),(2,'Wed'),(3,'Thu'),(4,'Fri'),(5,'Sat'),(6,'Sun')] %}
+          <label class="day-checkbox">
+            <input type="checkbox" name="working_days" value="{{ i }}" {{ 'checked' if i < 5 }}>
+            {{ d }}
+          </label>
+          {% endfor %}
+        </fieldset>
+        <button type="submit" class="btn">Add Member</button>
+      </form>
+    </details>
+  </section>
+
+  {# ── Groups ──────────────────────────────────────────────────── #}
+  <section id="groups">
+    <h2>Groups (SNOW Queues)</h2>
+    <table class="data-table">
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>SNOW Queue</th><th>Assignment Group IDs</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for g in groups %}
+        <tr>
+          <td><code>{{ g.id }}</code></td>
+          <td>{{ g.name }}</td>
+          <td>{{ g.get('snow_queue', '') }}</td>
+          <td class="mono">{{ ', '.join(g.get('assignment_group_ids', [])) }}</td>
+          <td>
+            <form method="post" action="{{ url_for('delete_group', group_id=g.id) }}">
+              <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete group {{ g.name }}?')">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <details class="add-form-details">
+      <summary>+ Add Group</summary>
+      <form method="post" action="{{ url_for('add_group') }}" class="add-form">
+        <label>ID (slug) <input type="text" name="id" placeholder="e.g. anz" required></label>
+        <label>Display Name <input type="text" name="name" placeholder="e.g. ANZ" required></label>
+        <label>SNOW Queue Name <input type="text" name="snow_queue" placeholder="e.g. ANZ GLS Support"></label>
+        <label>Assignment Group IDs <input type="text" name="assignment_group_ids" placeholder="comma-separated sys_ids"></label>
+        <button type="submit" class="btn">Add Group</button>
+      </form>
+    </details>
+  </section>
+
+  <footer>
+    <p>Auto-refreshes on page reload. API: <code>GET /api/shift?group=&lt;id&gt;</code> | <code>GET /api/status</code></p>
+  </footer>
+</body>
+</html>
