@@ -96,186 +96,158 @@ class ServiceNowAutoAssign:
         self._team_members_cache = {}
         
     def _load_team_configurations(self) -> Dict[str, TeamConfig]:
-        """Load team configurations from config or define them programmatically"""
+        """Load team configurations.
+
+        Static teams read their assignment_group_id from config/env
+        (falling back to legacy hardcoded values).
+        GLS CX teams are built dynamically from SNOW_GROUPS_CONFIG.
+        """
         teams = {}
-        
-        # T1 Team Configuration  
+
+        # -- static teams ------------------------------------------------
+
         teams["t1"] = TeamConfig(
             team_name="RHT Learner Experience",
-            assignment_group_id="5afc8ba24f8cf6004db6022f0310c70a",
+            assignment_group_id=(
+                self.config.get("T1", "ASSIGNMENT_GROUP_ID")
+                or "5afc8ba24f8cf6004db6022f0310c70a"
+            ),
             category="RHLS Standard Support",
-            frontend_shift_manager_url=self.config.get("T1", "FRONTEND_OPENSHIFT_ROUTE"),            
-            acknowledgment_template="""Hi {customer_name},
-
-Thanks for contacting Red Hat Online Learning support team.
-
-We have received your request and working on it, will update you at the earliest.
-
-Best Regards,
-{assignee_name} 
-Red Hat Training Technical Support"""
+            frontend_shift_manager_url=self.config.get("T1", "FRONTEND_OPENSHIFT_ROUTE"),
+            acknowledgment_template=(
+                self.config.get("T1", "ACKNOWLEDGMENT_TEMPLATE")
+                or "Hi {customer_name},\n\nThanks for contacting Red Hat Online Learning support team.\n\nWe have received your request and working on it, will update you at the earliest.\n\nBest Regards,\n{assignee_name}\nRed Hat Training Technical Support"
+            ),
         )
-        
-        # T2 Team Configuration
+
         teams["t2"] = TeamConfig(
-            team_name="RHT Learner Experience - T2", 
-            assignment_group_id="974cb3e01bc31c50c57c3224cc4bcbfe",
+            team_name="RHT Learner Experience - T2",
+            assignment_group_id=(
+                self.config.get("T2", "ASSIGNMENT_GROUP_ID")
+                or "974cb3e01bc31c50c57c3224cc4bcbfe"
+            ),
             category="RHLS Basic External Support",
             subcategory="Course Content",
             issue_type="Other",
             frontend_shift_manager_url=self.config.get("T2", "FRONTEND_OPENSHIFT_ROUTE"),
-            acknowledgment_template="""Hi {customer_name},
-
-Thanks for submitting your feedback to the Learner Experience Team.
-            
-We are reviewing your message and will get back to you as soon as possible.
-
-Best Regards,
-{assignee_name} 
-{team_name}""",
+            acknowledgment_template=(
+                self.config.get("T2", "ACKNOWLEDGMENT_TEMPLATE")
+                or "Hi {customer_name},\n\nThanks for submitting your feedback to the Learner Experience Team.\n\nWe are reviewing your message and will get back to you as soon as possible.\n\nBest Regards,\n{assignee_name}\n{team_name}"
+            ),
             auto_resolve_reporters=[
-                "gls-ftaylor", "lauber", "rht-jordisola", "rht-zgutterman", "abhkuma@redhat.com", 
-                "lxncastill", "rh-ee-smaity", "nehsingh@redhat.com", "rht-bchardim", "yuvaraj-rhls", 
-                "rht-pagomez", "vig@redhat.com", "rhn-gls-rtaniguchi", "abpatel@redhat.com", 
-                "rh-ee-tshi", "rht-sbonnevi", "rht-psolarvi", "wraja@redhat.com", "chetan-rhls", 
-                "rdacosta1@redhat.com", "ssanyal@redhat.com", "rh-ee-jingyuwa", "vsing@redhat.com", 
-                "shasingh01", "rh-ee-jyague", "rhn-gps-jdandrea", "carias@redhat.com", 
-                "rht-anhernan", "rht-eparenti", "amarirom@redhat.com", "rh-ee-mtahmeed", 
+                "gls-ftaylor", "lauber", "rht-jordisola", "rht-zgutterman", "abhkuma@redhat.com",
+                "lxncastill", "rh-ee-smaity", "nehsingh@redhat.com", "rht-bchardim", "yuvaraj-rhls",
+                "rht-pagomez", "vig@redhat.com", "rhn-gls-rtaniguchi", "abpatel@redhat.com",
+                "rh-ee-tshi", "rht-sbonnevi", "rht-psolarvi", "wraja@redhat.com", "chetan-rhls",
+                "rdacosta1@redhat.com", "ssanyal@redhat.com", "rh-ee-jingyuwa", "vsing@redhat.com",
+                "shasingh01", "rh-ee-jyague", "rhn-gps-jdandrea", "carias@redhat.com",
+                "rht-anhernan", "rht-eparenti", "amarirom@redhat.com", "rh-ee-mtahmeed",
                 "rhn-engineering-daobrien", "nehsingh@redhat.com", "yassingh@redhat.com"
-            ]
+            ],
         )
-        
-        # GLS RHLS Engagement - APAC
+
+        _gls_engagement_ack = (
+            self.config.get("GLS_RHLS_ENGAGEMENT", "ACKNOWLEDGMENT_TEMPLATE")
+            or "Hi {customer_name},\n\nThank you for contacting the RHLS Support Team.\n\nWe've received your request and shall get back to you at the earliest.\n\nBest Regards,\nRed Hat Training Support\n\nPlease note: If your request was submitted over the weekend, we will review it on the next working day."
+        )
+
         teams["gls-rhls-engagement-apac"] = TeamConfig(
             team_name="GLS RHLS Engagement - APAC",
-            assignment_group_id="9fddf7032b24ea50ec2ef42f4e91bf84",
-            #frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_APAC", "FRONTEND_OPENSHIFT_ROUTE"),
-            acknowledgment_template="""Hi {customer_name},
-
-Thank you for contacting the RHLS Support Team.
-
-We've received your request and shall get back to you at the earliest.
-
-Best Regards,
-Red Hat Training Support 
-
-Please note: If your request was submitted over the weekend, we will review it on the next working day.
-"""
+            assignment_group_id=(
+                self.config.get("GLS_RHLS_ENGAGEMENT_APAC", "ASSIGNMENT_GROUP_ID")
+                or "9fddf7032b24ea50ec2ef42f4e91bf84"
+            ),
+            frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_APAC", "FRONTEND_OPENSHIFT_ROUTE"),
+            acknowledgment_template=_gls_engagement_ack,
         )
 
-        # GLS RHLS Engagement - EMEA
         teams["gls-rhls-engagement-emea"] = TeamConfig(
             team_name="GLS RHLS Engagement - EMEA",
-            assignment_group_id="f53b635147b46a90b45f42fc416d4387",
-            #frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_EMEA", "FRONTEND_OPENSHIFT_ROUTE"),
-            acknowledgment_template="""Hi {customer_name},
-
-Thank you for contacting the RHLS Support Team.
-
-We've received your request and shall get back to you at the earliest.
-
-Best Regards,
-Red Hat Training Support 
-
-Please note: If your request was submitted over the weekend, we will review it on the next working day.
-"""
+            assignment_group_id=(
+                self.config.get("GLS_RHLS_ENGAGEMENT_EMEA", "ASSIGNMENT_GROUP_ID")
+                or "f53b635147b46a90b45f42fc416d4387"
+            ),
+            frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_EMEA", "FRONTEND_OPENSHIFT_ROUTE"),
+            acknowledgment_template=_gls_engagement_ack,
         )
 
-        # GLS RHLS Engagement - NA
+        _na_agids_raw = self.config.get("GLS_RHLS_ENGAGEMENT_NA", "ASSIGNMENT_GROUP_ID")
         teams["gls-rhls-engagement-na"] = TeamConfig(
             team_name="GLS RHLS Engagement - NA",
-            assignment_group_id=["43aa77114770aa90b45f42fc416d43cf", "c8a0b31d47786a90b45f42fc416d43dc", "79323f5d47b86a90b45f42fc416d43f4"],
-            #frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_NA", "FRONTEND_OPENSHIFT_ROUTE"),
-            acknowledgment_template="""Hi {customer_name},
-
-Thank you for contacting the RHLS Support Team.
-
-We've received your request and shall get back to you at the earliest.
-
-Best Regards,
-Red Hat Training Support 
-
-Please note: If your request was submitted over the weekend, we will review it on the next working day.
-"""
+            assignment_group_id=(
+                [a.strip() for a in _na_agids_raw.split(",") if a.strip()]
+                if _na_agids_raw
+                else ["43aa77114770aa90b45f42fc416d43cf", "c8a0b31d47786a90b45f42fc416d43dc", "79323f5d47b86a90b45f42fc416d43f4"]
+            ),
+            frontend_shift_manager_url=self.config.get("GLS_RHLS_ENGAGEMENT_NA", "FRONTEND_OPENSHIFT_ROUTE"),
+            acknowledgment_template=_gls_engagement_ack,
         )
 
-        # GLS Customer Experience — per-group sub-teams
-        # Each sub-region is a first-class team sharing the region's frontend.
-        # The frontend_group_param tells who_is_on_shift to pass ?group=<slug>.
-        # Replace PLACEHOLDER sys_ids with real SNOW assignment_group sys_ids.
-        _gls_cx_ack = """Hi {customer_name},
-
-Thank you for contacting the RHLS Support Team.
-
-We've received your request and shall get back to you at the earliest.
-
-Best Regards,
-{assignee_name}
-Red Hat Training Support
-
-Please note: If your request was submitted over the weekend, we will review it on the next working day.
-"""
-        _gls_cx_regions = {
-            "gls-cx-apac": {
-                "url_key": ("GLS_CX_APAC", "FRONTEND_OPENSHIFT_ROUTE"),
-                "groups": {
-                    "anz":   "PLACEHOLDER-anz-sys-id",
-                    "asean": "PLACEHOLDER-asean-sys-id",
-                    "gcg":   "PLACEHOLDER-gcg-sys-id",
-                    "india": "PLACEHOLDER-india-sys-id",
-                    "japan": "PLACEHOLDER-japan-sys-id",
-                    "korea": "PLACEHOLDER-korea-sys-id",
-                },
-            },
-            "gls-cx-emea": {
-                "url_key": ("GLS_CX_EMEA", "FRONTEND_OPENSHIFT_ROUTE"),
-                "groups": {
-                    # TODO: fill with EMEA sub-region slugs → assignment_group sys_ids
-                },
-            },
-            "gls-cx-namer": {
-                "url_key": ("GLS_CX_NAMER", "FRONTEND_OPENSHIFT_ROUTE"),
-                "groups": {
-                    # TODO: fill with NAMER sub-region slugs → assignment_group sys_ids
-                },
-            },
-            "gls-cx-latam": {
-                "url_key": ("GLS_CX_LATAM", "FRONTEND_OPENSHIFT_ROUTE"),
-                "groups": {
-                    # TODO: fill with LATAM sub-region slugs → assignment_group sys_ids
-                },
-            },
-        }
-        for region_prefix, region_cfg in _gls_cx_regions.items():
-            frontend_url = self.config.get(*region_cfg["url_key"])
-            for group_slug, agid in region_cfg["groups"].items():
-                teams[f"{region_prefix}-{group_slug}"] = TeamConfig(
-                    team_name=f"GLS CX {region_prefix.split('-')[-1].upper()} - {group_slug.upper()}",
-                    assignment_group_id=agid,
-                    frontend_shift_manager_url=frontend_url,
-                    frontend_group_param=group_slug,
-                    acknowledgment_template=_gls_cx_ack,
-                )
-
-        # Remote Exam - Readiness Support 962d0c0d1b740a504cec766dcc4bcb7a
         teams["remote-exam-readiness-support"] = TeamConfig(
             team_name="Remote Exam - Readiness Support",
-            assignment_group_id="962d0c0d1b740a504cec766dcc4bcb7a",
+            assignment_group_id=(
+                self.config.get("REMOTE_EXAM_READINESS_SUPPORT", "ASSIGNMENT_GROUP_ID")
+                or "962d0c0d1b740a504cec766dcc4bcb7a"
+            ),
             frontend_shift_manager_url=self.config.get("REMOTE_EXAM_READINESS_SUPPORT", "FRONTEND_OPENSHIFT_ROUTE"),
-            acknowledgment_template="""Hi {customer_name},
+            acknowledgment_template=(
+                self.config.get("REMOTE_EXAM_READINESS_SUPPORT", "ACKNOWLEDGMENT_TEMPLATE")
+                or "Hi {customer_name},\n\nThank you for contacting the Remote Exam - Readiness Support Team.\n\nWe've received your request and shall get back to you at the earliest.\n\nBest Regards,\n{assignee_name}\n{team_name}"
+            ),
+        )
 
-Thank you for contacting the Remote Exam - Readiness Support Team.
+        # -- GLS CX dynamic teams from SNOW_GROUPS_CONFIG -----------------
 
-We've received your request and shall get back to you at the earliest.
+        self._load_gls_cx_teams(teams)
 
-Best Regards,
-{assignee_name} 
-{team_name}
-"""
-)
-
-        logger.debug(f"Loaded teams: {teams}")
+        logger.debug(f"Loaded teams: {list(teams.keys())}")
         return teams
+
+    def _load_gls_cx_teams(self, teams: Dict[str, "TeamConfig"]) -> None:
+        """Build GLS CX sub-team configs from the SNOW_GROUPS_CONFIG env var.
+
+        The env var is a JSON object:
+        {
+          "zones": [{"id": "apac", "name": "APAC"}, ...],
+          "groups": [
+            {"id": "anz", "name": "ANZ", "zone_id": "apac",
+             "assignment_group_ids": ["<sys_id>"]},
+            ...
+          ]
+        }
+        """
+        raw = self.config.get("SNOW", "GROUPS_CONFIG") or ""
+        if not raw:
+            return
+
+        try:
+            cfg = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.error("SNOW_GROUPS_CONFIG is not valid JSON – skipping GLS CX team loading")
+            return
+
+        frontend_url = self.config.get("FRONTEND", "OPENSHIFT_ROUTE")
+
+        _gls_cx_ack = (
+            self.config.get("GLS_CX", "ACKNOWLEDGMENT_TEMPLATE")
+            or "Hi {customer_name},\n\nThank you for contacting the RHLS Support Team.\n\nWe've received your request and shall get back to you at the earliest.\n\nBest Regards,\n{assignee_name}\nRed Hat Training Support\n\nPlease note: If your request was submitted over the weekend, we will review it on the next working day."
+        )
+
+        for group in cfg.get("groups", []):
+            slug = group.get("id")
+            agids = group.get("assignment_group_ids", [])
+            if not slug or not agids:
+                continue
+            zone_id = group.get("zone_id", "")
+            team_key = f"gls-cx-{zone_id}-{slug}" if zone_id else f"gls-cx-{slug}"
+            display_name = group.get("name", slug.upper())
+            teams[team_key] = TeamConfig(
+                team_name=f"GLS CX - {display_name}",
+                assignment_group_id=agids,
+                frontend_shift_manager_url=frontend_url,
+                frontend_group_param=slug,
+                acknowledgment_template=_gls_cx_ack,
+            )
 
     def _get_team_members(self, team_key: str) -> List[str]:
         """Get team member sys_ids, using cache to avoid repeated API calls"""
