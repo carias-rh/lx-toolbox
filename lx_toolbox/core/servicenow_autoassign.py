@@ -230,7 +230,7 @@ class ServiceNowAutoAssign:
 
         _gls_cx_ack = (
             self.config.get("GLS_CX", "ACKNOWLEDGMENT_TEMPLATE")
-            or "Hi {customer_name},\n\nThank you for contacting the RHLS Support Team.\n\nWe've received your request and shall get back to you at the earliest.\n\nBest Regards,\n{assignee_name}\nRed Hat Training Support\n\nPlease note: If your request was submitted over the weekend, we will review it on the next working day."
+            or "Hi {customer_name},\n\nThanks for contacting Red Hat Customer Experience team.\n\nWe have received your request and working on it, will update you at the earliest.\n\nBest Regards,\n{assignee_name}\nRed Hat Customer Experience Team"
         )
 
         for group in cfg.get("groups", []):
@@ -773,8 +773,8 @@ class ServiceNowAutoAssign:
             else:
                 customer_name = ""
 
-            # Phase 1: ACK
-            updates = {'state': TicketState.IN_PROGRESS.value}
+            # Phase 1: ACK (keep ticket in NEW state)
+            updates = {}
             primary_group_id = team_config.get_primary_assignment_group_id()
             if primary_group_id:
                 updates['assignment_group'] = primary_group_id
