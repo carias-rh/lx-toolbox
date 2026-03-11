@@ -354,52 +354,76 @@ class ServiceNowAutoAssign:
             logger.error(f"Error getting LMS token: {e}")
             return None
 
-    def lookup_user_name(self, username: str) -> str:
-        """Look up full name from LMS API, auto-refreshing token if expired"""
-        username = username.strip()
+    def lookup_user_name(self, username: str = None, email: str = None) -> str:
+        """Look up full name from LMS API, auto-refreshing token if expired.
+        Search by username or email; at least one must be provided.
+        """
+        identifier = (email or username or "").strip()
+        if not identifier:
+            return ""
+
         token = self.get_lms_token()
-        
         if not token:
-            return username
-            
+            return identifier
+
         headers = {'Authorization': f'Bearer {token}', 'Accept': '*/*'}
-        url = f"https://training-lms.redhat.com/ws/user?username={username}"
-        
+        base_url = "https://training-lms.redhat.com/ws/user"
+
+        if email:
+            url = f"{base_url}/search?q={email}"
+        else:
+            url = f"{base_url}?username={username}"
+
         try:
             response = requests.get(url, headers=headers)
-            
+
             # If token expired (401), refresh and retry once
             if response.status_code == 401:
-                logger.debug(f"Token expired for {username}, refreshing...")
-                self._lms_token = None  # Clear cached token
+                logger.debug(f"Token expired for {identifier}, refreshing...")
+                self._lms_token = None
                 token = self.get_lms_token()
                 if token:
                     headers = {'Authorization': f'Bearer {token}', 'Accept': '*/*'}
                     response = requests.get(url, headers=headers)
                 else:
-                    logger.warning(f"Could not refresh token for {username}")
-                    return username
-            
+                    logger.warning(f"Could not refresh token for {identifier}")
+                    return identifier
+
             # If still not 200, try with internal_ prefix for redhat users
-            if response.status_code != 200:
-                # Try with internal_ prefix for redhat users
-                response = requests.get(f"https://training-lms.redhat.com/ws/user?username=internal_{username}", headers=headers)
-            
+            if response.status_code != 200 and username:
+                response = requests.get(f"{base_url}?username=internal_{username}", headers=headers)
+
             response.raise_for_status()
             data = response.json()
-            user_data = data.get('user', {})
-            
+            logger.debug(f"LMS API raw response for {identifier}: {json.dumps(data, indent=2)}")
+
+            if email:
+                users = data.get('items', [])
+                logger.debug(f"LMS search returned {len(users)} results for email {email}")
+                for i, u in enumerate(users):
+                    logger.debug(f"  result[{i}]: username={u.get('username')}, fullName={u.get('fullName')}, "
+                                 f"firstName={u.get('firstName')}, lastName={u.get('lastName')}, email={u.get('email')}")
+                if users:
+                    user_data = users[0]
+                else:
+                    return identifier
+            else:
+                user_data = data.get('user', {})
+
             full_name = user_data.get('fullName')
+            logger.debug(f"LMS user_data for {identifier}: fullName={full_name}, "
+                         f"firstName={user_data.get('firstName')}, lastName={user_data.get('lastName')}")
             if not full_name:
                 first_name = user_data.get('firstName', '').capitalize()
                 last_name = user_data.get('lastName', '').capitalize()
                 full_name = f"{first_name} {last_name}".strip()
-                
-            return full_name or username
-            
+
+            logger.debug(f"LMS resolved {identifier} -> {full_name}")
+            return full_name or identifier
+
         except Exception as e:
-            logger.error(f"Error looking up user {username}: {e}")
-            return username
+            logger.error(f"Error looking up user {identifier}: {e}")
+            return identifier
 
     def lookup_user_sys_id(self, display_name: str, team_key: str = None) -> Optional[str]:
         """Look up a user's sys_id by their display name, using team filtering only when there are multiple matches"""
@@ -766,15 +790,27 @@ class ServiceNowAutoAssign:
                 logger.error(f"Could not find sys_id for assignee: {assignee_name}")
                 return False
 
-            contact_source = ticket.get('contact_source', '')
-            if contact_source:
-                name_parts = contact_source.split()
-                customer_name = f"{name_parts[0]} {name_parts[1] if len(name_parts) > 1 else ''}".strip()
+            customer_name = ""
+            email = ticket.get('u_email_from_address', '').strip()
+            if email:
+                full_name = self.lookup_user_name(email=email)
+                if full_name and full_name != email:
+                    customer_name = full_name
+                else:
+                    contact_source = ticket.get('contact_source', '')
+                    if contact_source:
+                        name_parts = contact_source.split()
+                        customer_name = f"{name_parts[0]} {name_parts[1] if len(name_parts) > 1 else ''}".strip()
             else:
-                customer_name = ""
+                contact_source = ticket.get('contact_source', '')
+                if contact_source:
+                    name_parts = contact_source.split()
+                    customer_name = f"{name_parts[0]} {name_parts[1] if len(name_parts) > 1 else ''}".strip()
 
             # Phase 1: ACK (keep ticket in NEW state)
             updates = {}
+            if customer_name:
+                updates['contact_source'] = customer_name
             primary_group_id = team_config.get_primary_assignment_group_id()
             if primary_group_id:
                 updates['assignment_group'] = primary_group_id
