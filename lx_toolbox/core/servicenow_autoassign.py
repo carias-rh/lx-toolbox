@@ -432,6 +432,75 @@ class ServiceNowAutoAssign:
             logger.error(f"Error looking up user {identifier}: {e}")
             return identifier
 
+    def lookup_user_details(self, username: str = None, email: str = None) -> List[Dict[str, Any]]:
+        """Look up user details from LMS API, returning all matching records.
+
+        Returns a list of user dicts with fields like fullName, firstName,
+        lastName, username, email, etc.  Returns an empty list on failure.
+        """
+        identifier = (email or username or "").strip()
+        if not identifier:
+            return []
+
+        token = self.get_lms_token()
+        if not token:
+            return []
+
+        headers = {'Authorization': f'Bearer {token}', 'Accept': '*/*'}
+        base_url = "https://training-lms.redhat.com/ws/user"
+
+        if email:
+            url = f"{base_url}/search?q={email}"
+        else:
+            url = f"{base_url}?username={username}"
+
+        try:
+            response = requests.get(url, headers=headers)
+
+            if response.status_code == 401:
+                self._lms_token = None
+                token = self.get_lms_token()
+                if token:
+                    headers = {'Authorization': f'Bearer {token}', 'Accept': '*/*'}
+                    response = requests.get(url, headers=headers)
+                else:
+                    return []
+
+            if response.status_code != 200 and username:
+                response = requests.get(f"{base_url}?username=internal_{username}", headers=headers)
+
+            response.raise_for_status()
+            data = response.json()
+
+            if email:
+                return data.get('items', [])
+            else:
+                user = data.get('user')
+                return [user] if user else []
+
+        except Exception as e:
+            logger.error(f"Error looking up user details for {identifier}: {e}")
+            return []
+
+    def _format_lms_work_note(self, lms_entries: List[Dict[str, Any]]) -> str:
+        """Format LMS user details into a ServiceNow work note."""
+        field_labels = [
+            ('fullName', 'Full Name'),
+            ('username', 'Username'),
+            ('email', 'Email'),
+            ('firstName', 'First Name'),
+            ('lastName', 'Last Name'),
+        ]
+        lines = [f"[LMS Lookup Results] ({len(lms_entries)} entries found)"]
+        for idx, entry in enumerate(lms_entries, start=1):
+            if len(lms_entries) > 1:
+                lines.append(f"--- Entry {idx} ---")
+            for key, label in field_labels:
+                value = entry.get(key)
+                if value:
+                    lines.append(f"  {label}: {value}")
+        return "\n".join(lines)
+
     def lookup_user_sys_id(self, display_name: str, team_key: str = None) -> Optional[str]:
         """Look up a user's sys_id by their display name, using team filtering only when there are multiple matches"""
         try:
@@ -814,12 +883,21 @@ class ServiceNowAutoAssign:
                 return False
 
             customer_name = ""
+            lms_work_note = ""
             email = ticket.get('u_email_from_address', '').strip()
             if email:
-                full_name = self.lookup_user_name(email=email)
-                if full_name and full_name != email:
-                    customer_name = full_name
-                else:
+                lms_entries = self.lookup_user_details(email=email)
+                if lms_entries:
+                    first_match = lms_entries[0]
+                    full_name = first_match.get('fullName')
+                    if not full_name:
+                        first = first_match.get('firstName', '').capitalize()
+                        last = first_match.get('lastName', '').capitalize()
+                        full_name = f"{first} {last}".strip()
+                    if full_name and full_name != email:
+                        customer_name = full_name
+                    lms_work_note = self._format_lms_work_note(lms_entries)
+                if not customer_name:
                     contact_source = ticket.get('contact_source', '')
                     if contact_source:
                         name_parts = contact_source.split()
@@ -834,6 +912,8 @@ class ServiceNowAutoAssign:
             updates = {}
             if customer_name:
                 updates['contact_source'] = customer_name
+            if lms_work_note:
+                updates['work_notes'] = lms_work_note
             primary_group_id = team_config.get_primary_assignment_group_id()
             if primary_group_id:
                 updates['assignment_group'] = primary_group_id
