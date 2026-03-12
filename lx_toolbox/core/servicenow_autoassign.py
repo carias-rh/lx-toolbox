@@ -215,7 +215,13 @@ class ServiceNowAutoAssign:
             ...
           ]
         }
+
+        Groups whose id starts with ``audit-`` are schedule-only groups used
+        to route "Audit Request received" tickets to a zone-specific subset
+        of contacts with their own priority order.
         """
+        self._gls_cx_team_zone: Dict[str, str] = {}
+
         raw = self.config.get("SNOW", "GROUPS_CONFIG") or ""
         if not raw:
             return
@@ -248,6 +254,7 @@ class ServiceNowAutoAssign:
                 frontend_group_param=slug,
                 acknowledgment_template=_gls_cx_ack,
             )
+            self._gls_cx_team_zone[team_key] = zone_id
 
     def _get_team_members(self, team_key: str) -> List[str]:
         """Get team member sys_ids, using cache to avoid repeated API calls"""
@@ -782,9 +789,25 @@ class ServiceNowAutoAssign:
             return False
 
 
-    def process_gls_cx_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str) -> bool:
-        """Process a GLS Customer Experience ticket: ACK + assign."""
+    def process_gls_cx_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str, team_key: str = None) -> bool:
+        """Process a GLS Customer Experience ticket: ACK + assign.
+
+        If the ticket's short_description contains "Audit Request received",
+        the assignee is resolved from the zone-level audit schedule instead
+        of the standard group schedule.  When no audit person is on shift
+        the ticket is skipped (returns False) so it stays unassigned.
+        """
         try:
+            short_desc = ticket.get('short_description', '')
+            if 'Audit Request received' in short_desc and team_key:
+                audit_assignee = self._resolve_audit_assignee(team_key)
+                if audit_assignee and audit_assignee != "None":
+                    logger.info(f"Audit ticket {ticket.get('number')} routed to audit assignee: {audit_assignee}")
+                    assignee_name = audit_assignee
+                else:
+                    logger.info(f"Audit ticket {ticket.get('number')} – no audit person on shift, skipping")
+                    return False
+
             assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_config.team_name)
             if not assignee_sys_id:
                 logger.error(f"Could not find sys_id for assignee: {assignee_name}")
@@ -980,6 +1003,26 @@ class ServiceNowAutoAssign:
             pass
 
 
+    def _resolve_audit_assignee(self, team_key: str) -> Optional[str]:
+        """Find the audit-eligible person currently on shift for the zone of the given team.
+
+        Uses the ``audit-<zone>`` group schedules configured in the frontend.
+        Returns the assignee name, ``"None"`` if nobody is on audit shift,
+        or ``None`` if no audit config exists for the zone.
+        """
+        zone_id = self._gls_cx_team_zone.get(team_key)
+        if not zone_id:
+            logger.warning(f"Cannot determine zone for team '{team_key}' – audit routing unavailable")
+            return None
+
+        audit_team_key = f"gls-cx-{zone_id}-audit-{zone_id}"
+        audit_config = self.teams.get(audit_team_key)
+        if not audit_config:
+            logger.warning(f"No audit team config found for zone '{zone_id}' (expected key: {audit_team_key})")
+            return None
+
+        return self.who_is_on_shift(audit_config)
+
     def run_auto_assignment(self, team_key: str, assignee_name: str = None) -> Dict[str, int]:
         """Run auto-assignment for a specific team"""
         team_config = self.teams.get(team_key)
@@ -1030,9 +1073,9 @@ class ServiceNowAutoAssign:
                     success = self.process_gls_rhls_engagement_ticket(ticket, team_config, assignee_name)
                 elif "gls-cx" in team_key:
                     if assignee_name == "None":
-                        logger.debug("No one is on shift, stopping ticket processing")
-                        break
-                    success = self.process_gls_cx_ticket(ticket, team_config, assignee_name)
+                        if 'Audit Request received' not in ticket.get('short_description', ''):
+                            continue
+                    success = self.process_gls_cx_ticket(ticket, team_config, assignee_name, team_key=team_key)
                 elif "exam" in team_key:
                     if assignee_name == "None":
                         logger.debug("No one is on shift, stopping ticket processing")
@@ -1080,7 +1123,7 @@ class ServiceNowAutoAssign:
         if team_key in self.teams:
             return [team_key]
         prefix = team_key + "-"
-        sub = sorted(k for k in self.teams if k.startswith(prefix))
+        sub = sorted(k for k in self.teams if k.startswith(prefix) and "-audit-" not in k)
         return sub if sub else [team_key]
 
     def run_continuous_assignment(self, team_key: str, assignee_name: str = None, interval_seconds: int = 60):
