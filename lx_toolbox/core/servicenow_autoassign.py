@@ -917,7 +917,7 @@ class ServiceNowAutoAssign:
                     logger.info(f"Audit ticket {ticket.get('number')} routed to audit assignee: {audit_assignee}")
                     assignee_name = audit_assignee
                 else:
-                    logger.info(f"Audit ticket {ticket.get('number')} – no audit person on shift, skipping")
+                    logger.debug(f"Audit ticket {ticket.get('number')} – no audit person on shift, skipping")
                     return False
 
             elif team_key and self._email_alias_to_team_key:
@@ -928,7 +928,7 @@ class ServiceNowAutoAssign:
                         logger.info(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' → routed to {alias_assignee}")
                         assignee_name = alias_assignee
                     else:
-                        logger.info(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' but no one on sub-region shift, skipping")
+                        logger.debug(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' but no one on sub-region shift, skipping")
                         return False
 
             if assignee_name == "None":
