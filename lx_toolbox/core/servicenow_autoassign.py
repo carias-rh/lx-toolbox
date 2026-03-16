@@ -471,27 +471,44 @@ class ServiceNowAutoAssign:
             url = f"{base_url}?username={username}"
 
         try:
+            logger.debug(f"LMS lookup_user_details: requesting {url}")
             response = requests.get(url, headers=headers)
+            logger.debug(f"LMS lookup_user_details: status={response.status_code} for {identifier}")
 
             if response.status_code == 401:
+                logger.debug(f"LMS lookup_user_details: token expired for {identifier}, refreshing")
                 self._lms_token = None
                 token = self.get_lms_token()
                 if token:
                     headers = {'Authorization': f'Bearer {token}', 'Accept': '*/*'}
                     response = requests.get(url, headers=headers)
+                    logger.debug(f"LMS lookup_user_details: retry status={response.status_code}")
                 else:
+                    logger.warning(f"LMS lookup_user_details: could not refresh token for {identifier}")
                     return []
 
             if response.status_code != 200 and username:
-                response = requests.get(f"{base_url}?username=internal_{username}", headers=headers)
+                retry_url = f"{base_url}?username=internal_{username}"
+                logger.debug(f"LMS lookup_user_details: retrying with internal_ prefix: {retry_url}")
+                response = requests.get(retry_url, headers=headers)
+                logger.debug(f"LMS lookup_user_details: internal_ retry status={response.status_code}")
 
             response.raise_for_status()
             data = response.json()
+            logger.debug(f"LMS lookup_user_details: raw response for {identifier}: {json.dumps(data, indent=2)}")
 
             if email:
-                return data.get('items', [])
+                entries = data.get('items', [])
+                logger.debug(f"LMS lookup_user_details: {len(entries)} entries found for email {email}")
+                for i, entry in enumerate(entries):
+                    logger.debug(f"  entry[{i}]: {json.dumps(entry, indent=2)}")
+                return entries
             else:
                 user = data.get('user')
+                if user:
+                    logger.debug(f"LMS lookup_user_details: user record for {username}: {json.dumps(user, indent=2)}")
+                else:
+                    logger.debug(f"LMS lookup_user_details: no user record found for {username}")
                 return [user] if user else []
 
         except Exception as e:
@@ -502,7 +519,7 @@ class ServiceNowAutoAssign:
         """Format LMS user details into a ServiceNow work note."""
         field_labels = [
             ('fullName', 'Full Name'),
-            ('username', 'Username'),
+            ('userName', 'RHN ID'),
             ('email', 'Email'),
             ('firstName', 'First Name'),
             ('lastName', 'Last Name'),
@@ -1088,7 +1105,7 @@ class ServiceNowAutoAssign:
         if team_config.frontend_group_param:
             group_params["group"] = team_config.frontend_group_param
         try:
-            if team_config.frontend_shift_manager_url != None:
+            if team_config.frontend_shift_manager_url != None and team_config.team_name == "RHT Learner Experience":
                 # Check if round-robin is enabled
                 try:
                     round_robin_status_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin_status")
