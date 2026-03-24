@@ -989,6 +989,9 @@ class ServiceNowAutoAssign:
             if not self.update_ticket(ticket['sys_id'], {'assigned_to': assignee_sys_id}):
                 logger.error(f"Failed to assign ticket {ticket['number']} to {assignee_name}")
                 return False
+            # Log here so the name matches audit/alias resolution; run_auto_assignment's
+            # assignee_name is only the default zone shift and is wrong for those paths.
+            logger.info(f"Assigned ticket {ticket['number']} to {assignee_name}")
             return True
         except Exception as e:
             logger.error(f"Error processing GLS CX ticket {ticket.get('number', 'unknown')}: {e}")
@@ -1264,7 +1267,8 @@ class ServiceNowAutoAssign:
                 
                 if success:
                     stats["assigned"] += 1
-                    logger.info(f"Assigned ticket {ticket['number']} to {assignee_name}")
+                    if "gls-cx" not in team_key:
+                        logger.info(f"Assigned ticket {ticket['number']} to {assignee_name}")
                 else:
                     stats["errors"] += 1
                     
