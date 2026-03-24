@@ -79,10 +79,18 @@ function normaliseLeaveType(raw) {
   var text = (raw || "").toString().trim();
   if (!text) return "";
   var lower = text.toLowerCase();
+  // Legend types: Leave, Tent leave, Half Day leave, Bank Holiday, Recharge Day, Holiday.
+  // Half-day cells are not added to the calendar.
+  if (lower.indexOf("half day") !== -1) return "";
+
   if (lower === "bh") return "Bank Holiday";
-  if (lower === "leave") return "Leave";
+  if (lower === "bank holiday") return "Bank Holiday";
+  if (lower === "tent leave") return "Tent leave";
+  if (lower === "recharge day") return "Recharge Day";
   if (lower === "holiday") return "Holiday";
-  return text;
+  if (lower === "leave") return "Leave";
+
+  return "";
 }
 
 function generateUid() {
