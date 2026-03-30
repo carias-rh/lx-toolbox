@@ -32,8 +32,9 @@ class JiraHandler:
     3. If credentials not available, prompt user for manual authentication
     """
     
-    JIRA_DASHBOARD_URL = "https://issues.redhat.com/secure/Dashboard.jspa"
-    JIRA_PROJECTS_URL = "https://issues.redhat.com/projects/PTL/issues"
+    JIRA_BASE_URL = "https://redhat.atlassian.net"
+    JIRA_DASHBOARD_URL = "https://redhat.atlassian.net/jira/your-work"
+    JIRA_PROJECTS_URL = "https://redhat.atlassian.net/jira/software/c/projects/PTL/issues"
     
     def __init__(self, driver, wait: WebDriverWait, config: ConfigManager, logger=None):
         """
@@ -71,21 +72,22 @@ class JiraHandler:
         
         input("Press Enter once you have completed the login...")
     
-    def _is_logged_in(self) -> bool:
+    def _is_logged_in(self, timeout: int = 5) -> bool:
         """
         Check if already logged into Jira by looking for logged-in indicators.
         
+        Args:
+            timeout: How many seconds to wait for logged-in indicators
+            
         Returns:
             True if logged in, False otherwise
         """
         try:
-            # Look for user profile elements that indicate logged-in state
-            # Check for avatar or user menu
-            WebDriverWait(self.driver, 3).until(
-                EC.presence_of_element_located((By.XPATH, 
-                    '//*[@id="header-details-user-fullname"] | '
-                    '//*[contains(@class, "aui-avatar")] | '
-                    '//a[contains(@href, "/secure/ViewProfile.jspa")]'
+            WebDriverWait(self.driver, timeout).until(
+                EC.presence_of_element_located((By.XPATH,
+                    '//button[contains(@aria-label, "@redhat.com")] | '
+                    '//button[text()="Create"] | '
+                    '//input[@placeholder="Search"]'
                 ))
             )
             return True
@@ -102,55 +104,89 @@ class JiraHandler:
             logging.getLogger(__name__).debug(f"Auth helper returned empty: {e}")
             return ""
 
+    def _on_login_page(self) -> bool:
+        """Check if the current URL indicates we're on an authentication page."""
+        current_url = self.driver.current_url or ""
+        return any(domain in current_url for domain in (
+            "id.atlassian.com", "auth.redhat.com", "sso.redhat.com",
+            "login.microsoftonline.com",
+        ))
+
     def _attempt_sso_login(self, username: str = None, password: str = None) -> bool:
         """
         Attempt SSO login with provided or stored credentials.
+        
+        Atlassian Cloud auth flow:
+        1. Redirects to id.atlassian.com → enter email → Continue
+        2. May redirect to Red Hat SSO (Keycloak) for SAML auth
+        3. Keycloak uses #username / #password / #submit fields
         
         Args:
             username: Optional username (uses config if not provided)
             password: Optional password (uses config if not provided)
             
         Returns:
-            True if credentials were autofilled, False if manual login required
+            True if credentials were submitted, False if no login page found
         """
         try:
-            # Get credentials from config if not provided
             if not username:
                 username = self.config.get("Credentials", "RH_USERNAME")
             if not password:
                 password = self.config.get("Credentials", "RH_PASSWORD")
             auth_helper = self.config.get("Credentials", "RH_AUTH_HELPER")
-            
-            # Try to find SSO login form elements
-            try:
-                # First, check for the username-verification field (Red Hat login page)
-                username_verification = WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, '//*[@id="username-verification"]'))
+
+            if not self._on_login_page():
+                logging.getLogger(__name__).debug(
+                    f"Not on a login page (url={self.driver.current_url}), skipping SSO"
                 )
-                
-                # Autofill username if available
+                return False
+
+            # Check for Atlassian Cloud login page (id.atlassian.com)
+            try:
+                atlassian_email_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH,
+                        '//input[@name="username"]'
+                    ))
+                )
                 if username:
-                    username_verification.send_keys(f"{username}@redhat.com")
-                    WebDriverWait(self.driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))
-                    ).click()
-                    time.sleep(1)
-                    
-                    # Now wait for SSO page and fill credentials
+                    atlassian_email_field.clear()
+                    atlassian_email_field.send_keys(f"{username}@redhat.com")
+                    try:
+                        WebDriverWait(self.driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH,
+                                '//*[@id="login-submit"] | '
+                                '//button[@type="submit"] | '
+                                '//span[text()="Continue"]/parent::button'
+                            ))
+                        ).click()
+                        time.sleep(3)
+                    except TimeoutException:
+                        pass
+
+                    # Before proceeding to SSO, check for //button/span[text()="Create"], which indicates user is already logged in
+                    try:
+                        create_btn = WebDriverWait(self.driver, 10).until(
+                            EC.element_to_be_clickable((By.XPATH, '//button/span[text()="Create"]'))
+                        )
+                        if create_btn:
+                            logging.getLogger(__name__).debug("Detected 'Create' button; Jira appears logged in. Skipping SSO.")
+                            return True
+                    except Exception as e:
+                        logging.getLogger(__name__).debug(f"Error checking for Jira 'Create' button: {e}")
+                    # After Atlassian redirects to Red Hat SSO (Keycloak)
                     try:
                         sso_username_field = WebDriverWait(self.driver, 5).until(
                             EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))
                         )
                         sso_username_field.send_keys(username)
-                        
+
                         if password:
-                            # Build full credential string
                             auth_token = self._get_auth_token(auth_helper)
                             full_credential = f"{str(password)}{auth_token}"
                             WebDriverWait(self.driver, 5).until(
                                 EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))
                             ).send_keys(full_credential)
-                            
+
                             WebDriverWait(self.driver, 5).until(
                                 EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))
                             ).click()
@@ -162,60 +198,31 @@ class JiraHandler:
                             )
                             return True
                     except TimeoutException:
+                        self._prompt_for_manual_login(
+                            "Could not detect Red Hat SSO page. Please complete login manually."
+                        )
                         return True
                 else:
                     self._prompt_for_manual_login(
                         "Credentials not configured. Please complete the login manually."
                     )
                     return True
-                    
             except TimeoutException:
-                # Username-verification field not found, check for direct SSO
-                try:
-                    sso_username_field = WebDriverWait(self.driver, 3).until(
-                        EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))
-                    )
-                    
-                    if username:
-                        sso_username_field.send_keys(username)
-                        
-                        if password:
-                            auth_token = self._get_auth_token(auth_helper)
-                            full_credential = f"{str(password)}{auth_token}"
-                            WebDriverWait(self.driver, 5).until(
-                                EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))
-                            ).send_keys(full_credential)
-                            
-                            WebDriverWait(self.driver, 5).until(
-                                EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))
-                            ).click()
-                            time.sleep(5)
-                            return True
-                        else:
-                            self._prompt_for_manual_login(
-                                "Username autofilled. Please enter your password and complete authentication."
-                            )
-                            return True
-                    else:
-                        self._prompt_for_manual_login(
-                            "Credentials not configured. Please complete the login manually."
-                        )
-                        return True
-                        
-                except TimeoutException:
-                    return True
-                    
+                self._prompt_for_manual_login(
+                    "Could not find login form. Please complete the login manually."
+                )
+                return True
+
         except Exception as e:
             logging.getLogger(__name__).warning(f"SSO login attempt failed: {e}")
             return False
     
     def login(self, use_session: bool = True) -> bool:
         """
-        Login to Jira.
+        Login to Jira (Atlassian Cloud at redhat.atlassian.net).
         
-        First tries session login (if already authenticated via SSO from another service).
-        If not logged in, attempts SSO login with available credentials.
-        If credentials are not available, prompts for manual authentication.
+        Atlassian Cloud redirects to id.atlassian.com for auth, which may
+        then redirect to Red Hat SSO (Keycloak) for SAML-based authentication.
         
         Args:
             use_session: If True, first check if already logged in via session
@@ -226,51 +233,40 @@ class JiraHandler:
         self.logger("Login into Jira")
         
         try:
-            # Navigate to Jira dashboard
             self.driver.get(self.JIRA_DASHBOARD_URL)
-            time.sleep(3)
-            
-            # Check if already logged in (session login)
-            if use_session and self._is_logged_in():
-                # Already logged into Jira (session active)
+
+            # Wait for the page to settle (Atlassian Cloud may redirect
+            # multiple times: main page → id.atlassian.com → SSO → back).
+            # Poll until the URL stops changing or 15 seconds pass.
+            prev_url = ""
+            for _ in range(6):
+                time.sleep(2.5)
+                cur_url = self.driver.current_url or ""
+                if cur_url == prev_url:
+                    break
+                prev_url = cur_url
+
+            if use_session and self._is_logged_in(timeout=5):
+                self.logger("Jira login successful")
                 self._logged_in = True
                 return True
-            
-            # Look for login link in navbar (if on Jira but not logged in)
-            try:
-                login_link = WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, 
-                        '/html/body/div[1]/header/nav/div/div[3]/ul/li[3]/a | '
-                        '//a[contains(@href, "/login.jsp")] | '
-                        '//a[contains(text(), "Log in")]'
-                    ))
-                )
-                login_link.click()
-                time.sleep(2)
-            except TimeoutException:
-                # No login link found - might be redirected to SSO or already logged in
-                pass
-            
-            # Attempt SSO login
+
+            # We're not logged in -- attempt SSO if we landed on a login page.
             if self._attempt_sso_login():
-                # Wait for page to load and verify login
-                time.sleep(3)
-                if self._is_logged_in():
+                # SSO credentials were submitted; wait for redirect back to Jira.
+                if self._is_logged_in(timeout=5):
                     self.logger("Jira login successful")
                     self._logged_in = True
                     return True
-                else:
-                    # Check if we're still on login page
-                    time.sleep(5)
-                    if self._is_logged_in():
-                        self.logger("Jira login successful")
-                        self._logged_in = True
-                        return True
             
-            # If we get here, login may have succeeded (user completed manually)
-            self.logger("Jira login process completed")
-            self._logged_in = True
-            return True
+            # Final check: the user may have completed login manually.
+            if self._is_logged_in(timeout=5):
+                self.logger("Jira login successful")
+                self._logged_in = True
+                return True
+
+            self.logger("Jira login could not be verified")
+            return False
             
         except Exception as e:
             logging.getLogger(__name__).error(f"Jira login failed: {e}")

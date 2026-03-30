@@ -12,6 +12,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger, reset_step_counter
@@ -54,7 +55,7 @@ class SnowAIProcessor:
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "glm-4.7-flash:latest") # ministral-3:8b
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b") # ministral-3:8b
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
@@ -202,15 +203,21 @@ class SnowAIProcessor:
         self.lab_mgr.dismiss_active_alerts()
 
         try:
-            while True:
-                try:
-                    show_solution_button = WebDriverWait(self.driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[text()='Show Solution']"))
-                    )
-                    show_solution_button.click()
-                    time.sleep(0.3)
-                except Exception:
+            clicked_ids = set()
+            for _ in range(10):
+                buttons = self.driver.find_elements(By.XPATH, "//button[text()='Show Solution']")
+                unclicked = [b for b in buttons if b.id not in clicked_ids]
+                if not unclicked:
                     break
+                for btn in unclicked:
+                    try:
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+                        btn.click()
+                    except Exception:
+                        pass
+                    clicked_ids.add(btn.id)
+                    time.sleep(0.3)
+                time.sleep(0.5)
         except Exception:
             pass
 
@@ -762,109 +769,221 @@ Translate the following text from {language} to english:
             component_clause = f'component = "{course}"'
         term = (keyword or course).replace('"', '').replace("'", "")
         jql = f'project = PTL AND resolution = Unresolved AND description ~ {chapter_and_section} AND {component_clause} AND text ~ "{term}" ORDER BY priority DESC, updated DESC'
-        return f"https://issues.redhat.com/issues/?jql={quote(jql)}"
+        return f"https://redhat.atlassian.net/issues/?jql={quote(jql)}"
 
 
     def open_jira_create_prefilled(self, snow_info: dict, analysis: dict, classification: dict):
-        self.driver.get("https://issues.redhat.com/projects/PTL/issues")
+        self.driver.get("https://redhat.atlassian.net/jira/software/c/projects/PTL/issues")
         time.sleep(5)
-        self.driver.execute_script("document.body.style.zoom = '0.6'")
+        self.driver.execute_script("document.body.style.zoom = '0.8'")
 
         try:
-            # Wait for tabs-placeholder to disappear (it obscures the Create button)
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    EC.invisibility_of_element_located((By.CSS_SELECTOR, 'div.tabs-placeholder'))
-                )
-            except Exception:
-                pass  # Continue even if placeholder doesn't exist or timeout
-
-            # Click Create - use JavaScript click as fallback if element is obscured
-            create_btn = WebDriverWait(self.driver, 20).until(EC.presence_of_element_located((By.XPATH, '//*[@id="create_link"]')))
+            # Click Create button in the top nav bar
+            create_btn = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH,
+                    '//button[text()="Create"] | '
+                    '//button[contains(@data-testid, "create-button")]'
+                ))
+            )
             try:
                 create_btn.click()
             except Exception:
-                # Fallback to JavaScript click if regular click fails
                 self.driver.execute_script("arguments[0].click();", create_btn)
-            time.sleep(2)
+            time.sleep(8)
+            logging.getLogger(__name__).info("Jira create dialog loaded")
 
-            # Select Text mode
-            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[2]/button'))).click()
+            # Change Work type to "Bug" -- the input is obscured by the value
+            # overlay so we JS-focus it, then type + Enter to select.
+            try:
+                work_type_input = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH,
+                        '//input[starts-with(@id, "type-picker-")]'
+                    ))
+                )
+                self.driver.execute_script("arguments[0].focus(); arguments[0].click();", work_type_input)
+                time.sleep(0.5)
+                work_type_input.send_keys("Bug")
+                time.sleep(1)
+                work_type_input.send_keys(Keys.RETURN)
+                time.sleep(2)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Could not set Work type to Bug: {e}")
 
             # Fill in Summary
             summary_value = f"{snow_info.get('Course','')}: ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} - {analysis.get('jira_title', '')} - {snow_info.get('snow_id','')}"
-            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))).send_keys(summary_value)
+            summary_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH,
+                    '//input[@id="summary-field"]'
+                ))
+            )
+            summary_field.send_keys(summary_value)
 
-            # Add Description
+            time.sleep(5)
+            # Fill the ProseMirror description editor.
+            # The "Create Bug" template pre-fills a table with URL / Reporter RHNID /
+            # Section Title rows plus an "Issue description" heading.
+            # We use JS insertText for instant paste (send_keys types char-by-char).
             translated = classification.get("translated_student_feedback", snow_info.get("Description",""))
-            description = (
-                f"\n|*URL:*|[ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} |{snow_info.get('URL','')}]|\n"
-                f"|*Reporter RHNID:*| {snow_info.get('RHNID','')} |\n"
-                f"|*Section title:*|{snow_info.get('Title','')}|\n"
-                f"|*Language*:| English |\n\n"
-                "*Issue description*\n\n" + translated + "\n\n"
-                "*Steps to reproduce:*\n\n"
-                "*Workaround:*\n" + self._normalize_suggested_correction(analysis.get('suggested_correction', '')) + "\n\n"
-                "*Expected result:*"
+
+            desc_editor = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, 'ak-editor-textarea'))
             )
 
-            # Add description
-            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description"]'))).clear()
-            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description"]'))).send_keys(description)
+            def _insert_text_in_editor(text):
+                """Insert text at current cursor position using execCommand (instant, not char-by-char)."""
+                self.driver.execute_script(
+                    "document.execCommand('insertText', false, arguments[0]);", text
+                )
 
-            # Select Visual mode back again
-            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[1]/button'))).click()
+            # Click the <p> inside each <td> value cell to ensure cursor placement.
+            # Empty cells have a tiny <p> with &nbsp; that's hard to click on the
+            # <td> itself, so we target the inner paragraph.
+            table_cells = desc_editor.find_elements(By.XPATH, './/td')
+            cell_values = [
+                snow_info.get("URL", ""),
+                snow_info.get("RHNID", ""),
+                snow_info.get("Title", ""),
+            ]
+            if table_cells:
+                for cell, value in zip(table_cells, cell_values):
+                    inner_p = cell.find_elements(By.TAG_NAME, 'p')
+                    target = inner_p[0] if inner_p else cell
+                    self.driver.execute_script(
+                        "var el = arguments[0]; el.focus ? el.focus() : el.click();"
+                        "var range = document.createRange(); range.selectNodeContents(el);"
+                        "var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);"
+                        "sel.collapseToStart();",
+                        target
+                    )
+                    time.sleep(0.2)
+                    _insert_text_in_editor(value)
+            else:
+                ActionChains(self.driver).click(desc_editor).perform()
+                time.sleep(0.3)
 
-            # Priority tab -> Minor
+            # The template already has bold headings: "Issue description",
+            # "Steps to reproduce:", "Workaround:", "Expected result:" with
+            # empty paragraphs below each. We click into those empty <p> elements
+            # and insert just the content.
+            def _fill_section(heading_text, content):
+                """Find the empty <p> after a bold heading and insert content there."""
+                if not content or not content.strip():
+                    return
+                self.driver.execute_script("""
+                    var editor = arguments[0];
+                    var heading = arguments[1];
+                    var text = arguments[2];
+                    var paragraphs = editor.querySelectorAll('p');
+                    for (var i = 0; i < paragraphs.length; i++) {
+                        var strong = paragraphs[i].querySelector('strong');
+                        if (strong && strong.textContent.trim().toLowerCase().startsWith(heading.toLowerCase())) {
+                            // Found the heading -- target the next <p> sibling
+                            var next = paragraphs[i].nextElementSibling;
+                            if (next && next.tagName === 'P') {
+                                var range = document.createRange();
+                                range.selectNodeContents(next);
+                                var sel = window.getSelection();
+                                sel.removeAllRanges();
+                                sel.addRange(range);
+                                sel.collapseToStart();
+                                document.execCommand('insertText', false, text);
+                                return;
+                            }
+                        }
+                    }
+                """, desc_editor, heading_text, content)
+                time.sleep(0.2)
+
+            _fill_section("Issue description", translated)
+            _fill_section("Workaround", self._normalize_suggested_correction(
+                analysis.get('suggested_correction', '')))
+
+            # Priority tab -> set priority to Minor
             try:
                 self._click_tab_by_text('Priority')
-                priority_dropdown = WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]')))
-                priority_dropdown.send_keys(Keys.CONTROL + "a")
-                priority_dropdown.send_keys(Keys.DELETE)
-                priority_dropdown.send_keys("Minor")
-                priority_dropdown.send_keys(Keys.TAB)    
+                time.sleep(1)
+                priority_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH,
+                        '//input[contains(@id, "priority")]'
+                    ))
+                )
+                self.driver.execute_script("arguments[0].focus(); arguments[0].click();", priority_field)
+                time.sleep(0.5)
+                priority_field.send_keys("Minor")
+                time.sleep(1)
+                priority_field.send_keys(Keys.RETURN)
                 self._click_tab_by_text('Field Tab')
             except Exception as e:
-                logging.getLogger(__name__).error(f"Failed to select Priority tab: {e}")
-                pass
+                logging.getLogger(__name__).warning(f"Failed to set Priority: {e}")
 
-            # Select Component (course)
+            # Components combobox
             try:
-                components_field = WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]')))
+                components_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH,
+                        '//input[@id="components-field"]'
+                    ))
+                )
+                self.driver.execute_script("arguments[0].focus(); arguments[0].click();", components_field)
+                time.sleep(0.5)
                 components_field.send_keys(snow_info.get("Course",""))
-                
-                # Add "Video Content" component if this is a video issue
+                time.sleep(1)
+                try:
+                    WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.XPATH, '//*[@role="option"]'))
+                    ).click()
+                except Exception:
+                    components_field.send_keys(Keys.RETURN)
+
                 if classification.get("is_video_issue_ticket", False):
-                    time.sleep(0.5)  # Brief pause to allow first component to register
-                    components_field.send_keys(Keys.TAB)
-                    components_field = WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]')))
+                    time.sleep(0.5)
+                    components_field = self.driver.find_element(By.XPATH, '//input[@id="components-field"]')
+                    self.driver.execute_script("arguments[0].focus(); arguments[0].click();", components_field)
                     components_field.send_keys("Video Content")
-                    logging.getLogger(__name__).info("Added 'Video Content' component for video issue")
+                    time.sleep(1)
+                    try:
+                        WebDriverWait(self.driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, '//*[@role="option"]'))
+                        ).click()
+                    except Exception:
+                        components_field.send_keys(Keys.RETURN)
             except Exception as e:
-                logging.getLogger(__name__).error(f"Failed to select Component: {e}")
-                pass
+                logging.getLogger(__name__).warning(f"Failed to set Component: {e}")
 
-            # Add chapter number (ch01s01 won't work)
+            # Chapter number
             try:
-                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="customfield_12316549"]'))).send_keys(f"{snow_info.get('Chapter','')}")
+                chapter_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH,
+                        '//input[@id="customfield_10709-field"]'
+                    ))
+                )
+                chapter_field.send_keys(f"{snow_info.get('Chapter','')}")
             except Exception as e:
-                logging.getLogger(__name__).error(f"Failed to add chapter number: {e}")
-                pass
+                logging.getLogger(__name__).warning(f"Failed to set Chapter: {e}")
 
-            # Select version (send HOME via unicode and type course name)
+            # Affects versions combobox
             try:
-                version = WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="versions-textarea"]')))
-                version.send_keys(Keys.HOME)
-                version.send_keys(snow_info.get("Course",""))
-            except Exception:
-                pass
+                version_field = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH,
+                        '//input[@id="versions-field"]'
+                    ))
+                )
+                self.driver.execute_script("arguments[0].focus(); arguments[0].click();", version_field)
+                time.sleep(0.5)
+                version_field.send_keys(snow_info.get("Course",""))
+
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Failed to set Affects versions: {e}")
         except Exception as e:
             logging.getLogger(__name__).warning(f"Prefill Jira create failed: {e}")
 
 
     def _click_tab_by_text(self, tab_text: str):
         try:
-            WebDriverWait(self.driver, 20).until(EC.element_to_be_clickable((By.XPATH, f'//ul[@role="tablist"]//li[@class="menu-item first" or @class="menu-item "]//strong[text()="{tab_text}"]'))).click()
+            WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH,
+                    f'//*[@role="tab"]/span[text()="{tab_text}"]'
+                ))
+            ).click()
         except Exception:
             pass
 
@@ -1028,5 +1147,3 @@ Translate the following text from {language} to english:
 
             except Exception as e:
                 logging.getLogger(__name__).error(f"Failed to orchestrate window for ticket {snow_id}: {e}")
-
-
