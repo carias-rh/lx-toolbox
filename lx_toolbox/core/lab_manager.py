@@ -1265,14 +1265,14 @@ class LabManager:
         
         self.logger("Lab environment tuned!")
 
-    def _wait_for_command_to_paste(self, command: str, min_wait: float = 0.5):
+    def _wait_for_command_to_paste(self, command: str, min_wait: float = 0.8):
         """Wait a proportional time based on the command length for pasting to complete.
         
         Args:
             command: The command being pasted
             min_wait: Minimum wait time in seconds (default 0.5s to allow modal to close)
         """
-        delay_per_char = self.config.get("QA", "paste_delay_per_char", 0.01)
+        delay_per_char = self.config.get("QA", "paste_delay_per_char", 0.007)
         calculated_wait = len(command) * delay_per_char
         time.sleep(max(calculated_wait, min_wait))
 
@@ -2117,8 +2117,14 @@ class LabManager:
             return True
             
         # OC create/apply with -f or -k commands
-        if ("oc create" in command or "oc apply" in command) and (" -f " in command or " -k " in command):
+        if ("oc create" in command or "oc apply" in command or "oc replace" in command) and (" -f " in command or " -k " in command):
             self._prompt_user_to_continue("when the yaml file has been saved.")
+            self.introduce_command_to_console(command, auto_enter=True)
+            return True
+
+        # Helm install commands
+        if "helm install" in command or "helm upgrade" in command:
+            self._prompt_user_to_continue("when the helm chart has been installed.")
             self.introduce_command_to_console(command, auto_enter=True)
             return True
             
