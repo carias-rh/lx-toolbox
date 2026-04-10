@@ -1028,35 +1028,8 @@ class LabManager:
                 break
         self.driver.switch_to.window(self._console_tab_handle)
 
-        # Open virtual keyboard in the console (with retry and verification)
-        max_keyboard_retries = 3
-        
-        for attempt in range(max_keyboard_retries):
-            try:
-                settings_button = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Settings"]'))
-                )
-                settings_button.click()
-                time.sleep(0.5)
+        self._enable_virtual_keyboard_in_console()
 
-                show_keyboard_button = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Show")]'))
-                )
-                show_keyboard_button.click()
-                time.sleep(2.5)
-                
-                # Verify keyboard is enabled by checking if Esc key is visible
-                self._click_virtual_keyboard_key("Esc")
-                break
-            except TimeoutException:
-                if attempt < max_keyboard_retries - 1:
-                    logging.getLogger(__name__).debug(f"Keyboard not enabled after attempt {attempt + 1}, retrying...")
-                    time.sleep(1)
-                else:
-                    logging.getLogger(__name__).error("Failed to enable virtual keyboard after multiple attempts. Enable manually in the qa console tab.")
-
-
-        
         if tune_workstation:
             self._tune_workstation()
 
@@ -1182,6 +1155,39 @@ class LabManager:
                 self.driver.switch_to.window(handles[1])
                 self._console_tab_handle = handles[1]
 
+    def _enable_virtual_keyboard_in_console(self, max_retries: int = 3) -> None:
+        """
+        Open Settings, show the virtual keyboard, and verify via Esc.
+        Retries on timeout; logs on final failure (manual enable may be needed).
+        """
+        for attempt in range(max_retries):
+            try:
+                settings_button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Settings"]'))
+                )
+                settings_button.click()
+                time.sleep(0.5)
+
+                show_keyboard_button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Show")]'))
+                )
+                show_keyboard_button.click()
+                time.sleep(2.5)
+
+                self._click_virtual_keyboard_key("Esc")
+                break
+            except TimeoutException:
+                if attempt < max_retries - 1:
+                    logging.getLogger(__name__).debug(
+                        f"Keyboard not enabled after attempt {attempt + 1}, retrying..."
+                    )
+                    time.sleep(1)
+                else:
+                    logging.getLogger(__name__).error(
+                        "Failed to enable virtual keyboard after multiple attempts. "
+                        "Enable manually in the qa console tab."
+                    )
+
     def _click_virtual_keyboard_key(self, key_name: str, timeout: int = 10):
         """
         Click a key on the virtual keyboard.
@@ -1216,11 +1222,11 @@ class LabManager:
         """
         Opens a terminal.
         """
-        self._click_virtual_keyboard_key("Esc")
-        self._click_virtual_keyboard_key("Super")
-        self._click_virtual_keyboard_key("Super")
+        self._click_virtual_keyboard_key("Alt")
+        time.sleep(0.2)
+        self._click_virtual_keyboard_key("F2")
         time.sleep(0.5)
-        self.introduce_command_to_console('terminal', auto_enter=True)
+        self.introduce_command_to_console('gnome-terminal', auto_enter=True)
 
 
     def _tune_workstation(self):
@@ -1243,10 +1249,16 @@ class LabManager:
         
         # Run the ansible playbook
         self.introduce_command_to_console('cd classroom_env; ansible-playbook playbook.yml', auto_enter=True)
-        time.sleep(60)
-        # Confirm reboot request
-        self.introduce_command_to_console('yes', auto_enter=True)
-        time.sleep(60)
+
+        try:
+            retry_connection_button = WebDriverWait(self.driver, 60).until(
+                EC.element_to_be_clickable((By.XPATH, '//button[text()="Retry Connection"]'))
+            )
+            retry_connection_button.click()
+            time.sleep(0.5)
+            self._enable_virtual_keyboard_in_console(max_retries=1)
+        except TimeoutException:
+            pass
 
         self._login_as_student()
         self._open_terminal()
