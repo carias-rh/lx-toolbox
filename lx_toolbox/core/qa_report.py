@@ -30,6 +30,12 @@ class ExerciseResult:
     start_duration_secs: float = 0.0
     grade_duration_secs: float = 0.0
     finish_duration_secs: float = 0.0
+    start_duration_source: str = "manual"
+    grade_duration_source: str = "manual"
+    finish_duration_source: str = "manual"
+    start_started_at: str = ""
+    grade_started_at: str = ""
+    finish_started_at: str = ""
     notes: str = ""
 
 
@@ -152,14 +158,22 @@ class QAReport:
 
     @staticmethod
     def _format_duration(seconds: float) -> str:
-        """Format seconds into a human-readable string like '1m 30s' or '45s'."""
+        """Format seconds into a human-readable string while preserving milliseconds."""
         if seconds <= 0:
             return ""
-        minutes = int(seconds) // 60
-        secs = int(seconds) % 60
+
+        rounded_seconds = round(seconds, 3)
+        minutes = int(rounded_seconds) // 60
+        secs = rounded_seconds - (minutes * 60)
+
         if minutes > 0:
-            return f"{minutes}m {secs}s"
-        return f"{secs}s"
+            if secs.is_integer():
+                return f"{minutes}m {int(secs):02d}s"
+            return f"{minutes}m {secs:06.3f}s"
+
+        if rounded_seconds.is_integer():
+            return f"{int(rounded_seconds)}s"
+        return f"{rounded_seconds:.3f}s"
 
     @staticmethod
     def _chapter_number(chapter_section: str) -> str:

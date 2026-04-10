@@ -15,6 +15,7 @@ from .base_selenium_driver import BaseSeleniumDriver
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger, reset_step_counter
 from ..utils.keyboard_handler import KeyboardHandler, print_status, clear_status_line
+from ..utils.terminal_ocr import parse_terminal_timing_from_screenshot
 
 
 class QAQuitException(Exception):
@@ -983,6 +984,33 @@ class LabManager:
             except Exception:
                 pass
 
+    def _apply_terminal_timing_from_screenshot(self, exercise, phase: str, screenshot_path: str, fallback_duration: float):
+        """Prefer the shell's `time real` output when OCR can parse the screenshot."""
+        duration_attr = f"{phase}_duration_secs"
+        source_attr = f"{phase}_duration_source"
+        started_at_attr = f"{phase}_started_at"
+
+        setattr(exercise, duration_attr, fallback_duration)
+        setattr(exercise, source_attr, "manual")
+        setattr(exercise, started_at_attr, "")
+
+        parsed_timing = parse_terminal_timing_from_screenshot(screenshot_path)
+        if not parsed_timing:
+            return
+
+        if parsed_timing.started_at:
+            setattr(exercise, started_at_attr, parsed_timing.started_at)
+
+        if parsed_timing.real_seconds is not None:
+            setattr(exercise, duration_attr, parsed_timing.real_seconds)
+            setattr(exercise, source_attr, "ocr")
+            logging.getLogger(__name__).debug(
+                "Parsed %s duration %.3fs from screenshot %s",
+                phase,
+                parsed_timing.real_seconds,
+                screenshot_path,
+            )
+
     def open_workstation_console(self, course_id: str, tune_workstation: bool = False):
         """
         Opens the workstation console for a course and optionally sets up the environment.
@@ -1941,7 +1969,7 @@ class LabManager:
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
                     ex.start_screenshot = path
-                    ex.start_duration_secs = duration
+                    self._apply_terminal_timing_from_screenshot(ex, "start", path, duration)
                 self._qa_report.save()
             return True
             
@@ -1960,7 +1988,7 @@ class LabManager:
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
                     ex.grade_screenshot = path
-                    ex.grade_duration_secs = duration
+                    self._apply_terminal_timing_from_screenshot(ex, "grade", path, duration)
 
             # Prompt for PASS/FAIL (default: PASS)
             if self._keyboard_handler:
@@ -1992,7 +2020,7 @@ class LabManager:
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
                     ex.finish_screenshot = path
-                    ex.finish_duration_secs = duration
+                    self._apply_terminal_timing_from_screenshot(ex, "finish", path, duration)
 
                     # Guided Exercises have no grade script — prompt for PASS/FAIL here
                     if not ex.grade_result:
