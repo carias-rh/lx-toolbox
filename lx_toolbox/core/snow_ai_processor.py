@@ -56,7 +56,7 @@ class SnowAIProcessor:
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:26b") # ministral-3:8b
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e4b") # ministral-3:8b
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
@@ -944,7 +944,7 @@ For example:
 {json_example}
 """
         response = self.ask_llm(prompt)
-        logging.getLogger(__name__).info(f"LLM Triaging response: {response}")
+        logging.getLogger(__name__).info(f"LLM Triaging response:\n {response}")
         parsed = self._parse_llm_json(response, context="LLM triaging")
         if not parsed:
             return {
@@ -1208,7 +1208,7 @@ For example:
     """
         logging.getLogger(__name__).debug(f"LLM student reply prompt length: {len(prompt_text)} chars")
         response = self.ask_llm(prompt_text)
-        logging.getLogger(__name__).info(f"LLM Student reply output ({len(response)} chars): {response}")
+        logging.getLogger(__name__).info(f"LLM Student reply output ({len(response)} chars):\n {response}")
         parsed = self._parse_llm_json(response, context="LLM student reply")
         if not parsed:
             return {"response": "Thank you for your feedback. We are investigating this and will follow up."}
