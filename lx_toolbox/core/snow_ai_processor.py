@@ -1,3 +1,4 @@
+import ast
 import os
 import re
 import json
@@ -173,7 +174,7 @@ class SnowAIProcessor:
                 combined[: self._LLM_THINKING_LOG_MAX_CHARS]
                 + "\n... [thinking log truncated]"
             )
-        logger.info(
+        logger.debug(
             "LLM thinking [%s] (%d chars):\n%s",
             self.OLLAMA_MODEL,
             len(combined),
@@ -645,6 +646,17 @@ Instructions:
             if isinstance(parsed, dict):
                 return parsed
         except json.JSONDecodeError:
+            pass
+
+        # Strategy 1b: Python-dict-style output (single quotes, Python booleans)
+        # Some models return {'key': 'value', 'flag': true} instead of JSON.
+        try:
+            py_text = self._extract_first_json_object(cleaned)
+            if py_text:
+                py_obj = ast.literal_eval(py_text)
+                if isinstance(py_obj, dict):
+                    return py_obj
+        except (ValueError, SyntaxError):
             pass
 
         # Strategy 2: extract first balanced {...}, then lenient parse
