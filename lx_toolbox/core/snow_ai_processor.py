@@ -55,7 +55,7 @@ class SnowAIProcessor:
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b") # ministral-3:8b
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e2b") # ministral-3:8b
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
@@ -126,8 +126,17 @@ class SnowAIProcessor:
                 )
             response = result.stdout or ""
 
-            # Strip ANSI escape sequences (cursor movement, erase, colors)
-            # that ollama emits for its streaming/thinking display.
+            # Ollama's streaming display uses ESC[nD (cursor back n) +
+            # ESC[K (erase to EOL) to re-wrap words across lines.  We must
+            # *simulate* the erase (delete the preceding n chars) rather
+            # than just strip the codes, otherwise both copies of the
+            # word survive.
+            _rewrite = re.compile(r'\x1b\[(\d+)D\x1b\[K')
+            for m in reversed(list(_rewrite.finditer(response))):
+                n = int(m.group(1))
+                erase_from = max(0, m.start() - n)
+                response = response[:erase_from] + response[m.end():]
+            # Strip any remaining ANSI escape sequences (colors, etc.)
             response = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', response)
 
             if self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gpt-oss", "glm", "gemma")):
@@ -176,6 +185,22 @@ class SnowAIProcessor:
                 parts.append("Remove flag: " + ", ".join(value["remove_flag"]))
             return "\n".join(parts) if parts else str(value)
         return str(value)
+
+    @staticmethod
+    def _clean_llm_text(text: str) -> str:
+        """Collapse line-wrapping newlines into spaces, preserve paragraph breaks."""
+        if not text:
+            return text
+        text = text.replace('\r\n', '\n')
+        # Protect intentional paragraph breaks (2+ consecutive newlines)
+        text = re.sub(r'\n{2,}', '\x00PARA\x00', text)
+        # Collapse remaining single newlines (wrapping artifacts) into spaces
+        text = text.replace('\n', ' ')
+        # Restore paragraph breaks
+        text = text.replace('\x00PARA\x00', '\n\n')
+        # Clean up runs of spaces
+        text = re.sub(r' {2,}', ' ', text)
+        return text.strip()
 
     @staticmethod
     def _extract_first_json_object(text: str) -> str:
@@ -680,7 +705,11 @@ For example:
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Student reply output: {response}")
         parsed = self._parse_llm_json(response, context="LLM student reply")
-        return parsed or {"response": "Thank you for your feedback. We are investigating this and will follow up."}
+        if not parsed:
+            return {"response": "Thank you for your feedback. We are investigating this and will follow up."}
+        if "response" in parsed:
+            parsed["response"] = self._clean_llm_text(parsed["response"])
+        return parsed
 
 
     def reply_to_student_and_add_notes(self, snow_info: dict, classification_data: dict, analysis_response_json: dict):
@@ -692,8 +721,9 @@ For example:
             self.switch_to_iframe()
 
             # Add work note with summary of analysis
-            work_note = f"""Summary:\n{analysis_response_json.get('summary', 'No summary available')}\n
-LLM Analysis: {analysis_response_json.get('analysis', '')}\n"""
+            summary = self._clean_llm_text(analysis_response_json.get('summary', 'No summary available'))
+            analysis = self._clean_llm_text(analysis_response_json.get('analysis', ''))
+            work_note = f"Summary:\n{summary}\n\nLLM Analysis:\n{analysis}\n"
             try:
                 WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(work_note)
             except Exception:
