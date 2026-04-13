@@ -182,19 +182,44 @@ class SnowAIProcessor:
 
     def _ask_ollama(self, prompt: str) -> str:
         try:
-            if self.OLLAMA_MODEL.startswith(("qwen", "deepseek")):
-                result = subprocess.run(
-                    [self.OLLAMA_COMMAND, "run", self.OLLAMA_MODEL, prompt],
-                    capture_output=True,
-                    text=True
-                )
+            # Pass the prompt via stdin to avoid shell-escaping issues and
+            # ollama misinterpreting special characters as a file path.
+            # Models that emit chain-of-thought (Thinking... / ...done thinking.)
+            # do not include that text in stdout when --format json is used; run
+            # without JSON mode so thinking can be logged, then strip it and parse JSON.
+            if self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gemma")):
+                cmd = [self.OLLAMA_COMMAND, "run", self.OLLAMA_MODEL]
             else:
-                result = subprocess.run(
-                    [self.OLLAMA_COMMAND, "run", self.OLLAMA_MODEL, prompt, "--format", "json"],
-                    capture_output=True,
-                    text=True
-                )
+                cmd = [self.OLLAMA_COMMAND, "run", self.OLLAMA_MODEL, "--format", "json"]
+            result = subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True
+            )
             response = result.stdout or ""
+            if result.returncode != 0:
+                logging.getLogger(__name__).error(
+                    "LLM[ollama:%s] exited with code %d; stderr: %s",
+                    self.OLLAMA_MODEL,
+                    result.returncode,
+                    (result.stderr or "")[:2000],
+                )
+            if not response.strip():
+                logging.getLogger(__name__).warning(
+                    "LLM[ollama:%s] returned empty stdout (returncode=%d, "
+                    "stderr=%r, prompt_len=%d chars)",
+                    self.OLLAMA_MODEL,
+                    result.returncode,
+                    (result.stderr or "")[:500],
+                    len(prompt),
+                )
+            elif result.stderr and result.stderr.strip():
+                logging.getLogger(__name__).debug(
+                    "LLM[ollama:%s] stderr: %s",
+                    self.OLLAMA_MODEL,
+                    result.stderr[:2000],
+                )
 
             # Ollama's streaming display uses ESC[nD (cursor back n) +
             # ESC[K (erase to EOL) to re-wrap words across lines.  We must
@@ -275,6 +300,119 @@ class SnowAIProcessor:
         return text.strip()
 
     @staticmethod
+    def _strip_email_quote_chain(text: str) -> str:
+        """Strip the quoted email reply chain, keeping only the new content."""
+        lines = text.split("\n")
+        kept: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            # Stop at the start of a quoted reply block
+            if stripped.startswith(">"):
+                break
+            # Stop at "On <date> ... wrote:" patterns
+            if re.match(r"^On .+ wrote:\s*$", stripped):
+                break
+            # Stop at common email thread markers
+            if stripped.startswith("------") and len(stripped) > 10:
+                break
+            kept.append(line)
+        # Remove trailing email signature boilerplate (generic patterns only)
+        while kept and re.match(
+            r"^\s*(:host|Thanks\s*&\s*Regards|Sr\.?\s*Consultant|"
+            r"Email:\s|Mobile:\s|<https?://|Best Regards|"
+            r"Red Hat Learner|reply from:|Regards,?\s*$|"
+            r"\+\d[\d\s\-]{6,})\s*",
+            kept[-1], re.IGNORECASE
+        ):
+            kept.pop()
+        # Also strip trailing lines that look like a name-only sign-off
+        # (single short line with only capitalized words, no punctuation)
+        while kept and re.match(r"^\s*([A-Z][a-z]+\s*){1,4}\s*$", kept[-1]):
+            kept.pop()
+        result = "\n".join(kept).strip()
+        # Remove shadow-root CSS artifacts
+        result = re.sub(r":host\s+img\s*\{[^}]*\}", "", result).strip()
+        return result
+
+    def _filter_and_clean_updates(self, raw_updates: list[dict]) -> list[dict]:
+        """Filter out our own replies and clean up each update's text."""
+        agent_name = self.SIGNATURE_NAME
+        cleaned: list[dict] = []
+        seen_texts: set[str] = set()
+        for update in raw_updates:
+            author = update.get("author", "")
+            if author and agent_name and agent_name.lower() in author.lower():
+                continue
+            text = self._strip_email_quote_chain(update.get("text", ""))
+            if not text or len(text) < 5:
+                continue
+            # De-duplicate near-identical messages
+            fingerprint = re.sub(r"\s+", " ", text[:200]).strip().lower()
+            if fingerprint in seen_texts:
+                continue
+            seen_texts.add(fingerprint)
+            cleaned.append({
+                "timestamp": update.get("timestamp", ""),
+                "author": author,
+                "text": text,
+            })
+        return cleaned
+
+    def _summarize_customer_updates(self, snow_info: dict) -> str:
+        """Use the LLM to distill customer follow-up updates into a concise,
+        PII-free summary of any new facts, issues, or clarifications the
+        customer provided beyond the original ticket description."""
+        updates = snow_info.get("customer_updates")
+        if not updates:
+            return ""
+        # Build a condensed input for the LLM (text only, no raw PII dump)
+        update_block = ""
+        for u in updates:
+            ts = u.get("timestamp", "")
+            text = u.get("text", "").strip()
+            if len(text) > 1500:
+                text = text[:1500] + " …"
+            update_block += f"[{ts}]\n{text}\n\n"
+
+        prompt = f"""You are summarizing customer follow-up messages on a Red Hat Training support ticket.
+
+Original ticket description:
+{snow_info.get("Description", "")}
+
+Customer follow-up messages (newest first):
+{update_block}
+
+Instructions:
+- Extract ONLY new technical facts, clarifications, or additional issues the customer raised beyond the original description.
+- Omit greetings, thank-yous, signatures, email addresses, phone numbers, and any personal information.
+- Omit anything that simply repeats the original description.
+- If a follow-up mentions a different course page URL or section than the original, note that explicitly.
+- If the customer provided a screenshot reference or image, mention that briefly.
+- If none of the follow-ups add new information, return exactly: "No additional information."
+- Be concise: 2-5 sentences maximum.
+- Return plain text only, no JSON.
+"""
+        response = self.ask_llm(prompt)
+        # The LLM may return JSON-wrapped text; extract plain text
+        if response.strip().startswith("{"):
+            parsed = self._parse_llm_json(response, context="customer update summary")
+            for key in ("summary", "text", "result", "response"):
+                if key in parsed and isinstance(parsed[key], str):
+                    return self._clean_llm_text(parsed[key])
+            for v in parsed.values():
+                if isinstance(v, str):
+                    return self._clean_llm_text(v)
+        return self._clean_llm_text(response)
+
+    def _build_full_description(self, snow_info: dict) -> str:
+        """Combine the original description with a summary of customer follow-ups."""
+        desc = snow_info.get("Description", "")
+        summary = snow_info.get("customer_updates_summary", "")
+        if not summary or summary == "No additional information.":
+            return desc
+        return f"{desc}\n\n--- Additional information from customer follow-ups ---\n{summary}"
+
+    @staticmethod
     def _infer_course_family(course: str) -> str:
         match = re.match(r"([A-Za-z]+)", str(course or "").strip())
         return match.group(1).lower() if match else ""
@@ -309,7 +447,7 @@ class SnowAIProcessor:
         title = snow_info.get("Title", "")
         section_kind = self._infer_section_kind(snow_info)
 
-        return (
+        context = (
             "Ticket metadata:\n"
             f"- Course: {course}\n"
             f"- Version: {version}\n"
@@ -318,6 +456,15 @@ class SnowAIProcessor:
             f"- Title: {title}\n"
             f"- Inferred section kind: {section_kind}\n"
         )
+
+        summary = snow_info.get("customer_updates_summary", "")
+        if summary and summary != "No additional information.":
+            context += (
+                f"\nAdditional context from customer follow-ups:\n"
+                f"{summary}\n"
+            )
+
+        return context
 
     def _course_family_operational_notes(self, snow_info: dict | None) -> str:
         course = str((snow_info or {}).get("Course", "")).upper()
@@ -478,9 +625,15 @@ class SnowAIProcessor:
         cleaned = re.sub(r"```\s*$", "", cleaned).strip()
 
         if "{" not in cleaned:
-            logging.getLogger(__name__).error(
-                f"No JSON object found in {context} response: {response[:500]}"
-            )
+            if not cleaned:
+                logging.getLogger(__name__).error(
+                    f"Empty response from {context} — LLM returned no output"
+                )
+            else:
+                logging.getLogger(__name__).error(
+                    f"No JSON object found in {context} response "
+                    f"({len(cleaned)} chars): {response[:500]}"
+                )
             return {}
 
         lenient = json.JSONDecoder(strict=False)
@@ -624,6 +777,9 @@ class SnowAIProcessor:
         title = re.findall("Section Title:.*", description)[0].split(":  ")[1]
         rhnid = re.findall("User Name:.*", description)[0].split(":  ")[1]
 
+        raw_updates = self.snow_handler.get_customer_updates()
+        customer_updates = self._filter_and_clean_updates(raw_updates)
+
         self.driver.refresh()
         info = {
             "snow_id": snow_id,
@@ -636,8 +792,18 @@ class SnowAIProcessor:
             "Section": section,
             "Title": title,
             "RHNID": rhnid,
+            "customer_updates": customer_updates,
+            "customer_updates_summary": "",
         }
-        logging.getLogger(__name__).info(f"ServiceNow ticket info: {json.dumps(info, indent=2)}")
+
+        if customer_updates:
+            self.logger("Summarizing customer follow-up messages")
+            info["customer_updates_summary"] = self._summarize_customer_updates(info)
+            logging.getLogger(__name__).info(
+                f"Customer updates summary: {info['customer_updates_summary']}"
+            )
+
+        logging.getLogger(__name__).info(f"ServiceNow ticket info: {json.dumps({k: v for k, v in info.items() if k != 'customer_updates'}, indent=2)}")
         return info
 
     def get_ticket_ids_from_queue(self) -> list:
@@ -956,8 +1122,9 @@ For example:
     Reply in JSON only, no extra text, such as:
     {json_example}
     """
+        logging.getLogger(__name__).debug(f"LLM student reply prompt length: {len(prompt_text)} chars")
         response = self.ask_llm(prompt_text)
-        logging.getLogger(__name__).info(f"LLM Student reply output: {response}")
+        logging.getLogger(__name__).info(f"LLM Student reply output ({len(response)} chars): {response}")
         parsed = self._parse_llm_json(response, context="LLM student reply")
         if not parsed:
             return {"response": "Thank you for your feedback. We are investigating this and will follow up."}
@@ -1414,11 +1581,12 @@ Translate the following text from {language} to english:
                 # Parse info and run classification/analysis
                 self.driver.switch_to.window(tab_snow)
                 snow_info = self.get_snow_info(snow_id)
-                classification = self.classify_ticket_llm(snow_info["Description"], snow_info)
+                full_description = self._build_full_description(snow_info)
+                classification = self.classify_ticket_llm(full_description, snow_info)
                 if classification.get("language") == "en":
-                    translated = snow_info["Description"]
+                    translated = full_description
                 else:
-                    translated = self.translate_text(snow_info["Description"], classification.get("language", "en"))
+                    translated = self.translate_text(full_description, classification.get("language", "en"))
                 classification["translated_student_feedback"] = translated
                 analysis = {"summary": "", "suggested_correction": "", "jira_title": "", "is_valid_issue": False}
 
@@ -1448,7 +1616,7 @@ Translate the following text from {language} to english:
                         self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
                         time.sleep(2)
                         video_player_available = self.lab_mgr.check_video_player_available()
-                        analysis = self.analyze_video_issue(snow_info["Description"], video_player_available, snow_info)
+                        analysis = self.analyze_video_issue(full_description, video_player_available, snow_info)
                     elif is_content_issue:                        
                         # Navigate to the course page
                         self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
@@ -1468,11 +1636,10 @@ Translate the following text from {language} to english:
                             logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
 
                         # Perform analysis based on issue type
-                        analysis = self.analyze_content_issue(snow_info["Description"], guide_text, snow_info)
+                        analysis = self.analyze_content_issue(full_description, guide_text, snow_info)
 
                     elif is_environment_issue:
-                        # Fetch guide text for "lab environment" issue analysis
-                        analysis = self.analyze_environment_issue(snow_info["Description"], snow_info)
+                        analysis = self.analyze_environment_issue(full_description, snow_info)
 
                     # If the issue requires lab verification, start the lab
                     if needs_lab:

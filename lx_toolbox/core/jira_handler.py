@@ -240,13 +240,13 @@ class JiraHandler:
             # Poll until the URL stops changing or 15 seconds pass.
             prev_url = ""
             for _ in range(6):
-                time.sleep(2.5)
+                time.sleep(1.5)
                 cur_url = self.driver.current_url or ""
                 if cur_url == prev_url:
                     break
                 prev_url = cur_url
 
-            if use_session and self._is_logged_in(timeout=5):
+            if use_session and self._is_logged_in(timeout=2):
                 self.logger("Jira login successful")
                 self._logged_in = True
                 return True
@@ -254,13 +254,13 @@ class JiraHandler:
             # We're not logged in -- attempt SSO if we landed on a login page.
             if self._attempt_sso_login():
                 # SSO credentials were submitted; wait for redirect back to Jira.
-                if self._is_logged_in(timeout=5):
+                if self._is_logged_in(timeout=2):
                     self.logger("Jira login successful")
                     self._logged_in = True
                     return True
             
             # Final check: the user may have completed login manually.
-            if self._is_logged_in(timeout=5):
+            if self._is_logged_in(timeout=2):
                 self.logger("Jira login successful")
                 self._logged_in = True
                 return True

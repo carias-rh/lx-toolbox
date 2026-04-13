@@ -314,6 +314,126 @@ class ServiceNowHandler:
         except Exception as e:
             logging.getLogger(__name__).warning(f"Could not add comment: {e}")
     
+    def get_customer_updates(self, max_entries: int = 10) -> list[dict]:
+        """
+        Extract customer update entries from the ticket activity journal.
+
+        ServiceNow renders journal entry content inside shadow DOM elements
+        created by its encapsulate() function.  This method pierces those
+        shadow roots to retrieve the plain-text content.  Falls back to
+        parsing the raw HTML template script tag when the shadow root is
+        not yet attached.
+
+        Must be called while the driver is switched into the ticket iframe
+        (i.e. after navigate_to_ticket or switch_to_iframe).
+
+        Args:
+            max_entries: Maximum number of entries to return (newest first)
+
+        Returns:
+            List of dicts with 'timestamp' and 'text' keys
+        """
+        try:
+            _log = logging.getLogger(__name__)
+
+            # Scroll the activity stream into view to trigger lazy loading
+            self.driver.execute_script("""
+                var el = document.querySelector('#sn_form_inline_stream_entries');
+                if (el) el.scrollIntoView({block: 'center'});
+            """)
+            time.sleep(2)
+
+            # The activity stream lives inside <ul class="activities-form">
+            # with each entry as a <li class="h-card">.  Inside each <li>:
+            #   - a meta div has the type label ("Customer update") and timestamp
+            #   - a sibling div#activity_* has the journal content
+            # Content appears in two patterns:
+            #   A) encapsulate() shadow root on <span id="journal-content_*">
+            #   B) direct HTML in <span class="sn-widget-textblock-body_formatted">
+            updates = self.driver.execute_script("""
+                var results = [];
+                var maxEntries = arguments[0];
+                var cards = document.querySelectorAll('li.h-card');
+
+                for (var i = 0; i < cards.length && results.length < maxEntries; i++) {
+                    var card = cards[i];
+
+                    // Check if this card is a "Customer update"
+                    var timeSpan = card.querySelector('.sn-card-component-time');
+                    if (!timeSpan) continue;
+                    var typeLabel = timeSpan.querySelector('span:first-child');
+                    if (!typeLabel || typeLabel.textContent.trim() !== 'Customer update')
+                        continue;
+
+                    // Skip api_snow_autoassign entries
+                    var createdBy = card.querySelector('.sn-card-component-createdby');
+                    if (createdBy &&
+                        createdBy.textContent.trim() === 'api_snow_autoassign')
+                        continue;
+
+                    var author = createdBy ? createdBy.textContent.trim() : '';
+
+                    var dateEl = card.querySelector('.date-calendar');
+                    var timestamp = dateEl ? dateEl.textContent.trim() : '';
+
+                    var text = '';
+
+                    // Pattern A: shadow root from encapsulate()
+                    var jSpans = card.querySelectorAll(
+                        '[id^="journal-content_"]:not([id*="value"])'
+                    );
+                    for (var j = 0; j < jSpans.length; j++) {
+                        if (jSpans[j].shadowRoot) {
+                            text = jSpans[j].shadowRoot.textContent || '';
+                            if (text.trim()) break;
+                        }
+                    }
+
+                    // Pattern B: direct content in textblock-body span
+                    if (!text.trim()) {
+                        var bodySpans = card.querySelectorAll(
+                            '.sn-widget-textblock-body_formatted'
+                        );
+                        for (var b = 0; b < bodySpans.length; b++) {
+                            var bt = bodySpans[b].textContent || '';
+                            if (bt.trim()) { text = bt; break; }
+                        }
+                    }
+
+                    // Pattern C: fallback to HTML template script tag
+                    if (!text.trim()) {
+                        var scripts = card.querySelectorAll(
+                            'script[type="text/html-template"]'
+                        );
+                        for (var k = 0; k < scripts.length; k++) {
+                            var tmp = document.createElement('div');
+                            tmp.innerHTML = scripts[k].textContent
+                                         || scripts[k].innerHTML || '';
+                            text = tmp.textContent || '';
+                            if (text.trim()) break;
+                        }
+                    }
+
+                    text = (text || '').trim();
+                    if (text) {
+                        results.push({
+                            timestamp: timestamp,
+                            author: author,
+                            text: text
+                        });
+                    }
+                }
+                return results;
+            """, max_entries)
+
+            _log.info(
+                f"Extracted {len(updates or [])} customer update(s) from activity journal"
+            )
+            return updates or []
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to extract customer updates: {e}")
+            return []
+
     def ensure_logged_in(self) -> bool:
         """
         Ensure we are logged into ServiceNow, logging in if necessary.
