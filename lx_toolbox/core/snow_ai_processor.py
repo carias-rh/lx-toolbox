@@ -126,7 +126,11 @@ class SnowAIProcessor:
                 )
             response = result.stdout or ""
 
-            if self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gpt-oss", "glm")):
+            # Strip ANSI escape sequences (cursor movement, erase, colors)
+            # that ollama emits for its streaming/thinking display.
+            response = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', response)
+
+            if self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gpt-oss", "glm", "gemma")):
                 response = re.sub(r'Thinking.*?done thinking\.', '', response, flags=re.DOTALL).strip()
                 response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
                 response = re.sub(r'</think>', '', response).strip()
@@ -172,6 +176,113 @@ class SnowAIProcessor:
                 parts.append("Remove flag: " + ", ".join(value["remove_flag"]))
             return "\n".join(parts) if parts else str(value)
         return str(value)
+
+    @staticmethod
+    def _extract_first_json_object(text: str) -> str:
+        """Extract the first top-level JSON object from arbitrary text."""
+        if not text:
+            return ""
+        start = text.find("{")
+        if start == -1:
+            return text.strip()
+
+        depth = 0
+        in_string = False
+        escaped = False
+        for idx in range(start, len(text)):
+            ch = text[idx]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:idx + 1].strip()
+
+        return text[start:].strip()
+
+    def _parse_llm_json(self, response: str, context: str = "LLM") -> dict:
+        """
+        Parse LLM JSON output robustly.
+
+        Handles markdown fences, extra pre/post text, control characters
+        inside string values (literal newlines from line-wrapped model
+        output), invalid escape sequences, and trailing commas.
+        """
+        raw = response or ""
+        for old, new in [("\u201c", '"'), ("\u201d", '"'),
+                         ("\u2018", "'"), ("\u2019", "'")]:
+            raw = raw.replace(old, new)
+
+        cleaned = re.sub(r"```json\s*", "", raw)
+        cleaned = re.sub(r"```\s*$", "", cleaned).strip()
+
+        if "{" not in cleaned:
+            logging.getLogger(__name__).error(
+                f"No JSON object found in {context} response: {response[:500]}"
+            )
+            return {}
+
+        lenient = json.JSONDecoder(strict=False)
+        start = cleaned.find("{")
+
+        # Strategy 1: lenient decoder accepts literal control chars in strings
+        try:
+            parsed, _ = lenient.raw_decode(cleaned, idx=start)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # Strategy 2: extract first balanced {...}, then lenient parse
+        extracted = self._extract_first_json_object(cleaned)
+        if extracted:
+            try:
+                parsed = lenient.decode(extracted)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+        # Strategy 3: replace control chars with space, fix orphaned
+        # backslashes (e.g. line wrap splitting \n into \ <space> n)
+        sanitized = re.sub(r"[\x00-\x1F]", " ", extracted or cleaned)
+        sanitized = re.sub(r'\\(?!["\\/bfnrtu])', "", sanitized)
+        sanitized = re.sub(r",(\s*[}\]])", r"\1", sanitized)
+        try:
+            parsed = lenient.decode(sanitized)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # Strategy 4: collapse all whitespace + same fixes
+        collapsed = re.sub(r"\s+", " ", extracted or cleaned)
+        collapsed = re.sub(r'\\(?!["\\/bfnrtu])', "", collapsed)
+        collapsed = re.sub(r",(\s*[}\]])", r"\1", collapsed)
+        try:
+            parsed = lenient.decode(collapsed)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError as e:
+            logging.getLogger(__name__).debug(
+                f"Final JSON parse attempt failed ({context}): {e}"
+            )
+
+        logging.getLogger(__name__).error(
+            f"Could not parse JSON from {context}. Full response: {response}"
+        )
+        return {}
 
     # --------------------------
     # ROL helpers (via LabManager)
@@ -340,10 +451,8 @@ For example:
 """
         response = self.ask_llm(prompt)
         logging.getLogger(__name__).info(f"LLM Triaging response: {response}")
-        try:
-            return json.loads(response)
-        except Exception:
-            logging.getLogger(__name__).error(f"Could not parse JSON from LLM. Full response: {response}")
+        parsed = self._parse_llm_json(response, context="LLM triaging")
+        if not parsed:
             return {
                 "student_feedback": description,
                 "language": "en",
@@ -353,6 +462,23 @@ For example:
                 "is_video_issue_ticket": False,
                 "needs_lab_verification": False,
             }
+
+        # Tolerate near-miss field names from some models (e.g. truncated keys).
+        if "is_environment_issue_ticket" not in parsed:
+            for key in list(parsed.keys()):
+                if key.startswith("is_environment_issue"):
+                    parsed["is_environment_issue_ticket"] = bool(parsed[key])
+                    break
+
+        return {
+            "student_feedback": str(parsed.get("student_feedback", description)),
+            "language": str(parsed.get("language", "en")).lower(),
+            "summary": str(parsed.get("summary", "No summary provided")),
+            "is_content_issue_ticket": bool(parsed.get("is_content_issue_ticket", False)),
+            "is_environment_issue_ticket": bool(parsed.get("is_environment_issue_ticket", False)),
+            "is_video_issue_ticket": bool(parsed.get("is_video_issue_ticket", False)),
+            "needs_lab_verification": bool(parsed.get("needs_lab_verification", False)),
+        }
 
     def analyze_content_issue(self, user_issue: str, guide_text: str) -> dict:
         self.logger("Analyzing content issue using LLM")
@@ -400,10 +526,8 @@ For example:
         """
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Content analysis response: {response}")
-        try:
-            return json.loads(response)
-        except Exception:
-            return {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
+        parsed = self._parse_llm_json(response, context="LLM content analysis")
+        return parsed or {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
 
     def analyze_environment_issue(self, user_issue: str) -> dict:
         self.logger("Analyzing environment issue using LLM")
@@ -422,10 +546,8 @@ For example:
         """
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Environment analysis response: {response}")
-        try:
-            return json.loads(response)
-        except Exception:
-            return {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
+        parsed = self._parse_llm_json(response, context="LLM environment analysis")
+        return parsed or {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
 
     def analyze_video_issue(self, user_issue: str, video_available: bool) -> dict:
         """
@@ -482,17 +604,15 @@ For example:
         """
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Video analysis response: {response}")
-        try:
-            return json.loads(response)
-        except Exception:
-            return {
-                "is_valid_issue": False,
-                "needs_jira": False,
-                "video_issue_type": "other",
-                "summary": "analysis parse error",
-                "suggested_correction": "",
-                "jira_title": ""
-            }
+        parsed = self._parse_llm_json(response, context="LLM video analysis")
+        return parsed or {
+            "is_valid_issue": False,
+            "needs_jira": False,
+            "video_issue_type": "other",
+            "summary": "analysis parse error",
+            "suggested_correction": "",
+            "jira_title": ""
+        }
 
     def is_openshift_lab_first_boot(self, snow_info: dict, analysis_response_json: dict) -> bool:
         course = snow_info.get("Course", "")
@@ -559,10 +679,8 @@ For example:
     """
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Student reply output: {response}")
-        try:
-            return json.loads(response)
-        except Exception:
-            return {"response": "Thank you for your feedback. We are investigating this and will follow up."}
+        parsed = self._parse_llm_json(response, context="LLM student reply")
+        return parsed or {"response": "Thank you for your feedback. We are investigating this and will follow up."}
 
 
     def reply_to_student_and_add_notes(self, snow_info: dict, classification_data: dict, analysis_response_json: dict):
@@ -664,17 +782,15 @@ Translate the following text from {language} to english:
 """
         translated_text = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Feedback translation response: {translated_text}")
-        if translated_text.strip().startswith('{') and translated_text.strip().endswith('}'):
-            try:
-                json_response = json.loads(translated_text)
+        if '{' in translated_text:
+            parsed = self._parse_llm_json(translated_text, context="LLM translation")
+            if parsed:
                 for key in ("text", "translation", "result"):
-                    if key in json_response and isinstance(json_response[key], str) and json_response[key] != '/set parameter num_ctx 128000':
-                        return json_response[key]
-                for value in json_response.values():
+                    if key in parsed and isinstance(parsed[key], str) and parsed[key] != '/set parameter num_ctx 128000':
+                        return parsed[key]
+                for value in parsed.values():
                     if isinstance(value, str) and value != '/set parameter num_ctx 128000':
                         return value
-            except Exception:
-                pass
         return translated_text
 
     # --------------------------
@@ -750,12 +866,10 @@ Translate the following text from {language} to english:
             "Reply in JSON only, no extra text."
         )
         llm_response = self.ask_llm(prompt)
-        try:
-            keyword = json.loads(llm_response).get("keyword", "")
-            logging.getLogger(__name__).info(f"Extracted Jira keyword: {keyword if keyword else '[none]'}")
-            return keyword
-        except Exception:
-            return ""
+        parsed = self._parse_llm_json(llm_response, context="LLM keyword extraction")
+        keyword = parsed.get("keyword", "")
+        logging.getLogger(__name__).info(f"Extracted Jira keyword: {keyword if keyword else '[none]'}")
+        return keyword
 
     def build_jira_search_url(self, snow_info: dict, keyword: str) -> str:
         course = snow_info.get("Course", "")
