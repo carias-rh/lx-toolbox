@@ -56,7 +56,7 @@ class SnowAIProcessor:
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e2b") # ministral-3:8b
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:26b") # ministral-3:8b
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
@@ -140,6 +140,7 @@ class SnowAIProcessor:
     # LLM helpers
     # --------------------------
     _LLM_THINKING_LOG_MAX_CHARS = 24000
+    _LLM_APOS_PLACEHOLDER = "__LX_APOS__"
 
     def _log_llm_thinking_if_present(self, raw_text: str) -> None:
         """Log chain-of-thought / thinking blocks from Ollama before they are stripped."""
@@ -299,6 +300,43 @@ class SnowAIProcessor:
         # Clean up runs of spaces
         text = re.sub(r' {2,}', ' ', text)
         return text.strip()
+
+    @staticmethod
+    def _json_output_rules() -> str:
+        """Shared prompt instructions for strict JSON output."""
+        return (
+            "JSON formatting rules:\n"
+            "- Return valid JSON only, with no extra text before or after the JSON object.\n"
+            "- Use double quotes for every JSON key and every string value.\n"
+            "- Do not use single quotes to delimit JSON keys or JSON string values.\n"
+            "- If you need quote characters inside a string value, prefer single quotes inside the value so the outer JSON stays valid.\n"
+            "- Use JSON booleans true/false and null, not Python True/False/None.\n"
+            "- Do not return Python dict syntax.\n"
+            "- Do not wrap the JSON in markdown fences.\n"
+        )
+
+    @classmethod
+    def _normalize_llm_parsed_value(cls, value):
+        """Normalize relaxed LLM parser output into Python-native values."""
+        if isinstance(value, str):
+            value = value.replace(cls._LLM_APOS_PLACEHOLDER, "'")
+            lowered = value.strip().lower()
+            if lowered == "true":
+                return True
+            if lowered == "false":
+                return False
+            if lowered in ("null", "none"):
+                return None
+            return value
+        if isinstance(value, list):
+            return [cls._normalize_llm_parsed_value(item) for item in value]
+        if isinstance(value, dict):
+            normalized = {}
+            for key, item in value.items():
+                norm_key = cls._normalize_llm_parsed_value(key) if isinstance(key, str) else key
+                normalized[norm_key] = cls._normalize_llm_parsed_value(item)
+            return normalized
+        return value
 
     @staticmethod
     def _strip_email_quote_chain(text: str) -> str:
@@ -525,7 +563,8 @@ Instructions:
                 "- Treat lab startup, lab finish, lab grade, building, starting, stopping, VM access, and lab-environment behavior as environment issues.",
                 "- Treat account, exam, subscription, refund, and unrelated platform requests as manually managed issues.",
                 "- If the learner ran commands from a theory section and expected lab-validated output, learner confusion is often more likely than an environment defect.",
-                "- A doXXX course taking a long time to start on first use may be expected first-boot behavior and may not need lab verification if the report matches that pattern.",
+                "- A doXXX or aiXXX course taking a long time to start on first use may be expected first-boot behavior and may not need lab verification if the report matches that pattern.",
+                "- For doXXX and aiXXX courses: 'Authentication timed out' during 'Verifying cluster state', or 'FAIL Verifying cluster state' after a few minutes, are classic first-boot symptoms. The student likely did not wait 30-40 minutes. This is an environment issue but does NOT need lab verification.",
                 "- Reports that can be validated by reading the course text alone do not need lab verification.",
                 "- CRITICAL: If the learner claims that a file, directory, path, or script referenced in the guide does not exist, has a different name, or has different contents inside the lab VM, lab verification IS needed. The guide text alone cannot confirm or deny what is actually on the lab filesystem. The same applies to solution files prepared by the lab start command.",
             ]
@@ -546,6 +585,9 @@ Instructions:
                 "- A specific actionable error from a grading script often means learner error rather than platform failure.",
                 "- A lab stuck in building, starting, or stopping for too long is more likely a platform or provisioning problem.",
                 "- Workstation is the normal learner entrypoint. Bastion, classroom, and registry are not normal learner targets.",
+                "- CRITICAL for doXXX and aiXXX courses: 'Authentication timed out' during 'Verifying cluster state' is a classic first-boot symptom, NOT a real authentication failure. The cluster is still initializing. The lab start script timeout expires before the cluster finishes first-time setup.",
+                "- If a doXXX or aiXXX lab start fails within 10-15 minutes with cluster verification or authentication errors, this is almost always because the student did not wait the full 30-40 minutes for first boot.",
+                "- Even if the student says 'tried N times' or 'tried for days', they may have been restarting too quickly each time without waiting long enough. Each restart resets the boot process.",
             ]
         elif issue_type == "video":
             issue_specific_notes = [
@@ -643,17 +685,31 @@ Instructions:
         # Strategy 1: lenient decoder accepts literal control chars in strings
         try:
             parsed, _ = lenient.raw_decode(cleaned, idx=start)
+            parsed = self._normalize_llm_parsed_value(parsed)
             if isinstance(parsed, dict):
                 return parsed
         except json.JSONDecodeError:
             pass
 
-        # Strategy 1b: Python-dict-style output (single quotes, Python booleans)
+        # Strategy 1b: Python-dict-style output (single quotes, Python-ish booleans)
         # Some models return {'key': 'value', 'flag': true} instead of JSON.
         try:
             py_text = self._extract_first_json_object(cleaned)
             if py_text:
+                # Python string literals cannot contain bare newlines, so normalize
+                # line-wrapped model output before ast.literal_eval().
+                py_text = re.sub(r"[\x00-\x1F]+", " ", py_text)
+                py_text = re.sub(r",(\s*[}\]])", r"\1", py_text)
+                py_text = re.sub(r"(:\s*)true(\s*[,}\]])", r"\1True\2", py_text)
+                py_text = re.sub(r"(:\s*)false(\s*[,}\]])", r"\1False\2", py_text)
+                py_text = re.sub(r"(:\s*)null(\s*[,}\]])", r"\1None\2", py_text)
+                py_text = re.sub(
+                    r"(?<=\w)'(?=\w)",
+                    self._LLM_APOS_PLACEHOLDER,
+                    py_text,
+                )
                 py_obj = ast.literal_eval(py_text)
+                py_obj = self._normalize_llm_parsed_value(py_obj)
                 if isinstance(py_obj, dict):
                     return py_obj
         except (ValueError, SyntaxError):
@@ -664,6 +720,7 @@ Instructions:
         if extracted:
             try:
                 parsed = lenient.decode(extracted)
+                parsed = self._normalize_llm_parsed_value(parsed)
                 if isinstance(parsed, dict):
                     return parsed
             except json.JSONDecodeError:
@@ -676,6 +733,7 @@ Instructions:
         sanitized = re.sub(r",(\s*[}\]])", r"\1", sanitized)
         try:
             parsed = lenient.decode(sanitized)
+            parsed = self._normalize_llm_parsed_value(parsed)
             if isinstance(parsed, dict):
                 return parsed
         except json.JSONDecodeError:
@@ -687,6 +745,7 @@ Instructions:
         collapsed = re.sub(r",(\s*[}\]])", r"\1", collapsed)
         try:
             parsed = lenient.decode(collapsed)
+            parsed = self._normalize_llm_parsed_value(parsed)
             if isinstance(parsed, dict):
                 return parsed
         except json.JSONDecodeError as e:
@@ -866,7 +925,7 @@ Lab verification is NOT needed when:
 - The issue is a likely doXXX first-boot delay that matches expected startup behavior
 
 Return JSON with the following fields:
-- student_feedback: the user's feedback in english, as it is, without any changes. Substitute double quotes with single quotes.
+- student_feedback: the user's feedback in english, as it is, without any changes. If the text itself contains double quotes, replace those inner quote characters with single quotes inside the string value.
 - language: the language of the student's feedback. If the student's feedback is in english, the value of this key-value pair is 'en'.
 - summary: in a short sentence, summarize the user's feedback
 - is_content_issue_ticket: (true/false)
@@ -879,7 +938,8 @@ This is the student's feedback:
 \"\"\"{description}\"\"\"
 </student_feedback>
 
-Reply in JSON only, no extra text.
+{self._json_output_rules()}
+
 For example:
 {json_example}
 """
@@ -931,7 +991,7 @@ For example:
             '{' +
             f"\n        \"student_feedback\": \"{user_issue.replace('\n',' ').replace('\t',' ').replace('\r',' ').replace('\"', "'").strip()}\"," +
             f"\n        {excerpt_spec}" +
-            "\n        \"analysis\": \"think step by step, first try to understand student_feedback, then explain what the student is trying to communicate, then comprehend the the guide_text excerpt, then compare to see if the student's claims are correct regarding the guide_text excerpt. Detail the analysis as much as possible. Substitute double quotes in this field with single quotes.\"," +
+            "\n        \"analysis\": \"think step by step, first try to understand student_feedback, then explain what the student is trying to communicate, then comprehend the the guide_text excerpt, then compare to see if the student's claims are correct regarding the guide_text excerpt. Detail the analysis as much as possible. If you need quote characters inside this string value, use single quotes inside the value so the outer JSON remains valid.\"," +
             "\n        \"is_valid_issue\": true," +
             "\n        \"suggested_correction\": \"If the issue is valid, indicate what words, lines, or commands that should be changed in the guide_text to fix the issue. If the issue is valid but there is not enough information it could be possible that a deeper investigation within the lab environment is required. Do not include any explanations or markdown formatting outside the JSON object.\"," +
             "\n        \"summary\": \"a short/medium summary of the 'analysis' field\"," +
@@ -959,7 +1019,8 @@ For example:
         </json_example>
 
         Do not include any explanations, xml or markdown formatting outside the JSON object. No dictionaries in the value fields
-        Substitute double quote (") for single quote (') in all fields to avoid errors in the JSON object, and remove any special characters such as '\n', '\t', '\r', etc, as well as XML markers.
+        {self._json_output_rules()}
+        Remove any special characters such as '\n', '\t', '\r', etc, as well as XML markers, from inside string values.
         """
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Content analysis response: {response}")
@@ -981,10 +1042,11 @@ For example:
         {json_example}
 
         Do not include any explanations, xml or markdown formatting outside the JSON object. No dictionaries in the value fields
-        Substitute double quote (") for single quote (') in all fields to avoid errors in the JSON object, and remove any special characters such as '\n', '\t', '\r', etc, as well as XML markers.
+        {self._json_output_rules()}
+        Remove any special characters such as '\n', '\t', '\r', etc, as well as XML markers, from inside string values.
         """
         response = self.ask_llm(prompt_text)
-        logging.getLogger(__name__).info(f"LLM Environment analysis response: {response}")
+        logging.getLogger(__name__).info(f"LLM Environment analysis response:\n {response}")
         parsed = self._parse_llm_json(response, context="LLM environment analysis")
         return parsed or {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
 
@@ -1040,7 +1102,7 @@ For example:
         - jira_title: title for the Jira ticket (empty if no Jira needed)
         
         Do not include any explanations, xml or markdown formatting outside the JSON object.
-        Substitute double quote (") for single quote (') in all fields to avoid errors in the JSON object.
+        {self._json_output_rules()}
         """
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Video analysis response: {response}")
@@ -1065,12 +1127,20 @@ For example:
                You are an expert in Red Hat Training. We have a platform where students can run labs.
                {self._build_operational_context("environment", snow_info)}
                Labs in doXXX and aiXXX courses take about 30-40 min to finish the setup the first time they are booted up. Once everything is working, it should be pretty fast.
+
+               CRITICAL first-boot symptoms to recognize:
+               - "Authentication timed out" during "Verifying cluster state" is one of the MOST COMMON first-boot symptoms. The cluster is still initializing and the authentication layer is not ready yet. This is NOT a real authentication failure.
+               - "FAIL Verifying cluster state" followed by a timeout is almost always caused by the cluster still starting up. The lab start script has a short timeout that expires before the cluster finishes its first-time initialization.
+               - Even if the student says they tried multiple times over multiple days, they may have been impatient each time and not waited the full 30-40 minutes. Retrying too quickly restarts the timer but does not fix the underlying startup.
+               - If the failure happens within 10-15 minutes of starting the lab, the student almost certainly did not wait long enough.
+               - A student saying "it doesn't work at all" or "tried N times" does NOT mean it is a real failure. It means they did not wait long enough for the first boot to complete.
+
                Determine from the student's feedback if this looks like expected first-boot delay or an actual failure.
 
                The analysis of the issue is:
                {json.dumps(analysis_response_json)}
 
-               Your work is to determine if the lab is first boot or not based on the information provided.
+               Your work is to determine if this is likely a first-boot timing issue. Given the symptoms above, return True if there is any reasonable chance this is first-boot behavior. Only return False if the error is clearly unrelated to startup timing (e.g., a specific application error after the cluster is running).
                Return just True or False, no extra text.
               """
             )
@@ -1131,7 +1201,9 @@ For example:
     Format the response as a JSON object with the following fields:
     - response: the response to the student
 
-    Reply in JSON only, no extra text, such as:
+    {self._json_output_rules()}
+
+    Example:
     {json_example}
     """
         logging.getLogger(__name__).debug(f"LLM student reply prompt length: {len(prompt_text)} chars")
@@ -1329,7 +1401,7 @@ Translate the following text from {language} to english:
             "From the folowing feedback information, identify ONE single defining technical term that will be used to search into a database of tickets. "
             f"<feedback> {snow_info.get('Description','')} </feedback>"
             "Output JSON example: {\"keyword\": \"PosgreSQL\"}\n"
-            "Reply in JSON only, no extra text."
+            f"{self._json_output_rules()}"
         )
         llm_response = self.ask_llm(prompt)
         parsed = self._parse_llm_json(llm_response, context="LLM keyword extraction")
@@ -1666,6 +1738,8 @@ Translate the following text from {language} to english:
                         self.lab_mgr.select_lab_environment_tab("course")
                         if is_video_issue:
                             self.lab_mgr.toggle_video_player(state=True)
+                        else:
+                            self.lab_mgr.toggle_video_player(state=False)
                         time.sleep(2)
 
                 except Exception as e:
