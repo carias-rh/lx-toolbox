@@ -107,9 +107,79 @@ class SnowAIProcessor:
             "- UI suggestions of improvement\n"
             "- Complaints / Praises on the learning platform or the courses.\n"
         )
+
+        # Distilled operational rules from internal SNOW AI knowledge gathering.
+        self.platform_operational_notes = (
+            "Platform facts:\n"
+            "- Some courses begin with a preface that explains the classroom or lab environment.\n"
+            "- Learners can access ebook and PDF versions from the training bookshelf.\n"
+            "- Learners can switch course version in platform settings; this can change written content, video availability, lab topology, and solution behavior.\n"
+            "- Course pages have a Course view and a Lab Environment view.\n"
+            "- The Lab Environment view includes SSH instructions, Classroom Webapp, and Lab Controls.\n"
+            "- Labs create multiple VMs. Workstation is the main learner entrypoint. Learners usually connect from workstation to VMs such as servera, serverb, and utility.\n"
+            "- Bastion, classroom, and registry machines are usually engineer-only systems and should not be suggested as normal learner entrypoints.\n"
+            "- Guided exercises, labs, and comprehensive reviews always have Show Solution.\n"
+            "- Quizzes always have Check and Show Solution.\n"
+            "- Even-numbered sections are guided exercises. Odd-numbered sections are usually theory or labs.\n"
+            "- Only guided exercises and labs should be assumed to have predictable runnable outcomes in the lab.\n"
+            "- Theory sections may contain explanatory commands or examples that do not need to match lab output exactly.\n"
+            "- When video and written course text disagree, the written course text is the source of truth.\n"
+        )
+
+        self.communication_reply_notes = (
+            "Reply rules:\n"
+            "- Always thank the learner and acknowledge that their feedback was received and considered.\n"
+            "- Use a professional, warm, patient, and clear tone.\n"
+            "- Do not mention Jira, internal tracking, or internal workflows in the learner-facing reply.\n"
+            "- If the report is vague or cannot be confirmed, ask for a screenshot, more detail, and the exact course section.\n"
+            "- If the issue cannot be reproduced, say that politely instead of sounding dismissive or overconfident.\n"
+            "- Avoid generic filler wording.\n"
+        )
     # --------------------------
     # LLM helpers
     # --------------------------
+    _LLM_THINKING_LOG_MAX_CHARS = 24000
+
+    def _log_llm_thinking_if_present(self, raw_text: str) -> None:
+        """Log chain-of-thought / thinking blocks from Ollama before they are stripped."""
+        if not raw_text or not raw_text.strip():
+            return
+        logger = logging.getLogger(__name__)
+        parts: list[str] = []
+        seen: set[str] = set()
+
+        def _add(fragment: str) -> None:
+            s = (fragment or "").strip()
+            if len(s) < 2:
+                return
+            if s in seen:
+                return
+            seen.add(s)
+            parts.append(s)
+
+        for m in re.finditer(r"Thinking.*?done thinking\.", raw_text, flags=re.DOTALL):
+            _add(m.group(0))
+        for m in re.finditer(
+            r"<redacted_thinking>.*?</redacted_thinking>", raw_text, flags=re.DOTALL
+        ):
+            _add(m.group(0))
+
+        if not parts:
+            return
+
+        combined = "\n\n---\n\n".join(parts)
+        if len(combined) > self._LLM_THINKING_LOG_MAX_CHARS:
+            combined = (
+                combined[: self._LLM_THINKING_LOG_MAX_CHARS]
+                + "\n... [thinking log truncated]"
+            )
+        logger.info(
+            "LLM thinking [%s] (%d chars):\n%s",
+            self.OLLAMA_MODEL,
+            len(combined),
+            combined,
+        )
+
     def _ask_ollama(self, prompt: str) -> str:
         try:
             if self.OLLAMA_MODEL.startswith(("qwen", "deepseek")):
@@ -138,6 +208,8 @@ class SnowAIProcessor:
                 response = response[:erase_from] + response[m.end():]
             # Strip any remaining ANSI escape sequences (colors, etc.)
             response = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', response)
+
+            self._log_llm_thinking_if_present(response)
 
             if self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gpt-oss", "glm", "gemma")):
                 response = re.sub(r'Thinking.*?done thinking\.', '', response, flags=re.DOTALL).strip()
@@ -201,6 +273,159 @@ class SnowAIProcessor:
         # Clean up runs of spaces
         text = re.sub(r' {2,}', ' ', text)
         return text.strip()
+
+    @staticmethod
+    def _infer_course_family(course: str) -> str:
+        match = re.match(r"([A-Za-z]+)", str(course or "").strip())
+        return match.group(1).lower() if match else ""
+
+    def _infer_section_kind(self, snow_info: dict | None) -> str:
+        if not snow_info:
+            return "unknown"
+
+        title = str(snow_info.get("Title", "")).lower()
+        section = str(snow_info.get("Section", "")).strip()
+
+        if "quiz" in title:
+            return "quiz"
+        if "guided exercise" in title:
+            return "guided exercise"
+        if "comprehensive review" in title:
+            return "comprehensive review"
+        if title.startswith("lab") or "lab:" in title:
+            return "lab"
+        if section.isdigit():
+            return "guided exercise" if int(section) % 2 == 0 else "theory or lab"
+        return "unknown"
+
+    def _format_ticket_context(self, snow_info: dict | None) -> str:
+        if not snow_info:
+            return "Ticket metadata:\n- Not available\n"
+
+        course = snow_info.get("Course", "")
+        version = snow_info.get("Version", "")
+        chapter = snow_info.get("Chapter", "")
+        section = snow_info.get("Section", "")
+        title = snow_info.get("Title", "")
+        section_kind = self._infer_section_kind(snow_info)
+
+        return (
+            "Ticket metadata:\n"
+            f"- Course: {course}\n"
+            f"- Version: {version}\n"
+            f"- Chapter: {chapter}\n"
+            f"- Section: {section}\n"
+            f"- Title: {title}\n"
+            f"- Inferred section kind: {section_kind}\n"
+        )
+
+    def _course_family_operational_notes(self, snow_info: dict | None) -> str:
+        course = str((snow_info or {}).get("Course", "")).upper()
+        family = self._infer_course_family(course)
+
+        if family == "do":
+            return (
+                "Course-family guidance:\n"
+                "- doXXX courses are OpenShift courses.\n"
+                "- First boot commonly takes 30-40 minutes.\n"
+                "- Long startup on first use is often expected behavior, especially in early setup sections.\n"
+                "- ssh lab@utility and running ./wait.sh is valid guidance for these courses.\n"
+            )
+        if family == "rh":
+            return (
+                "Course-family guidance:\n"
+                "- rhXXX courses are usually RHEL-focused courses.\n"
+                "- Lab startup is usually under 10 minutes.\n"
+            )
+        if family == "au":
+            return (
+                "Course-family guidance:\n"
+                "- auXXX courses are usually Ansible Automation Platform courses.\n"
+                "- Lab startup is usually under 20 minutes.\n"
+            )
+        if family == "cl":
+            return (
+                "Course-family guidance:\n"
+                "- clXXX courses are usually OpenStack courses.\n"
+                "- Lab startup is usually under 20 minutes.\n"
+            )
+        if family == "ad":
+            return (
+                "Course-family guidance:\n"
+                "- adXXX courses are usually advanced developer courses.\n"
+                "- Lab startup is usually under 20 minutes.\n"
+            )
+        if family == "ai":
+            return (
+                "Course-family guidance:\n"
+                "- aiXXX courses are usually artificial intelligence courses.\n"
+                "- First boot commonly takes up to 40 minutes.\n"
+                "- Long startup on first use is often expected behavior, similar to doXXX OpenShift courses.\n"
+            )
+        return (
+            "Course-family guidance:\n"
+            f"- No special family timing rule is encoded for {course or 'this course'}.\n"
+        )
+
+    def _build_operational_context(self, issue_type: str, snow_info: dict | None = None, video_available: bool | None = None) -> str:
+        issue_specific_notes = []
+
+        if issue_type == "classification":
+            issue_specific_notes = [
+                "Classification rules:",
+                "- Treat quiz problems, missing instructions, missing details hidden only in Show Solution, and grading-script logic mismatches as content issues first.",
+                "- Treat lab startup, lab finish, lab grade, building, starting, stopping, VM access, and lab-environment behavior as environment issues.",
+                "- Treat account, exam, subscription, refund, and unrelated platform requests as manually managed issues.",
+                "- If the learner ran commands from a theory section and expected lab-validated output, learner confusion is often more likely than an environment defect.",
+                "- A doXXX course taking a long time to start on first use may be expected first-boot behavior and may not need lab verification if the report matches that pattern.",
+                "- Reports that can be validated by reading the course text alone do not need lab verification.",
+                "- CRITICAL: If the learner claims that a file, directory, path, or script referenced in the guide does not exist, has a different name, or has different contents inside the lab VM, lab verification IS needed. The guide text alone cannot confirm or deny what is actually on the lab filesystem. The same applies to solution files prepared by the lab start command.",
+            ]
+        elif issue_type == "content":
+            issue_specific_notes = [
+                "Content-analysis rules:",
+                "- Missing information in the lab specification that only appears in Show Solution is still a valid content defect.",
+                "- If the learner is complaining about a quiz button or Show Solution behavior, analyze it as a content/platform issue rather than a lab-output issue.",
+                "- If the complaint depends on command output, determine whether the learner is in a guided exercise or lab before assuming the guide is wrong.",
+                "- If the complaint is about commands shown only in theory content, do not assume those commands must match a runnable lab outcome.",
+                "- CRITICAL: If the learner claims that a file, directory, or path referenced in the guide does not exist or has a different name on the lab VM, you CANNOT confirm or deny this from the guide text alone. The guide may reference files that the lab start command creates dynamically. In your analysis, clearly state that this claim requires lab verification and that you cannot confirm the suggested correction without checking the actual lab filesystem.",
+                "- When a claim involves lab filesystem state, set is_valid_issue to true but make the analysis and suggested_correction explicitly say that lab verification is needed to confirm.",
+            ]
+        elif issue_type == "environment":
+            issue_specific_notes = [
+                "Environment-analysis rules:",
+                "- Distinguish expected warm-up from real failure using course-family timing norms.",
+                "- A specific actionable error from a grading script often means learner error rather than platform failure.",
+                "- A lab stuck in building, starting, or stopping for too long is more likely a platform or provisioning problem.",
+                "- Workstation is the normal learner entrypoint. Bastion, classroom, and registry are not normal learner targets.",
+            ]
+        elif issue_type == "video":
+            issue_specific_notes = [
+                "Video-analysis rules:",
+                "- If the video toggle/button is missing, videos for that course version are usually not ready yet.",
+                "- If videos are not ready yet, the learner can be advised to use the previous version if video is important.",
+                "- If the video says something different from the course text, the written course text remains the source of truth and the video issue is a mismatch.",
+            ]
+            if video_available is not None:
+                issue_specific_notes.append(
+                    f"- Video player available on page: {'yes' if video_available else 'no'}."
+                )
+        elif issue_type == "reply":
+            issue_specific_notes = [
+                "Reply rules:",
+                "- Keep the response concise but informative.",
+                "- Do not mention Jira or internal tracking to the learner.",
+                "- If the report is vague, ask for a screenshot, more details, and the exact course section.",
+                "- CRITICAL: If the analysis mentions that lab verification is needed or the issue involves files, paths, or scripts on the lab VM that have not been checked yet, do NOT confirm the issue or suggest a specific fix to the learner. Instead, tell them that we are looking into it and will get back to them once we have verified it in the lab environment.",
+                "- Never present an unverified claim about lab filesystem contents as a confirmed finding.",
+            ]
+
+        return (
+            f"{self._format_ticket_context(snow_info)}\n"
+            f"{self.platform_operational_notes}\n"
+            f"{self._course_family_operational_notes(snow_info)}\n"
+            + "\n".join(issue_specific_notes)
+        ).strip()
 
     @staticmethod
     def _extract_first_json_object(text: str) -> str:
@@ -422,14 +647,16 @@ class SnowAIProcessor:
     # --------------------------
     # Ticket understanding
     # --------------------------
-    def classify_ticket_llm(self, description: str) -> dict:
+    def classify_ticket_llm(self, description: str, snow_info: dict | None = None) -> dict:
         self.logger("Classifying ticket using LLM")
         json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue_ticket": false, "is_video_issue_ticket": false, "needs_lab_verification": true}'
         prompt = f"""
 You are an expert classifier of Red Hat Training tickets.
+{self._build_operational_context("classification", snow_info)}
+
 Classify the user's feedback regarding a Red Hat Training course, there are three types of tickets:
-- content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, etc.
-- environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', it's an environment issue.
+- content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, a quiz problem, missing lab specification details, or a grading-script logic mismatch.
+- environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', or the learner is reporting machine access, VM state, or lab-environment behavior, it's an environment issue.
 - video_issue_ticket: if the feedback is about videos not being available, video not matching the section, subtitle issues, translation problems, bad video cuts, or any other video-related problem.
 
 Examples of content issues:
@@ -445,16 +672,20 @@ Examples of types of issues to be manually managed:
 {self.manually_managed_issues_examples}
 
 IMPORTANT: Determine if lab verification is needed. Lab verification IS needed when:
-- The student claims a command output is different from the guide
+- The student claims a command output is different from the guide AND the complaint is about a guided exercise or lab
 - The student says a lab script (start/grade/finish) is not working
 - The student says a particular solution doesn't work in the grading script
 - The student reports specific behavior in the lab environment that needs confirmation
+- The student claims that a file, directory, script, or path referenced in the guide does not exist, has a different name, or has different contents in the lab VM filesystem. These claims CANNOT be verified by reading the guide text alone; you must start the lab and check the actual filesystem.
+- The student claims that a solution file prepared by the lab start command is missing or different from what the guide says
 
 Lab verification is NOT needed when:
-- There is a simple typo in the guide text
+- There is a simple typo in the guide text (a spelling mistake visible in the guide itself, not involving lab files)
 - Video issues (missing, not matching, subtitle problems)
 - Manually managed issues (refunds, exam scheduling, UI suggestions)
-- The issue can be determined just by reading the guide text
+- The issue can be determined just by reading the guide text WITHOUT needing to check anything on the lab VM
+- The learner is complaining about theory-section example commands rather than guided exercise or lab steps
+- The issue is a likely doXXX first-boot delay that matches expected startup behavior
 
 Return JSON with the following fields:
 - student_feedback: the user's feedback in english, as it is, without any changes. Substitute double quotes with single quotes.
@@ -505,7 +736,7 @@ For example:
             "needs_lab_verification": bool(parsed.get("needs_lab_verification", False)),
         }
 
-    def analyze_content_issue(self, user_issue: str, guide_text: str) -> dict:
+    def analyze_content_issue(self, user_issue: str, guide_text: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing content issue using LLM")
         if guide_text.strip():
             guide_text_prompt = f"""
@@ -531,6 +762,7 @@ For example:
 
         prompt_text = f"""
         You are an useful Red Hat Training expert who is able to understand the flow of the exercises and labs in the course guide.
+        {self._build_operational_context("content", snow_info)}
         We have a student who reported an issue within the guide text. The student's feedback is:
         <student_feedback>
         {user_issue}
@@ -539,6 +771,8 @@ For example:
         {guide_text_prompt}
 
         Compare the student's feedback with the excerpt (if any), and provide a detailed analysis of the issue.
+        Determine whether this is a real content defect, a platform/UI issue visible in the course page, or learner confusion caused by using theory content as if it were a guided exercise or lab.
+        IMPORTANT: If the student's complaint involves files, directories, paths, or scripts that exist on the lab VM filesystem (not just in the guide text), you cannot confirm the issue from the guide alone. The lab start command may create or prepare files dynamically. In this case, explicitly state in your analysis that lab verification is required to confirm the claim, and do NOT present the student's suggested alternative as a confirmed fix.
         Remove from the response in the JSON any reference to titles or headings, as I already have that information.
 
         Return your analysis in exactly the following JSON example format without any extra text. Note that the description of what to put in each field is in every value of the JSON example:
@@ -554,10 +788,12 @@ For example:
         parsed = self._parse_llm_json(response, context="LLM content analysis")
         return parsed or {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
 
-    def analyze_environment_issue(self, user_issue: str) -> dict:
+    def analyze_environment_issue(self, user_issue: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing environment issue using LLM")
         json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "jira_title": "a short title for the Jira ticket, all characters in lowercase separated by spaces, no dashes"}'
         prompt_text = f"""
+        You are an expert in Red Hat Training lab environments.
+        {self._build_operational_context("environment", snow_info)}
         We have a student who reported an issue within the lab environment. The student's feedback is:
         <student_feedback>
         {user_issue}
@@ -574,7 +810,7 @@ For example:
         parsed = self._parse_llm_json(response, context="LLM environment analysis")
         return parsed or {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
 
-    def analyze_video_issue(self, user_issue: str, video_available: bool) -> dict:
+    def analyze_video_issue(self, user_issue: str, video_available: bool, snow_info: dict | None = None) -> dict:
         """
         Analyze video-related issues reported by students.
         
@@ -593,6 +829,7 @@ For example:
         
         prompt_text = f"""
         You are an expert in Red Hat Training video content issues.
+        {self._build_operational_context("video", snow_info, video_available=video_available)}
         
         A student has reported a video-related issue. The student's feedback is:
         <student_feedback>
@@ -639,14 +876,18 @@ For example:
             "jira_title": ""
         }
 
-    def is_openshift_lab_first_boot(self, snow_info: dict, analysis_response_json: dict) -> bool:
+    def is_long_boot_lab_first_start(self, snow_info: dict, analysis_response_json: dict) -> bool:
         course = snow_info.get("Course", "")
-        if course in ["DO180", "DO280", "DO188", "DO288", "DO380", "DO480", "DO316", "DO322", "DO328", "DO370", "DO400"]:
+        family = self._infer_course_family(course)
+        long_boot_courses = ["DO180", "DO280", "DO188", "DO288", "DO380", "DO480", "DO316", "DO322", "DO328", "DO370", "DO400"]
+        is_long_boot = course in long_boot_courses or family == "ai"
+        if is_long_boot:
             response = self.ask_llm(
                 f"""
                You are an expert in Red Hat Training. We have a platform where students can run labs.
-               Openshift labs take about 20-30 min to finish the setup the first time they are booted up. Once everything is working, it should be pretty fast.
-               Determine from the students feedback if this could be the case that the lab is first boot or not.
+               {self._build_operational_context("environment", snow_info)}
+               Labs in doXXX and aiXXX courses take about 30-40 min to finish the setup the first time they are booted up. Once everything is working, it should be pretty fast.
+               Determine from the student's feedback if this looks like expected first-boot delay or an actual failure.
 
                The analysis of the issue is:
                {json.dumps(analysis_response_json)}
@@ -658,7 +899,7 @@ For example:
             return str(response).strip().lower().startswith("true")
         return False
 
-    def craft_llm_response(self, snow_info: dict, analysis_response_json: dict) -> dict:
+    def craft_llm_response(self, snow_info: dict, analysis_response_json: dict, classification_data: dict | None = None) -> dict:
         self.logger("LLM Crafting reply to student")
         student_name = snow_info.get("full_name", "").split(" ")[0]
         course = snow_info.get("Course", "")
@@ -668,9 +909,14 @@ For example:
         json_example = '{"response": "the response to the student"}'
         prompt_text = f"""
     You are a helpful Red Hat Training support representative responding to a student's feedback.
+    {self._build_operational_context("reply", snow_info)}
+    {self.communication_reply_notes}
 
     Student Information:
     - Name: {student_name}
+    - Course: {course}
+    - Chapter: {chapter}
+    - Section: {section}
 
     Student's Original Feedback:
     {snow_info.get('Description', '')}
@@ -683,18 +929,26 @@ For example:
     - Is Valid Issue: {analysis_response_json.get('is_valid_issue', False)}
     - Suggested Correction: {self._normalize_suggested_correction(analysis_response_json.get('suggested_correction', ''))}
     - Analysis: {analysis_response_json.get('analysis', '')}
+    - Video Issue Type: {analysis_response_json.get('video_issue_type', '')}
+    - Classification Flags: {json.dumps(classification_data or {}, ensure_ascii=True)}
 
     Craft a professional, helpful response to the student based on the analysis results that:
     1. Addresses them by their first name
-    2. Acknowledges their feedback if the analysis is valid, otherwise ask for more information.
-    3. Don't add a signature nor final salutation to the response.
+    2. Always thanks them and acknowledges the feedback.
+    3. If the analysis is not valid or the evidence is insufficient, ask for more information, a screenshot, and confirmation of the exact course section.
+    4. Don't add a signature nor final salutation to the response.
+    5. Do not mention Jira or internal tracking.
 
 
     Keep the response concise but informative. 
 
     Special cases:
-    - If the issue is related to the lab environment Suggest to the student to delete the lab environment and create a new one .
-    - If the feedback is vague, asks for more information.
+    - If the issue looks like a doXXX first-boot delay, explain that the first boot can take about 30-40 minutes and mention ssh lab@utility plus ./wait.sh.
+    - If videos for this version are not ready, explain that clearly and suggest using the previous version if video is important.
+    - Only suggest deleting and recreating the lab when the analysis indicates that this is an appropriate recovery step.
+    - If the learner seems to have used theory content as if it were a guided exercise or lab, clarify that politely.
+    - IMPORTANT: If the analysis says lab verification is needed, or the issue involves files, directories, or scripts on the lab VM that we have not yet verified, do NOT tell the learner what the fix is. Instead, say something like: 'Thank you for your feedback. We are currently looking into this and verifying it in the lab environment. We will get back to you once we have confirmed the issue.' Keep it short and reassuring.
+    - Never confirm an unverified filesystem claim as fact in the reply.
 
     Format the response as a JSON object with the following fields:
     - response: the response to the student
@@ -732,7 +986,7 @@ For example:
             # Prepare and add student reply
             reply_text = ""
             if classification_data.get("is_content_issue_ticket", False):
-                crafted = self.craft_llm_response(snow_info, analysis_response_json)
+                crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
                 reply_text = crafted.get("response", "")
                 default_jira_reply = (
                     f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
@@ -758,6 +1012,9 @@ For example:
                         f"The videos for this course version are still being produced by our team. "
                         f"Once they become available, the \"Enable video player\" button will appear "
                         f"in the dock bar at the bottom of the learning platform.\n\n"
+                        f"If video is an important resource for you right now, I would recommend using "
+                        f"the previous version of the course in the meantime, because the written content "
+                        f"usually does not change much between versions.\n\n"
                         f"We appreciate your patience and understanding. Please check back later "
                         f"for video availability.\n\n"
                     )
@@ -768,7 +1025,7 @@ For example:
                         pass
                 else:
                     # Video content issue that needs a Jira ticket
-                    crafted = self.craft_llm_response(snow_info, analysis_response_json)
+                    crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
                     reply_text = crafted.get("response", "")
                     default_jira_reply = (
                         f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
@@ -781,10 +1038,10 @@ For example:
                         WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(default_jira_reply + signature)
                     except Exception:
                         pass
-            elif classification_data.get("is_environment_issue_ticket", False) and self.is_openshift_lab_first_boot(snow_info, analysis_response_json):
+            elif classification_data.get("is_environment_issue_ticket", False) and self.is_long_boot_lab_first_start(snow_info, analysis_response_json):
                 reply_text = (
                     f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
-                    f"Labs take about 20-30 min to finish the setup the first time they are booted up, so please give it time. Once everything is working, it should be pretty fast.\n\n"
+                    f"Thank you for your feedback. Labs in this course can take about 30-40 minutes to finish the setup the first time they are booted up, so please give it some more time. Once everything is working, it should be much faster.\n\n"
                     f"You can monitor the status of the cluster by ssh lab@utility and running the ./wait.sh script. Once the script has finished the scripts are ready to be run.\n\n"
                     f"If by the time you read this message it is still not working fine, I would suggest deleting and creating a new lab environment, and then try to run the lab again.\n\n"
                     f"Please, let me know if the issue persists.\n\n"
@@ -794,7 +1051,7 @@ For example:
                 except Exception:
                     pass
             else:
-                crafted = self.craft_llm_response(snow_info, analysis_response_json)
+                crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
                 reply_text = crafted.get("response", "")
                 try:
                     WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
@@ -1157,7 +1414,7 @@ Translate the following text from {language} to english:
                 # Parse info and run classification/analysis
                 self.driver.switch_to.window(tab_snow)
                 snow_info = self.get_snow_info(snow_id)
-                classification = self.classify_ticket_llm(snow_info["Description"])
+                classification = self.classify_ticket_llm(snow_info["Description"], snow_info)
                 if classification.get("language") == "en":
                     translated = snow_info["Description"]
                 else:
@@ -1191,7 +1448,7 @@ Translate the following text from {language} to english:
                         self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
                         time.sleep(2)
                         video_player_available = self.lab_mgr.check_video_player_available()
-                        analysis = self.analyze_video_issue(snow_info["Description"], video_player_available)
+                        analysis = self.analyze_video_issue(snow_info["Description"], video_player_available, snow_info)
                     elif is_content_issue:                        
                         # Navigate to the course page
                         self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
@@ -1211,11 +1468,11 @@ Translate the following text from {language} to english:
                             logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
 
                         # Perform analysis based on issue type
-                        analysis = self.analyze_content_issue(snow_info["Description"], guide_text)
+                        analysis = self.analyze_content_issue(snow_info["Description"], guide_text, snow_info)
 
                     elif is_environment_issue:
                         # Fetch guide text for "lab environment" issue analysis
-                        analysis = self.analyze_environment_issue(snow_info["Description"])
+                        analysis = self.analyze_environment_issue(snow_info["Description"], snow_info)
 
                     # If the issue requires lab verification, start the lab
                     if needs_lab:
