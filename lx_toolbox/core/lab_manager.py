@@ -844,28 +844,35 @@ class LabManager:
     def get_autostop_hours_remaining(self) -> int:
         """
         Get the number of hours remaining before auto-stop.
-        Parses text like "in an hour", "in 2 hours", "in 9 hours".
-        Returns hours as int, or 0 if unable to determine.
+        Parses text like "Auto-stop in 39 minutes", "in an hour",
+        "in 2 hours", or "in 1 hour 30 minutes".
+        Returns the remaining time rounded up to the next hour as int,
+        or 0 if unable to determine.
         """
         try:
             self.select_lab_environment_tab("lab-environment")
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(0.3)
             
-            # Get the time element text from the auto-stop row (tr[1]/td[1])
-            time_element = WebDriverWait(self.driver, 30).until(
-                EC.presence_of_element_located((By.XPATH, '//table/tr[1]/td[1]/time'))
+            # Read the whole auto-stop cell because the remaining time is not
+            # always wrapped in a <time> element, especially for minute values.
+            time_cell = WebDriverWait(self.driver, 30).until(
+                EC.presence_of_element_located((By.XPATH, '//table/tr[1]/td[1]'))
             )
-            text = time_element.text.lower()  # e.g., "in an hour", "in 2 hours"
+            text = time_cell.text.lower().strip()
             
-            if "an hour" in text:
-                return 1
-            
-            # Extract number from text like "in 2 hours"
-            match = re.search(r'(\d+)', text)
-            if match:
-                hours = int(match.group(1))
-                return hours
+            hours = 0
+            hour_match = re.search(r'\b(an|\d+)\s+hours?\b', text)
+            if hour_match:
+                hours = 1 if hour_match.group(1) == "an" else int(hour_match.group(1))
+
+            minutes = 0
+            minute_match = re.search(r'\b(a|\d+)\s+minutes?\b', text)
+            if minute_match:
+                minutes = 1 if minute_match.group(1) == "a" else int(minute_match.group(1))
+
+            if hours or minutes:
+                return hours + (1 if minutes > 0 else 0)
         except Exception as e:
             logging.getLogger(__name__).warning(f"Could not determine auto-stop time: {e}")
         return 0
