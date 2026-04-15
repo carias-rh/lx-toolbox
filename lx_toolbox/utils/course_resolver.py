@@ -115,8 +115,14 @@ def parse_version(version_str: str) -> tuple[int, int]:
 
 def resolve_course(short_name: str, courses_file: Optional[Path] = None) -> str:
     """
-    Resolve a short course name to the full course ID with latest version.
-    
+    Resolve a short course name to the full course ID.
+
+    Bare or incomplete codes (e.g. \"do180\", \"do280-4\" with no minor) resolve
+    to the latest version present in the courses list. A full course id including
+    version (e.g. \"do280-4.14\") is only used when that exact id appears in
+    ``courses-list.txt``; otherwise resolution falls back to the latest listed
+    version for that course.
+
     Args:
         short_name: Short course identifier (e.g., "199", "do180", "do180ea", "do180-4.14")
         courses_file: Optional path to courses-list.txt
@@ -174,15 +180,13 @@ def resolve_course(short_name: str, courses_file: Optional[Path] = None) -> str:
                     # Check if any version of this course exists
                     matching = [c for c in courses if c.startswith(search_pattern + '-') or c.startswith(search_pattern + 'ea-')]
                     if matching:
-                        # Found the right prefix, but exact version doesn't exist - fall back to latest
-                        # Filter by EA preference
+                        # Found the right prefix, but exact version not in list — fall back to latest
                         if want_ea:
                             filtered = [c for c in matching if c.startswith(search_pattern + 'ea-')]
                         else:
                             filtered = [c for c in matching if not c.startswith(search_pattern + 'ea-')]
                         
                         if filtered:
-                            # Sort by version and return latest
                             matching_courses = []
                             for course in filtered:
                                 if '-' not in course:
@@ -209,10 +213,9 @@ def resolve_course(short_name: str, courses_file: Optional[Path] = None) -> str:
                 if exact_match in courses:
                     return exact_match
                 
-                # Check if base exists with other versions - fall back to latest
+                # Check if base exists with other versions — fall back to latest if exact id not listed
                 matching = [c for c in courses if c.startswith(search_base + '-')]
                 if matching:
-                    # Exact version not found, but course exists - return latest version
                     matching_courses = []
                     for course in matching:
                         if '-' not in course:
