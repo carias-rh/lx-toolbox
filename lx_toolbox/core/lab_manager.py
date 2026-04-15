@@ -3,7 +3,7 @@ import os
 import re
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -1185,25 +1185,21 @@ class LabManager:
 
     def _enable_virtual_keyboard_in_console(self, max_retries: int = 3) -> None:
         """
-        Open Settings, show the virtual keyboard, and verify via Esc.
-        Retries on timeout; logs on final failure (manual enable may be needed).
+        Open the virtual keyboard in the console.
+        Retries on timeout; raises on final failure so callers do not continue
+        trying to press keys against a keyboard that never opened.
         """
+
         for attempt in range(max_retries):
             try:
-                settings_button = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Settings"]'))
-                )
-                settings_button.click()
-                time.sleep(0.5)
-
-                show_keyboard_button = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Show")]'))
+                self.switch_to_console_tab()
+                show_keyboard_button = WebDriverWait(self.driver, 3).until(
+                    EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Show keyboard"]'))
                 )
                 show_keyboard_button.click()
-                time.sleep(2.5)
+                time.sleep(0.5)
+                return
 
-                self._click_virtual_keyboard_key("Esc")
-                break
             except TimeoutException:
                 if attempt < max_retries - 1:
                     logging.getLogger(__name__).debug(
@@ -1211,29 +1207,53 @@ class LabManager:
                     )
                     time.sleep(1)
                 else:
-                    logging.getLogger(__name__).error(
+                    self._disable_virtual_keyboard_in_console()
+                    raise RuntimeError(
                         "Failed to enable virtual keyboard after multiple attempts. "
                         "Enable manually in the qa console tab."
                     )
 
-    def _click_virtual_keyboard_key(self, key_name: str, timeout: int = 10):
+    def _disable_virtual_keyboard_in_console(self):
         """
-        Click a key on the virtual keyboard.
-        
-        Args:
-            key_name: The name of the key (e.g., "Enter", "Tab", "Esc", "Alt", "F2")
-            timeout: Maximum time to wait for the key to be clickable
+        Disable the virtual keyboard in the console if it is open.
         """
         try:
-            key_xpath = f'/html/body/div/div/div/div[2]/div//button[text()="{key_name}"]'
-            key_element = WebDriverWait(self.driver, timeout).until(
-                EC.element_to_be_clickable((By.XPATH, key_xpath))
+            close_keyboard_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '//button[@title="Close"]'))
             )
-            key_element.click()
-            time.sleep(0.3)
+            close_keyboard_button.click()
+            time.sleep(0.5)
         except TimeoutException:
-            logging.getLogger(__name__).debug(f"Could not find virtual keyboard key: {key_name}")
+            logging.getLogger(__name__).debug(f"Could not find close keyboard button")
+            pass
+
+    def _click_virtual_keyboard_key(self, key_name: str | Sequence[str], timeout: int = 10):
+        """
+        Click one or more keys on the virtual keyboard.
+        
+        Args:
+            key_name: A key name or key combination (e.g., "Enter", ("Alt", "F2"), ("Ctrl", "l"))
+            timeout: Maximum time to wait for each key to be clickable
+        """
+        keys_to_click = [key_name] if isinstance(key_name, str) else list(key_name)
+        if not keys_to_click:
+            raise ValueError("At least one virtual keyboard key must be provided.")
+
+        self._enable_virtual_keyboard_in_console(max_retries=2)
+        try:
+            for current_key in keys_to_click:
+                key_xpath = f'//button[normalize-space()="{current_key}"]'
+                key_element = WebDriverWait(self.driver, timeout).until(
+                    EC.element_to_be_clickable((By.XPATH, key_xpath))
+                )
+                key_element.click()
+                time.sleep(0.2)
+        except TimeoutException:
+            combo_name = " + ".join(keys_to_click)
+            logging.getLogger(__name__).debug(f"Could not find virtual keyboard key: {combo_name}")
             raise
+        finally:
+            self._disable_virtual_keyboard_in_console()
 
     def _login_as_student(self):
         """
@@ -1250,10 +1270,7 @@ class LabManager:
         """
         Opens a terminal.
         """
-        self._click_virtual_keyboard_key("Alt")
-        time.sleep(0.2)
-        self._click_virtual_keyboard_key("F2")
-        time.sleep(0.5)
+        self._click_virtual_keyboard_key(("Alt", "F2"))
         self.introduce_command_to_console('gnome-terminal', auto_enter=True)
 
 
@@ -1284,7 +1301,7 @@ class LabManager:
             )
             retry_connection_button.click()
             time.sleep(0.5)
-            self._enable_virtual_keyboard_in_console(max_retries=1)
+            #self._enable_virtual_keyboard_in_console(max_retries=3)
         except TimeoutException:
             pass
 
@@ -1316,19 +1333,12 @@ class LabManager:
             return
 
         try:
-            # Open text dialog
-            settings_button = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Settings"]'))
-                )
-            settings_button.click()
-            time.sleep(0.5)
-
-            show_keyboard_button = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, '//*[contains(text(), "Send Text")]'))
+            #self._disable_virtual_keyboard_in_console()
+            send_text_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Enter large text"]'))
             )
-            show_keyboard_button.click()
+            send_text_button.click()
             time.sleep(0.5)
-
 
             # Paste command into text box
             text_input_area = self.wait.until(
@@ -1338,6 +1348,7 @@ class LabManager:
 
             # Click Send button to send the command
             try:
+                time.sleep(0.25)
                 text_input_area.send_keys(Keys.CONTROL + Keys.ENTER)
             except Exception as e:
                 self.logger(f"Error sending command: {e}")
@@ -1357,20 +1368,21 @@ class LabManager:
             if auto_enter:
                 # Wait for modal backdrop to disappear before clicking Enter
                 try:
-                    WebDriverWait(self.driver, 5).until(
+                    WebDriverWait(self.driver, 1).until(
                         EC.invisibility_of_element_located((By.CSS_SELECTOR, ".modal-backdrop"))
                     )
                 except TimeoutException:
                     # Modal may have already closed, continue
                     pass
 
+                self._enable_virtual_keyboard_in_console(max_retries=2)
                 # Using the specific XPath from the original implementation
                 enter_key_xpath = '//button[text()="↵"]'
                 enter_key = WebDriverWait(self.driver, 1).until(
                         EC.element_to_be_clickable((By.XPATH, enter_key_xpath))
                     )
                 enter_key.click()
-                
+                self._disable_virtual_keyboard_in_console()
 
         except Exception as e:
             self.logger(f"Error introducing command '{command[:50]}...': {e}")
@@ -1953,8 +1965,7 @@ class LabManager:
         # Lab start/setup commands
         if re.match(r"lab .*start", command) or re.match(r"lab .*setup", command):
             # Ctrl+L to clear the terminal screen via the virtual keyboard
-            self._click_virtual_keyboard_key("Ctrl")
-            self._click_virtual_keyboard_key("l")
+            self._click_virtual_keyboard_key(("Ctrl", "l"))
             time.sleep(0.5)
             command = "cd; date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
@@ -2260,8 +2271,11 @@ class LabManager:
                 except QAQuitException:
                     self.logger("QA quit requested by user.")
                     break
-                except Exception as e:
-                    logging.getLogger(__name__).error(f"Error during QA of {chapter_section}: {e}")
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "Error during QA of %s",
+                        chapter_section,
+                    )
                     self._prompt_user_to_continue(f"after handling error in {chapter_section}.")
             
             if self._qa_quit_requested:
@@ -2335,28 +2349,36 @@ class LabManager:
             print(f"\n$ {command}")
             if command_num < total_commands:
                 print('-------------------------------------------------')
-            
-            # Check if this is a special command that needs specific handling
-            if not self._handle_special_command(command):
-                # Regular command - just execute it
-                self.introduce_command_to_console(command, auto_enter=True)
 
-            # Mid-exercise screenshot (proof of QA execution)
-            if not mid_screenshot_taken and i >= mid_command_index and self._qa_report and self._current_exercise_section:
-                path = self._qa_report.screenshot_path(self._current_exercise_section, "mid")
-                self._screenshot_monitor_console(path)
-                ex = self._qa_report.get_exercise(self._current_exercise_section)
-                if ex:
-                    ex.mid_screenshot = path
-                self._qa_report.save()
-                mid_screenshot_taken = True
+            try:
+                # Check if this is a special command that needs specific handling
+                if not self._handle_special_command(command):
+                    # Regular command - just execute it
+                    self.introduce_command_to_console(command, auto_enter=True)
 
-            # Interactive delay with keyboard checking
-            command_delay = self.config.get("QA", "command_delay_seconds", 3)
-            if isinstance(command_delay, str):
-                command_delay = int(command_delay)
-            
-            self._interactive_delay(command_delay, command_num, total_commands)
+                # Mid-exercise screenshot (proof of QA execution)
+                if not mid_screenshot_taken and i >= mid_command_index and self._qa_report and self._current_exercise_section:
+                    path = self._qa_report.screenshot_path(self._current_exercise_section, "mid")
+                    self._screenshot_monitor_console(path)
+                    ex = self._qa_report.get_exercise(self._current_exercise_section)
+                    if ex:
+                        ex.mid_screenshot = path
+                    self._qa_report.save()
+                    mid_screenshot_taken = True
+
+                # Interactive delay with keyboard checking
+                command_delay = self.config.get("QA", "command_delay_seconds", 3)
+                if isinstance(command_delay, str):
+                    command_delay = int(command_delay)
+
+                self._interactive_delay(command_delay, command_num, total_commands)
+            except QAQuitException:
+                raise
+            except Exception as e:
+                raise RuntimeError(
+                    f"QA command {command_num}/{total_commands} failed in "
+                    f"{chapter_section}: {command}"
+                ) from e
 
         clear_status_line()
         self.logger(f"Finished QA for {course_id} - {chapter_section}")
