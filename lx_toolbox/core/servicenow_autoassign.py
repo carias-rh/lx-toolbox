@@ -1115,17 +1115,16 @@ class ServiceNowAutoAssign:
                     round_robin_status_response.raise_for_status()
                     round_robin_status = round_robin_status_response.json()
                     is_round_robin_enabled = round_robin_status.get("round_robin_enabled", False)
+                    if is_round_robin_enabled:
+                        # Get next assignee from round-robin
+                        round_robin_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin", params=group_params)
+                        round_robin_response.raise_for_status()
+                        round_robin_data = round_robin_response.json()
+                        assignee_name = round_robin_data.get("name")
+                        logger.debug(f"Round-robin enabled, got assignee: {assignee_name}")
+                        return assignee_name                    
                 except Exception as e:
                     pass
-            
-            if is_round_robin_enabled:
-                # Get next assignee from round-robin
-                round_robin_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin", params=group_params)
-                round_robin_response.raise_for_status()
-                round_robin_data = round_robin_response.json()
-                assignee_name = round_robin_data.get("name")
-                logger.debug(f"Round-robin enabled, got assignee: {assignee_name}")
-                return assignee_name
             else:
                 # Get assignee from shift endpoint
                 shift_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/shift", params=group_params)
@@ -1242,6 +1241,8 @@ class ServiceNowAutoAssign:
                         if not is_audit and not is_alias:
                             continue
                     success = self.process_gls_cx_ticket(ticket, team_config, assignee_name, team_key=team_key)
+                    # Update assignee_name for Round-robin enabled teams
+                    assignee_name = self.who_is_on_shift(team_config)
                 elif "exam" in team_key:
                     if assignee_name == "None":
                         logger.debug("No one is on shift, stopping ticket processing")
