@@ -113,25 +113,15 @@ def parse_version(version_str: str) -> tuple[int, int]:
         return (0, 0)
 
 
-def _is_complete_version_spec(version_part: str) -> bool:
-    """
-    True when the user gave an explicit dotted version (e.g. 4.14, 9.3.2).
-
-    A single-component version (e.g. \"4\" only) is treated as incomplete so we
-    can still resolve to the latest matching line, same as a bare course code.
-    """
-    v = version_part.strip()
-    return bool(re.match(r"^\d+(\.\d+)+$", v))
-
-
 def resolve_course(short_name: str, courses_file: Optional[Path] = None) -> str:
     """
     Resolve a short course name to the full course ID.
 
-    Bare or incomplete codes (e.g. \"do180\", \"280-4\" with no minor) resolve to
-    the latest version present in the courses list. A fully specified dotted
-    version (e.g. \"do280-4.14\") is kept as-is when the course base matches,
-    even if that exact build id is not listed (avoids silently upgrading to latest).
+    Bare or incomplete codes (e.g. \"do180\", \"do280-4\" with no minor) resolve
+    to the latest version present in the courses list. A full course id including
+    version (e.g. \"do280-4.14\") is only used when that exact id appears in
+    ``courses-list.txt``; otherwise resolution falls back to the latest listed
+    version for that course.
 
     Args:
         short_name: Short course identifier (e.g., "199", "do180", "do180ea", "do180-4.14")
@@ -190,7 +180,7 @@ def resolve_course(short_name: str, courses_file: Optional[Path] = None) -> str:
                     # Check if any version of this course exists
                     matching = [c for c in courses if c.startswith(search_pattern + '-') or c.startswith(search_pattern + 'ea-')]
                     if matching:
-                        # Found the right prefix, but exact version doesn't exist
+                        # Found the right prefix, but exact version not in list — fall back to latest
                         if want_ea:
                             filtered = [c for c in matching if c.startswith(search_pattern + 'ea-')]
                         else:
@@ -205,9 +195,6 @@ def resolve_course(short_name: str, courses_file: Optional[Path] = None) -> str:
                                 matching_courses.append((course, course_version))
                             
                             if matching_courses:
-                                # Explicit dotted version (e.g. do280-4.14): honor it; do not upgrade to latest
-                                if _is_complete_version_spec(version_part):
-                                    return full_match
                                 matching_courses.sort(key=lambda x: parse_version(x[1]), reverse=True)
                                 return matching_courses[0][0]
                         # If we found the prefix but no matching versions (EA/non-EA), continue to next prefix
@@ -226,7 +213,7 @@ def resolve_course(short_name: str, courses_file: Optional[Path] = None) -> str:
                 if exact_match in courses:
                     return exact_match
                 
-                # Check if base exists with other versions
+                # Check if base exists with other versions — fall back to latest if exact id not listed
                 matching = [c for c in courses if c.startswith(search_base + '-')]
                 if matching:
                     matching_courses = []
@@ -237,9 +224,6 @@ def resolve_course(short_name: str, courses_file: Optional[Path] = None) -> str:
                         matching_courses.append((course, course_version))
                     
                     if matching_courses:
-                        # Explicit dotted version: honor it; do not upgrade to latest list entry
-                        if _is_complete_version_spec(version_part):
-                            return exact_match
                         matching_courses.sort(key=lambda x: parse_version(x[1]), reverse=True)
                         return matching_courses[0][0]
                 
