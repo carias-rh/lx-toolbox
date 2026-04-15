@@ -925,7 +925,7 @@ class ServiceNowAutoAssign:
                 alias_assignee, matched_alias = self._resolve_email_alias_assignee(description)
                 if matched_alias:
                     if alias_assignee and alias_assignee != "None":
-                        logger.info(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' → routed to {alias_assignee}")
+                        logger.info(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' routed to {alias_assignee}")
                         assignee_name = alias_assignee
                     else:
                         logger.debug(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' but no one on sub-region shift, skipping")
