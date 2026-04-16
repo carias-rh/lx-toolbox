@@ -1193,8 +1193,12 @@ class LabManager:
         for attempt in range(max_retries):
             try:
                 self.switch_to_console_tab()
-                show_keyboard_button = WebDriverWait(self.driver, 3).until(
-                    EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Show keyboard"]'))
+                show_keyboard_button = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR,
+                        'button:has(svg.lucide-keyboard), '
+                        'button[aria-label="Show keyboard"], '
+                        'button[title="Show keyboard"]'
+                    ))
                 )
                 show_keyboard_button.click()
                 time.sleep(0.5)
