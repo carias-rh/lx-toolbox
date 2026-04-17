@@ -158,22 +158,17 @@ class QAReport:
 
     @staticmethod
     def _format_duration(seconds: float) -> str:
-        """Format seconds into a human-readable string while preserving milliseconds."""
+        """Format seconds into a human-readable string, truncating fractional seconds."""
         if seconds <= 0:
             return ""
 
-        rounded_seconds = round(seconds, 3)
-        minutes = int(rounded_seconds) // 60
-        secs = rounded_seconds - (minutes * 60)
+        whole_seconds = int(seconds)
+        minutes = whole_seconds // 60
+        secs = whole_seconds % 60
 
         if minutes > 0:
-            if secs.is_integer():
-                return f"{minutes}m {int(secs):02d}s"
-            return f"{minutes}m {secs:06.3f}s"
-
-        if rounded_seconds.is_integer():
-            return f"{int(rounded_seconds)}s"
-        return f"{rounded_seconds:.3f}s"
+            return f"{minutes}m {secs:02d}s"
+        return f"{whole_seconds}s"
 
     @staticmethod
     def _chapter_number(chapter_section: str) -> str:
