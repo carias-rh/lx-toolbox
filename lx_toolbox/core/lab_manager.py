@@ -1211,7 +1211,6 @@ class LabManager:
                     )
                     time.sleep(1)
                 else:
-                    self._disable_virtual_keyboard_in_console()
                     raise RuntimeError(
                         "Failed to enable virtual keyboard after multiple attempts. "
                         "Enable manually in the qa console tab."
@@ -1243,7 +1242,6 @@ class LabManager:
         if not keys_to_click:
             raise ValueError("At least one virtual keyboard key must be provided.")
 
-        self._enable_virtual_keyboard_in_console(max_retries=2)
         try:
             for current_key in keys_to_click:
                 key_xpath = f'//button[normalize-space()="{current_key}"]'
@@ -1256,8 +1254,6 @@ class LabManager:
             combo_name = " + ".join(keys_to_click)
             logging.getLogger(__name__).debug(f"Could not find virtual keyboard key: {combo_name}")
             raise
-        finally:
-            self._disable_virtual_keyboard_in_console()
 
     def _login_as_student(self):
         """
@@ -1305,7 +1301,6 @@ class LabManager:
             )
             retry_connection_button.click()
             time.sleep(0.5)
-            #self._enable_virtual_keyboard_in_console(max_retries=3)
         except TimeoutException:
             pass
 
@@ -1337,7 +1332,6 @@ class LabManager:
             return
 
         try:
-            #self._disable_virtual_keyboard_in_console()
             send_text_button = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Enter large text"]'))
             )
@@ -1379,14 +1373,12 @@ class LabManager:
                     # Modal may have already closed, continue
                     pass
 
-                self._enable_virtual_keyboard_in_console(max_retries=2)
                 # Using the specific XPath from the original implementation
                 enter_key_xpath = '//button[text()="↵"]'
                 enter_key = WebDriverWait(self.driver, 1).until(
                         EC.element_to_be_clickable((By.XPATH, enter_key_xpath))
                     )
                 enter_key.click()
-                self._disable_virtual_keyboard_in_console()
 
         except Exception as e:
             self.logger(f"Error introducing command '{command[:50]}...': {e}")
