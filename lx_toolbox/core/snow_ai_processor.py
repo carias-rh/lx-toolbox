@@ -56,7 +56,8 @@ class SnowAIProcessor:
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e4b") # ministral-3:8b
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b") # gemma4:e4b # ministral-3:8b
+        #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:14b") # gemma4:e4b # ministral-3:8b
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
@@ -313,6 +314,7 @@ class SnowAIProcessor:
             "- Use JSON booleans true/false and null, not Python True/False/None.\n"
             "- Do not return Python dict syntax.\n"
             "- Do not wrap the JSON in markdown fences.\n"
+            "- Never use asterisks for bold formatting (e.g. **word**). Use plain text only.\n"
         )
 
     @classmethod
@@ -430,6 +432,7 @@ Instructions:
 - If none of the follow-ups add new information, return exactly: "No additional information."
 - Be concise: 2-5 sentences maximum.
 - Return plain text only, no JSON.
+- Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 """
         response = self.ask_llm(prompt)
         # The LLM may return JSON-wrapped text; extract plain text
@@ -836,6 +839,8 @@ Instructions:
         url = re.findall("URL:.*", description)[0].split(":  ")[1].strip()
         if "role.rhu.redhat.com/rol-rhu" in url:
             url = url.replace("role.rhu.redhat.com/rol-rhu", "rol.redhat.com/rol")
+        # ROL sometimes embeds course slugs like do180f-4.18; canonical path uses do180-4.18
+        url = re.sub(r"([A-Za-z]{2}\d{3})f(?=-)", r"\1", url)
 
         try:
             chapter = re.findall("ch[0-9][0-9]", url)[0].split("ch")[1]
@@ -1313,7 +1318,8 @@ For example:
 
     def translate_text(self, text: str, language: str) -> str:
         prompt_text = f"""
-Translate the following text from {language} to english:
+Translate the following text from {language} to english.
+Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 <text>
 {text}
 </text>
