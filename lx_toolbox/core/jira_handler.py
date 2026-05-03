@@ -240,7 +240,7 @@ class JiraHandler:
             # Poll until the URL stops changing or 15 seconds pass.
             prev_url = ""
             for _ in range(6):
-                time.sleep(1.5)
+                time.sleep(2)
                 cur_url = self.driver.current_url or ""
                 if cur_url == prev_url:
                     break
