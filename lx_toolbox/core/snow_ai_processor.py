@@ -56,8 +56,9 @@ class SnowAIProcessor:
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b") # gemma4:e4b # ministral-3:8b
-        #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:14b") # gemma4:e4b # ministral-3:8b
+        #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
+        #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.6:27b")
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "granite4.1:3b")
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
@@ -136,6 +137,8 @@ class SnowAIProcessor:
             "- If the report is vague or cannot be confirmed, ask for a screenshot, more detail, and the exact course section.\n"
             "- If the issue cannot be reproduced, say that politely instead of sounding dismissive or overconfident.\n"
             "- Avoid generic filler wording.\n"
+            "- NEVER use the words 'guide text', 'guide_text', or 'course guide text' in the reply. Use natural alternatives like 'course material', 'exercise instructions', 'course page', or 'course content' instead.\n"
+            "- Structure the reply in short, clearly separated paragraphs. Each paragraph should cover one idea. Use a blank line (two newlines) between paragraphs.\n"
         )
     # --------------------------
     # LLM helpers
@@ -301,6 +304,48 @@ class SnowAIProcessor:
         # Clean up runs of spaces
         text = re.sub(r' {2,}', ' ', text)
         return text.strip()
+
+    @staticmethod
+    def _format_reply_paragraphs(text: str) -> str:
+        """Split a flat reply into paragraphs separated by blank lines.
+
+        If the LLM already produced paragraph breaks (\\n\\n) those are kept.
+        Otherwise the text is heuristically split: a sentence that ends a
+        logical block (acknowledgement, explanation, action, next-steps) gets
+        a blank line after it.
+        """
+        if not text:
+            return text
+
+        if "\n\n" in text:
+            paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+            return "\n\n".join(paragraphs)
+
+        sentences: list[str] = re.split(r'(?<=[.!?])\s+', text.strip())
+        if len(sentences) <= 2:
+            return text
+
+        paragraphs: list[str] = []
+        current: list[str] = []
+        for sent in sentences:
+            current.append(sent)
+            if len(current) >= 2:
+                paragraphs.append(" ".join(current))
+                current = []
+        if current:
+            if paragraphs:
+                paragraphs[-1] += " " + " ".join(current)
+            else:
+                paragraphs.append(" ".join(current))
+
+        return "\n\n".join(paragraphs)
+
+    @staticmethod
+    def _scrub_guide_text_wording(text: str) -> str:
+        """Replace robotic 'guide text' variants with natural alternatives."""
+        text = re.sub(r'\bguide[_ ]text\b', 'course material', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bcourse guide text\b', 'course material', text, flags=re.IGNORECASE)
+        return text
 
     @staticmethod
     def _json_output_rules() -> str:
@@ -920,6 +965,7 @@ IMPORTANT: Determine if lab verification is needed. Lab verification IS needed w
 - The student reports specific behavior in the lab environment that needs confirmation
 - The student claims that a file, directory, script, or path referenced in the guide does not exist, has a different name, or has different contents in the lab VM filesystem. These claims CANNOT be verified by reading the guide text alone; you must start the lab and check the actual filesystem.
 - The student claims that a solution file prepared by the lab start command is missing or different from what the guide says
+- The feedback contains a URL ending in *.example.com (e.g. https://api.ocp4.example.com:6443, https://console-openshift-console.apps.ocp4.example.com, etc.). These are lab-internal hostnames that only resolve inside the lab environment and must be verified there.
 
 Lab verification is NOT needed when:
 - There is a simple typo in the guide text (a spelling mistake visible in the guide itself, not involving lab files)
@@ -1034,7 +1080,7 @@ For example:
 
     def analyze_environment_issue(self, user_issue: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing environment issue using LLM")
-        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "jira_title": "a short title for the Jira ticket, all characters in lowercase separated by spaces, no dashes"}'
+        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "jira_title": "a very short title focused only on the core defect, without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes"}'
         prompt_text = f"""
         You are an expert in Red Hat Training lab environments.
         {self._build_operational_context("environment", snow_info)}
@@ -1070,7 +1116,7 @@ For example:
         
         video_context = "The video player IS available on the page, so videos should be accessible." if video_available else "The video player button is NOT available on the page, which typically means videos for this course version are still being produced."
         
-        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "jira_title": "video issue title for jira"}'
+        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "jira_title": "a very short title focused only on the core defect, without mentioning the exercise type, course section, or course name"}'
         
         prompt_text = f"""
         You are an expert in Red Hat Training video content issues.
@@ -1104,7 +1150,7 @@ For example:
         - video_issue_type: one of "videos_not_ready", "content_mismatch", "subtitle_issue", "technical_issue", "other"
         - suggested_correction: what needs to be fixed (empty if videos_not_ready)
         - summary: short summary of the analysis
-        - jira_title: title for the Jira ticket (empty if no Jira needed)
+        - jira_title: a very short title focused only on the core defect, without mentioning the exercise type, course section, or course name (empty if no Jira needed)
         
         Do not include any explanations, xml or markdown formatting outside the JSON object.
         {self._json_output_rules()}
@@ -1186,14 +1232,15 @@ For example:
     - Classification Flags: {json.dumps(classification_data or {}, ensure_ascii=True)}
 
     Craft a professional, helpful response to the student based on the analysis results that:
-    1. Addresses them by their first name
-    2. Always thanks them and acknowledges the feedback.
+    1. Do NOT include a greeting line such as 'Dear Name,' or 'Hi Name,' — the greeting is added separately.
+    2. Start directly with thanking them and acknowledging the feedback shortly.
     3. If the analysis is not valid or the evidence is insufficient, ask for more information, a screenshot, and confirmation of the exact course section.
     4. Don't add a signature nor final salutation to the response.
     5. Do not mention Jira or internal tracking.
+    6. NEVER use the words 'guide text', 'guide_text', or 'course guide text'. Use natural alternatives like 'course material', 'exercise instructions', 'course page', or 'course content'.
+    7. Write the reply in short paragraphs separated by blank lines (two newlines). Each paragraph should cover one distinct idea: acknowledgement, explanation of the issue, what we are doing about it, and next steps for the learner. Do NOT write the entire reply as a single block of text.
 
-
-    Keep the response concise but informative. 
+    Keep the response concise but informative.
 
     Special cases:
     - If the issue looks like a doXXX first-boot delay, explain that the first boot can take about 30-40 minutes and mention ssh lab@utility plus ./wait.sh.
@@ -1218,13 +1265,17 @@ For example:
         if not parsed:
             return {"response": "Thank you for your feedback. We are investigating this and will follow up."}
         if "response" in parsed:
-            parsed["response"] = self._clean_llm_text(parsed["response"])
+            reply = self._clean_llm_text(parsed["response"])
+            reply = self._format_reply_paragraphs(reply)
+            reply = self._scrub_guide_text_wording(reply)
+            reply = re.sub(r'^(Dear|Hi|Hello|Hey)\s+\S+[,.]?\s*\n*', '', reply, flags=re.IGNORECASE).lstrip()
+            parsed["response"] = f"Dear {student_name},\n\n{reply}"
         return parsed
 
 
     def reply_to_student_and_add_notes(self, snow_info: dict, classification_data: dict, analysis_response_json: dict):
         self.logger("Replying to student and adding summary notes")
-        signature = f"\nBest Regards,\n{self.SIGNATURE_NAME}\nRed Hat Learner Experience Team"
+        signature = f"\n\nBest Regards,\n{self.SIGNATURE_NAME}\nRed Hat Learner Experience Team"
 
         try:
             # Ensure we are inside the ticket iframe
