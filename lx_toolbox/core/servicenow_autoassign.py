@@ -1117,7 +1117,7 @@ class ServiceNowAutoAssign:
                         round_robin_response.raise_for_status()
                         round_robin_data = round_robin_response.json()
                         assignee_name = round_robin_data.get("name")
-                        logger.info(f"[{team_config.team_name}] Round-robin assignee: {assignee_name}")
+                        logger.debug(f"[{team_config.team_name}] Round-robin assignee: {assignee_name}")
                         return assignee_name                    
                 except Exception as e:
                     logger.warning(f"[{team_config.team_name}] Round-robin endpoint failed: {e}")
@@ -1130,13 +1130,13 @@ class ServiceNowAutoAssign:
                 is_rr = shift_data.get("round_robin", False)
 
                 if shift_name and shift_name != "None":
-                    logger.info(
+                    logger.debug(
                         f"[{team_config.team_name}] Shift assignee: {shift_name} "
                         f"| round_robin={is_rr} | group={group_params.get('group', '-')}"
                     )
                     return shift_name
                 else:
-                    logger.info(
+                    logger.debug(
                         f"[{team_config.team_name}] No one on shift "
                         f"| group={group_params.get('group', '-')}"
                     )
@@ -1192,8 +1192,9 @@ class ServiceNowAutoAssign:
         team_config = self.teams.get(team_key)
         if not team_config:
             raise ValueError(f"Unknown team: {team_key}")
-            
-        stats = {"assigned": 0, "resolved": 0, "errors": 0}
+
+        tname = team_config.team_name
+        stats = {"assigned": 0, "resolved": 0, "skipped": 0, "errors": 0}
         
         if team_config.auto_resolve_reporters:
             stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
@@ -1202,14 +1203,17 @@ class ServiceNowAutoAssign:
             assignee_name = self.who_is_on_shift(team_config)                
 
         if not assignee_name and team_config.frontend_shift_manager_url:
-            logger.info(f"[{team_key}] No assignee available — skipping assignment cycle")
+            logger.info(f"[{tname}] No assignee available — skipping assignment cycle")
             return stats
         elif not assignee_name and not team_config.frontend_shift_manager_url:
             assignee_name = "only-ack"            
-            logger.info(f"[{team_key}] No frontend configured — ACK-only mode")
+            logger.debug(f"[{tname}] No frontend configured — ACK-only mode")
 
         tickets = self.get_unassigned_tickets(team_key)
-        logger.info(f"[{team_key}] Found {len(tickets)} unassigned ticket(s), initial assignee: {assignee_name}")
+        if not tickets:
+            logger.debug(f"[{tname}] No unassigned tickets | assignee={assignee_name}")
+            return stats
+        logger.info(f"[{tname}] {len(tickets)} unassigned ticket(s) | assignee={assignee_name}")
         
         # Process each ticket
         for ticket in tickets:
@@ -1239,12 +1243,17 @@ class ServiceNowAutoAssign:
                         is_audit = 'Audit Request received' in short_desc
                         is_alias = any(a in desc for a in self._email_alias_to_team_key)
                         if not is_audit and not is_alias:
+                            stats["skipped"] += 1
                             continue
                     success = self.process_gls_cx_ticket(ticket, team_config, assignee_name, team_key=team_key)
-                    prev_assignee = assignee_name
-                    assignee_name = self.who_is_on_shift(team_config)
-                    if assignee_name != prev_assignee:
-                        logger.info(f"[{team_key}] Round-robin advanced: {prev_assignee} → {assignee_name}")
+                    if success:
+                        prev_assignee = assignee_name
+                        assignee_name = self.who_is_on_shift(team_config)
+                        if assignee_name != prev_assignee:
+                            logger.info(f"[{tname}] Round-robin: {prev_assignee} → {assignee_name}")
+                    else:
+                        stats["skipped"] += 1
+                        continue
                 elif "exam" in team_key:
                     if assignee_name == "None":
                         logger.debug("No one is on shift, stopping ticket processing")
@@ -1271,14 +1280,18 @@ class ServiceNowAutoAssign:
                 if success:
                     stats["assigned"] += 1
                     if "gls-cx" not in team_key:
-                        logger.info(f"Assigned ticket {ticket['number']} to {assignee_name}")
+                        logger.info(f"[{tname}] Assigned ticket {ticket['number']} to {assignee_name}")
                 else:
                     stats["errors"] += 1
                     
             except Exception as e:
                 logger.error(f"Error processing ticket {ticket.get('number', 'unknown')}: {e}")
                 stats["errors"] += 1
-                
+
+        if stats["skipped"]:
+            logger.info(
+                f"[{tname}] {stats['skipped']} ticket(s) skipped (no eligible assignee on shift)"
+            )
         return stats
 
     def _resolve_team_keys(self, team_key: str) -> List[str]:
