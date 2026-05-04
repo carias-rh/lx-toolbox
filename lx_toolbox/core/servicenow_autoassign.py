@@ -991,7 +991,7 @@ class ServiceNowAutoAssign:
                 return False
             # Log here so the name matches audit/alias resolution; run_auto_assignment's
             # assignee_name is only the default zone shift and is wrong for those paths.
-            logger.info(f"Assigned ticket {ticket['number']} to {assignee_name}")
+            logger.info(f"[{team_config.team_name}] Assigned ticket {ticket['number']} to {assignee_name}")
             return True
         except Exception as e:
             logger.error(f"Error processing GLS CX ticket {ticket.get('number', 'unknown')}: {e}")
