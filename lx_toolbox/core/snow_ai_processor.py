@@ -58,7 +58,7 @@ class SnowAIProcessor:
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
         #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
         #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.6:27b")
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "granite4.1:3b")
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "granite4.1:8b")
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
