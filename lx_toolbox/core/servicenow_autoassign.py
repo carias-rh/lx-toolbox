@@ -1229,7 +1229,6 @@ class ServiceNowAutoAssign:
         if not tickets:
             logger.debug(f"[{tname}] No unassigned tickets | assignee={assignee_name}")
             return stats
-        logger.info(f"[{tname}] {len(tickets)} unassigned ticket(s) | assignee={assignee_name}")
         
         # Process each ticket
         for ticket in tickets:
@@ -1306,7 +1305,7 @@ class ServiceNowAutoAssign:
                 stats["errors"] += 1
 
         if stats["skipped"]:
-            logger.info(
+            logger.debug(
                 f"[{tname}] {stats['skipped']} ticket(s) skipped (no eligible assignee on shift)"
             )
         return stats
