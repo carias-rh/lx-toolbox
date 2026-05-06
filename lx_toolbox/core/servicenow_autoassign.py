@@ -95,9 +95,6 @@ class ServiceNowAutoAssign:
         # Cache for team members to avoid repeated API calls
         self._team_members_cache = {}
 
-        # Persisted round-robin state: team_key -> next assignee name.
-        # Survives across polling cycles so single-ticket arrivals rotate correctly.
-        self._rr_next_assignee: Dict[str, str] = {}
         # Tracks which teams have round-robin enabled (learned from /api/shift response).
         self._rr_enabled: Dict[str, bool] = {}
         
@@ -1106,7 +1103,7 @@ class ServiceNowAutoAssign:
             return 0
 
 
-    def who_is_on_shift(self, team_config: TeamConfig, team_key: str = None) -> Optional[str]:
+    def who_is_on_shift(self, team_config: TeamConfig, team_key: str = None, advance: bool = True) -> Optional[str]:
         is_round_robin_enabled = False
         group_params = {}
         if team_config.frontend_group_param:
@@ -1129,6 +1126,9 @@ class ServiceNowAutoAssign:
                     logger.warning(f"[{team_config.team_name}] Round-robin endpoint failed: {e}")
             else:
                 shift_url = f"{team_config.frontend_shift_manager_url}/api/shift"
+                if team_key:
+                    group_params["team_key"] = team_key
+                    group_params["advance"] = "true" if advance else "false"
                 shift_response = requests.get(shift_url, params=group_params)
                 shift_response.raise_for_status()
                 shift_data = shift_response.json()
@@ -1209,14 +1209,7 @@ class ServiceNowAutoAssign:
             stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
             
         if team_config.frontend_shift_manager_url != None:
-            assignee_name = self.who_is_on_shift(team_config, team_key)
-
-        if self._rr_enabled.get(team_key) and assignee_name and assignee_name != "None":
-            stored_next = self._rr_next_assignee.get(team_key)
-            if stored_next and stored_next != "None":
-                assignee_name = stored_next
-        elif self._rr_enabled.get(team_key) and (not assignee_name or assignee_name == "None"):
-            self._rr_next_assignee.pop(team_key, None)
+            assignee_name = self.who_is_on_shift(team_config, team_key, advance=False)
 
         if not assignee_name and team_config.frontend_shift_manager_url:
             logger.info(f"[{tname}] No assignee available — skipping assignment cycle")
@@ -1293,9 +1286,8 @@ class ServiceNowAutoAssign:
                         logger.info(f"[{tname}] Assigned ticket {ticket['number']} to {assignee_name}")
                     if self._rr_enabled.get(team_key):
                         prev_assignee = assignee_name
-                        assignee_name = self.who_is_on_shift(team_config, team_key)
-                        self._rr_next_assignee[team_key] = assignee_name
-                        if assignee_name != prev_assignee:
+                        assignee_name = self.who_is_on_shift(team_config, team_key, advance=True)
+                        if assignee_name and assignee_name != prev_assignee:
                             logger.info(f"[{tname}] Round-robin: {prev_assignee} → {assignee_name}")
                 else:
                     stats["errors"] += 1
