@@ -130,7 +130,7 @@ class ServiceNowAutoAssign:
                 or "974cb3e01bc31c50c57c3224cc4bcbfe"
             ),
             category="RHLS Standard External Support_t2",
-            subcategory="Course Content",
+            subcategory="Course Content_rses",
             issue_type="Other",
             frontend_shift_manager_url=self.config.get("T2", "FRONTEND_OPENSHIFT_ROUTE"),
             acknowledgment_template=(
