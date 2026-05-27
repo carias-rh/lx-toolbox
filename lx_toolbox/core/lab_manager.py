@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 # Assuming WebDriver exceptions like TimeoutException might be caught
@@ -2378,64 +2379,88 @@ class LabManager:
         self.selenium_driver.go_to_url(catalog_url)
         time.sleep(2)
 
-    def filter_by_courses(self):
-        """Filter the catalog to show only courses."""
-        self.logger("Filtering catalog by 'Course' delivery format...")
+    def filter_by_format(self, delivery_format: str):
+        """
+        Filter the catalog to show only items of the given delivery format.
+        delivery_format should match the label text exactly, e.g. 'Course' or 'Lesson'.
+        """
+        self.logger(f"Filtering catalog by '{delivery_format}' delivery format...")
+        catalog_wait = WebDriverWait(self.driver, 20)
         try:
-            delivery_formats_btn = self.wait.until(EC.element_to_be_clickable(
+            delivery_formats_btn = catalog_wait.until(EC.element_to_be_clickable(
                 (By.XPATH, '//button[contains(text(), "Delivery formats")]')
             ))
             delivery_formats_btn.click()
             time.sleep(0.5)
 
-            course_checkbox = self.wait.until(EC.element_to_be_clickable(
-                (By.XPATH, '//input[@id="course_checkbox"]')
-            ))
+            # Try by convention id first, then fall back to finding the input
+            # that sits alongside a label containing the format text.
+            checkbox_xpath = (
+                f'//input[@id="{delivery_format.lower()}_checkbox"]'
+                f' | //label[contains(@class, "check__label")'
+                f' and normalize-space(text())="{delivery_format}"]'
+                f'/..//input[@type="checkbox"]'
+            )
+            checkbox = catalog_wait.until(EC.element_to_be_clickable((By.XPATH, checkbox_xpath)))
 
-            if not course_checkbox.is_selected():
-                course_checkbox.click()
+            if not checkbox.is_selected():
+                checkbox.click()
                 time.sleep(1)
 
-            self.logger("Filter applied: Showing courses only")
+            self.logger(f"Filter applied: Showing {delivery_format.lower()}s only")
 
         except TimeoutException:
-            self.logger("Could not apply course filter. Proceeding with current view.")
+            self.logger(f"Could not apply {delivery_format} filter. Proceeding with current view.")
 
-    def _get_courses_from_current_page(self) -> list[dict]:
+    def filter_by_courses(self):
+        """Filter the catalog to show only courses (convenience alias)."""
+        self.filter_by_format('Course')
+
+    def _get_courses_from_current_page(self, version_cache: dict | None = None) -> list[dict]:
         """
-        Extract courses from the current catalog page.
-        Returns a list of dicts with 'id', 'title', and 'url'.
+        Extract courses from the current catalog page (PF5 card layout).
+        Returns a list of dicts with 'id' (versioned when known, e.g. 'do336-4.18'),
+        'sku' (bare, e.g. 'do336'), 'title', and 'url'.
+
+        Versioned IDs are resolved via version_cache (built from courses-list.txt).
+        Courses absent from the cache get a bare SKU as id; update_courses_list
+        handles those with a separate click-and-navigate pass.
         """
         courses = []
 
-        course_links = self.driver.find_elements(
+        cards = self.driver.find_elements(
             By.XPATH,
-            '//a[contains(@href, "/rol/app/courses/") and (text()="Launch" or text()="View" or text()="Access" or text()="LAUNCH")]'
+            '//div[contains(@class, "pf-v5-c-card") and contains(@class, "offering-card")]'
         )
 
-        for link in course_links:
+        for card in cards:
             try:
-                url = link.get_attribute('href')
-                if url and '/rol/app/courses/' in url:
-                    parts = url.split('/rol/app/courses/')
-                    if len(parts) > 1:
-                        course_id = parts[1].split('/')[0]
+                sku_elem = card.find_element(
+                    By.XPATH, './/span[contains(@class, "pf-v5-c-label__text")]'
+                )
+                sku = sku_elem.text.strip().lower()
+                if not sku:
+                    continue
 
-                        try:
-                            parent = link.find_element(By.XPATH, './ancestor::div[contains(@class, "pf-")]')
-                            title_elem = parent.find_element(By.XPATH, './/h4')
-                            title = title_elem.text
-                        except:
-                            title = course_id
+                try:
+                    title_elem = card.find_element(
+                        By.XPATH, './/h4[contains(@class, "title")]'
+                    )
+                    title = title_elem.get_attribute('title') or title_elem.text.strip()
+                except:
+                    title = sku
 
-                        if not any(c['id'] == course_id for c in courses):
-                            courses.append({
-                                'id': course_id,
-                                'title': title,
-                                'url': f"/rol/app/courses/{course_id}"
-                            })
+                versioned_id = version_cache.get(sku, sku) if version_cache else sku
+
+                if not any(c['sku'] == sku for c in courses):
+                    courses.append({
+                        'id': versioned_id,
+                        'sku': sku,
+                        'title': title,
+                        'url': f"/rol/app/courses/{versioned_id}"
+                    })
             except Exception as e:
-                logging.debug(f"Error processing course link: {e}")
+                logging.debug(f"Error processing course card: {e}")
                 continue
 
         return courses
@@ -2446,22 +2471,25 @@ class LabManager:
         Returns 1 if no pagination is found.
         """
         try:
-            pagination = self.driver.find_elements(
+            # PF5: <input aria-label="Current page" max="N"> inside pagination nav
+            page_inputs = self.driver.find_elements(
                 By.XPATH,
-                '//ul[contains(@class, "pagination")]//li[not(contains(., "«")) and not(contains(., "»")) and not(contains(., "‹")) and not(contains(., "›"))]//a'
+                '//nav[contains(@class, "pagination")]//input[@aria-label="Current page"]'
             )
+            if page_inputs:
+                max_pages = page_inputs[0].get_attribute('max')
+                if max_pages and max_pages.isdigit():
+                    return int(max_pages)
 
-            if pagination:
-                page_numbers = []
-                for page_link in pagination:
-                    try:
-                        page_num = int(page_link.text.strip())
-                        page_numbers.append(page_num)
-                    except ValueError:
-                        continue
-
-                if page_numbers:
-                    return max(page_numbers)
+            # PF5 fallback: <span aria-hidden="true">of N</span>
+            of_spans = self.driver.find_elements(
+                By.XPATH,
+                '//nav[contains(@class, "pagination")]//span[contains(normalize-space(.), "of ")]'
+            )
+            if of_spans:
+                match = re.search(r'of\s+(\d+)', of_spans[0].text)
+                if match:
+                    return int(match.group(1))
 
             return 1
         except Exception:
@@ -2473,12 +2501,14 @@ class LabManager:
         Returns True if successful, False otherwise.
         """
         try:
-            page_link = self.driver.find_element(
+            page_input = self.driver.find_element(
                 By.XPATH,
-                f'//ul[contains(@class, "pagination")]//li//a[text()="{page_number}"]'
+                '//nav[contains(@class, "pagination")]//input[@aria-label="Current page"]'
             )
 
-            self.driver.execute_script("arguments[0].click();", page_link)
+            self.driver.execute_script("arguments[0].value = '';", page_input)
+            page_input.send_keys(str(page_number))
+            page_input.send_keys(Keys.RETURN)
             time.sleep(2)
 
             return True
@@ -2490,17 +2520,16 @@ class LabManager:
 
     def _click_next_page(self) -> bool:
         """
-        Click the "next" (›) button to go to the next page.
-        Returns True if successful, False if no next page.
+        Click the "next" button to go to the next page.
+        Returns True if successful, False if no next page or button is disabled.
         """
         try:
             next_button = self.driver.find_element(
                 By.XPATH,
-                '//ul[contains(@class, "pagination")]//li//a[contains(text(), "›")]'
+                '//nav[contains(@class, "pagination")]//button[@data-action="next"]'
             )
 
-            parent_li = next_button.find_element(By.XPATH, './..')
-            if 'disabled' in parent_li.get_attribute('class') or '':
+            if next_button.get_attribute('disabled') or next_button.get_attribute('aria-disabled') == 'true':
                 return False
 
             self.driver.execute_script("arguments[0].click();", next_button)
@@ -2513,17 +2542,18 @@ class LabManager:
             logging.debug(f"Error clicking next page: {e}")
             return False
 
-    def get_all_courses(self) -> list[dict]:
+    def get_all_courses(self, version_cache: dict | None = None) -> list[dict]:
         """
         Get all courses from the catalog, navigating through all pagination pages.
-        Returns a list of dicts with 'id', 'title', and 'url'.
+        Returns a list of dicts with 'id' (versioned), 'sku', 'title', and 'url'.
         """
         self.logger("Getting list of all courses from catalog...")
         all_courses = []
 
         try:
-            self.wait.until(EC.presence_of_element_located(
-                (By.XPATH, '//a[contains(@href, "/rol/app/courses/")]')
+            time.sleep(2)
+            WebDriverWait(self.driver, 30).until(EC.presence_of_element_located(
+                (By.XPATH, '//nav[contains(@class, "pagination")]//input[@aria-label="Current page"]')
             ))
 
             total_pages = self._get_total_pages()
@@ -2533,10 +2563,10 @@ class LabManager:
             while True:
                 self.logger(f"  Fetching courses from page {current_page}/{total_pages}...")
 
-                page_courses = self._get_courses_from_current_page()
+                page_courses = self._get_courses_from_current_page(version_cache)
 
                 for course in page_courses:
-                    if not any(c['id'] == course['id'] for c in all_courses):
+                    if not any(c['sku'] == course['sku'] for c in all_courses):
                         all_courses.append(course)
 
                 self.logger(f"    Found {len(page_courses)} courses on page {current_page}")
@@ -2556,8 +2586,8 @@ class LabManager:
 
             self.logger(f"Found {len(all_courses)} total courses across {current_page} page(s)")
 
-        except TimeoutException:
-            self.logger("Timeout waiting for course list. Catalog might be empty or slow to load.")
+        except TimeoutException as e:
+            self.logger(f"Timeout waiting for course list. Catalog might be empty or slow to load: {e}")
         except Exception as e:
             self.logger(f"Error getting courses: {e}")
 
@@ -2596,11 +2626,28 @@ class LabManager:
                 ))
             )
             self.driver.execute_script("arguments[0].click();", version_dropdown)
-            time.sleep(0.5)
+
+            # Wait for any "Loading" state inside the version selector to clear,
+            # then wait until at least one menu item is actually present.
+            version_selector_xpath = "//div[contains(@class, 'settings-panel-version-selector')]"
+            loading_xpath = f"{version_selector_xpath}//*[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'loading')]"
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.invisibility_of_element_located((By.XPATH, loading_xpath))
+                )
+            except:
+                pass
+
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((
+                    By.XPATH,
+                    f"{version_selector_xpath}//ul[@role='menu']//button[@role='menuitem']"
+                ))
+            )
 
             version_items = self.driver.find_elements(
                 By.XPATH,
-                "//div[contains(@class, 'settings-panel-version-selector')]//ul[@role='menu']//button[@role='menuitem']"
+                f"{version_selector_xpath}//ul[@role='menu']//button[@role='menuitem']"
             )
 
             for item in version_items:
@@ -2627,17 +2674,144 @@ class LabManager:
 
         return versions
 
+    def _scrape_catalog_format(
+        self,
+        delivery_format: str,
+        environment: str,
+        version_cache: dict,
+    ) -> list[str]:
+        """
+        Full scrape cycle for one delivery format ('Course' or 'Lesson').
+
+        1. Navigate to catalog, apply filter.
+        2. Collect all catalog cards across all pages.
+        3. For items not found in version_cache, click Continue page-by-page
+           to discover the versioned URL.
+        4. Open the settings panel for each item and read all available versions.
+
+        Returns a list of versioned entry strings (e.g. ['do336-4.18', 'do336-4.14']).
+        """
+        self.logger(f"\n{'─' * 40}")
+        self.logger(f"Scraping {delivery_format}s from catalog…")
+
+        self.go_to_catalog(environment)
+        time.sleep(3)
+        self.filter_by_format(delivery_format)
+        catalog_items = self.get_all_courses(version_cache=version_cache)
+
+        if not catalog_items:
+            self.logger(f"No {delivery_format.lower()}s found in catalog.")
+            return []
+
+        # Discovery pass for items with no versioned ID in the cache
+        unknown_skus = {c['sku'] for c in catalog_items if '-' not in c['id']}
+        if unknown_skus:
+            self.logger(f"Resolving versioned URLs for {len(unknown_skus)} "
+                        f"{delivery_format.lower()}(s) via Continue button…")
+            resolved: dict[str, str] = {}
+
+            self.go_to_catalog(environment)
+            time.sleep(2)
+            self.filter_by_format(delivery_format)
+            time.sleep(2)
+
+            total_pages_disc = self._get_total_pages()
+            for page_num in range(1, total_pages_disc + 1):
+                if not unknown_skus:
+                    break
+                if page_num > 1:
+                    self._go_to_page(page_num)
+                    time.sleep(2)
+
+                for sku in list(unknown_skus):
+                    try:
+                        btn = self.driver.find_element(
+                            By.XPATH,
+                            f'//button[@data-analytics-id="offering-card-action-button-{sku}"]'
+                        )
+                        self.driver.execute_script("arguments[0].click();", btn)
+                        time.sleep(3)
+                        current_url = self.driver.current_url
+                        # Works regardless of URL path segment (/courses/, /labs/, etc.)
+                        for segment in ('/courses/', '/labs/', '/app/'):
+                            if segment in current_url:
+                                vid = (current_url.split(segment)[-1]
+                                       .split('/')[0].split('?')[0].lower())
+                                if '-' in vid:
+                                    resolved[sku] = vid
+                                    unknown_skus.discard(sku)
+                                    self.logger(f"  Resolved {sku} → {vid}")
+                                break
+                        self.driver.back()
+                        WebDriverWait(self.driver, 20).until(EC.presence_of_element_located(
+                            (By.XPATH, '//nav[contains(@class, "pagination")]'
+                                       '//input[@aria-label="Current page"]')
+                        ))
+                        time.sleep(1)
+                        if page_num > 1:
+                            self._go_to_page(page_num)
+                            time.sleep(1)
+                    except NoSuchElementException:
+                        pass
+                    except Exception as e:
+                        self.logger(f"  ⚠ Could not resolve {sku}: {e}")
+
+            for item in catalog_items:
+                if item['sku'] in resolved:
+                    item['id'] = resolved[item['sku']]
+                    item['url'] = f"/rol/app/courses/{resolved[item['sku']]}"
+
+        # Fetch available versions via the settings panel
+        entries: list[str] = []
+        failed: list[str] = []
+        self.logger(f"Fetching versions for {len(catalog_items)} "
+                    f"{delivery_format.lower()}(s)…")
+
+        for idx, item in enumerate(catalog_items):
+            item_id = item['id']
+            sku = item.get('sku', item_id)
+
+            if '-' not in item_id:
+                self.logger(f"  [{idx + 1}/{len(catalog_items)}] ⚠ {sku} – "
+                             "no versioned URL found, skipping.")
+                failed.append(sku)
+                continue
+
+            item_name, _ = self._parse_course_id(item_id)
+            self.logger(f"  [{idx + 1}/{len(catalog_items)}] {item_id} – "
+                        "fetching versions…")
+
+            try:
+                versions = self.get_available_versions(item_id, environment)
+            except Exception as exc:
+                self.logger(f"    ⚠ Failed: {exc}")
+                failed.append(item_id)
+                entries.append(item_id)
+                continue
+
+            if versions:
+                for ver in versions:
+                    entries.append(f"{item_name}-{ver}")
+                self.logger(f"    Found {len(versions)} version(s): "
+                             f"{', '.join(versions)}")
+            else:
+                entries.append(item_id)
+                self.logger("    No version dropdown – keeping catalog entry")
+
+        if failed:
+            self.logger(f"⚠ Skipped {len(failed)} {delivery_format.lower()}(s): "
+                        f"{', '.join(failed)}")
+        return entries
+
     def update_courses_list(self, environment: str, output_path: Optional[Path] = None) -> Path:
         """
         Scrape the ROL catalog to build a complete courses-list.txt with all
-        courses and their available versions.
+        courses and lessons and their available versions.
 
         Steps:
-            1. Navigate to the catalog and collect every course entry.
-            2. For each unique course base name, open the course settings panel
-               and retrieve all published versions.
-            3. Write sorted ``coursename-version`` entries to *output_path*
-               (defaults to the project-root ``courses-list.txt``).
+            1. Build a version cache from the existing courses-list.txt.
+            2. Scrape Courses, then Lessons (filter → collect → discover → versions).
+            3. Write sorted unique entries to *output_path*.
 
         Returns the Path that was written.
         """
@@ -2649,48 +2823,26 @@ class LabManager:
             except FileNotFoundError:
                 output_path = Path(__file__).resolve().parent.parent.parent / "courses-list.txt"
 
-        self.logger("=" * 60)
-        self.logger("UPDATING COURSES LIST")
-        self.logger("=" * 60)
-
-        self.go_to_catalog(environment)
-        self.filter_by_courses()
-        catalog_courses = self.get_all_courses()
-
-        if not catalog_courses:
-            self.logger("No courses found in catalog – aborting update.")
-            return output_path
-
-        self.logger(f"Catalog returned {len(catalog_courses)} course(s). "
-                     "Fetching versions for each…")
+        # Build {sku: versioned_id} cache so already-known items skip discovery.
+        version_cache: dict[str, str] = {}
+        existing_path = Path(output_path)
+        if existing_path.exists():
+            for line in existing_path.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                m = re.match(r'^([a-zA-Z]+\d+)-(\d+\.\d+.*)$', line)
+                if m:
+                    sku = m.group(1).lower()
+                    if sku not in version_cache:
+                        version_cache[sku] = line
+            self.logger(f"Loaded {len(version_cache)} known entry/entries from cache.")
 
         all_entries: list[str] = []
-        failed_courses: list[str] = []
-
-        for idx, course in enumerate(catalog_courses):
-            course_id = course["id"]
-            course_name, _ = self._parse_course_id(course_id)
-
-            self.logger(f"  [{idx + 1}/{len(catalog_courses)}] {course_id} – "
-                         "fetching versions…")
-
-            try:
-                versions = self.get_available_versions(course_id, environment)
-            except Exception as exc:
-                self.logger(f"    ⚠ Failed to get versions for {course_id}: {exc}")
-                failed_courses.append(course_id)
-                all_entries.append(course_id)
-                continue
-
-            if versions:
-                for ver in versions:
-                    entry = f"{course_name}-{ver}"
-                    all_entries.append(entry)
-                self.logger(f"    Found {len(versions)} version(s): "
-                             f"{', '.join(versions)}")
-            else:
-                all_entries.append(course_id)
-                self.logger(f"    No version dropdown – keeping catalog entry")
+        for fmt in ('Course', 'Lesson'):
+            all_entries.extend(
+                self._scrape_catalog_format(fmt, environment, version_cache)
+            )
 
         unique_entries = sorted(set(all_entries))
 
@@ -2699,10 +2851,6 @@ class LabManager:
 
         self.logger(f"\n{'=' * 60}")
         self.logger(f"Wrote {len(unique_entries)} entries to {output_path}")
-        if failed_courses:
-            self.logger(f"⚠ Failed to fetch versions for "
-                         f"{len(failed_courses)} course(s): "
-                         f"{', '.join(failed_courses)}")
         self.logger("=" * 60)
 
         return output_path
