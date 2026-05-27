@@ -56,9 +56,8 @@ class SnowAIProcessor:
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
         #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.6:27b")
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "granite4.1:8b")
         self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
@@ -1609,7 +1608,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
             # Priority tab -> set priority to Minor
             try:
-                self._click_tab_by_text('Priority')
+                #self._click_tab_by_text('Priority')
                 time.sleep(1)
                 priority_field = WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.XPATH,
@@ -1621,7 +1620,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 priority_field.send_keys("Minor")
                 time.sleep(1)
                 priority_field.send_keys(Keys.RETURN)
-                self._click_tab_by_text('Field Tab')
+                #self._click_tab_by_text('Field Tab')
             except Exception as e:
                 logging.getLogger(__name__).warning(f"Failed to set Priority: {e}")
 
