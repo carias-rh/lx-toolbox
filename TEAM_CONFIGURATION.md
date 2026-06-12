@@ -112,7 +112,7 @@ Best Regards,
 {team_name}""",
         auto_resolve_reporters=["reporter1", "reporter2"],  # Optional
         enable_round_robin=False,  # Set to True if needed
-        target_states=["1", "2", "-2"]  # Custom states if needed
+        target_states=["1", "2", "3"]  # HUB: New, In Progress, Pending
     )
     
     return teams
@@ -207,12 +207,23 @@ If your team needs special configuration variables:
 
 ### Custom Target States
 
-If your team uses different ticket states:
+If your team uses different ticket states (HUB values for `x_redha_rht_task`):
+
+| State | Value |
+|-------|-------|
+| New | 1 |
+| In Progress | 2 |
+| Pending | 3 |
+| Resolved | 6 |
+| Closed | 7 |
+| Canceled | 8 |
+
+When setting state to Pending (3), include `pending_reason`. When closing as duplicate, set state to Closed (7) with `closed_reason`.
 
 ```python
 teams["custom"] = TeamConfig(
     # ... other config ...
-    target_states=["1", "2", "10", "11"],  # Custom state list
+    target_states=["1", "2", "3"],  # Default HUB active states
 )
 ```
 

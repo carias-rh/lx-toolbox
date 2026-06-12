@@ -16,6 +16,7 @@ from selenium.common.exceptions import TimeoutException
 
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger
+from .servicenow_constants import RHT_TASK_TABLE, rht_task_field
 
 
 class ServiceNowHandler:
@@ -221,7 +222,7 @@ class ServiceNowHandler:
             self.switch_to_iframe()
             tickets_in_line = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable(
-                    (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training"]/div[1]')
+                    (By.XPATH, f'//*[@id="{RHT_TASK_TABLE}"]/div[1]')
                 )
             ).text
             
@@ -290,7 +291,7 @@ class ServiceNowHandler:
         try:
             work_notes_field = self.wait.until(
                 EC.element_to_be_clickable(
-                    (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]')
+                    (By.XPATH, f'//*[@id="{rht_task_field("work_notes")}"]')
                 )
             )
             work_notes_field.send_keys(note)
@@ -307,7 +308,7 @@ class ServiceNowHandler:
         try:
             comments_field = self.wait.until(
                 EC.element_to_be_clickable(
-                    (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]')
+                    (By.XPATH, f'//*[@id="{rht_task_field("comments")}"]')
                 )
             )
             comments_field.send_keys(comment)

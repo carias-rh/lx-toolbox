@@ -6,10 +6,14 @@ import logging
 import requests
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-from enum import Enum
 
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger
+from .servicenow_constants import (
+    DEFAULT_TARGET_STATES,
+    TicketState,
+    rht_task_table_url,
+)
 
 # Configure logging with environment fallback only if no handlers exist yet
 if not logging.getLogger().hasHandlers():
@@ -17,22 +21,6 @@ if not logging.getLogger().hasHandlers():
     _numeric_level = getattr(logging, _env_log_level, logging.INFO)
     logging.basicConfig(level=_numeric_level, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
-
-class TicketState(Enum):
-    NEW = "1"
-    IN_PROGRESS = "2"
-    PENDING_CUSTOMER = "-2"
-    CUSTOMER_RESPONDED = "14"
-    RESOLVED = "-6"
-    CLOSED_AS_DUPLICATE = "12"
-    CLOSED_CANCELLED = "8"
-    REOPENED = "13"
-    EXAMINER_TRAINING = "19"
-    WAITING_ON_ENGINEERING = "15"
-    WAITING_ON_PLATFORM = "16"
-    WAITING_ON_CURRICULUM = "17"
-    WAITING_ON_IT = "18"
-    CLOSED = "7"  # If still needed, otherwise remove if not used elsewhere
 
 @dataclass
 class TeamConfig:
@@ -55,7 +43,7 @@ class TeamConfig:
         elif self.assignment_group_id is None:
             self.assignment_group_id = []
         if self.target_states is None:
-            self.target_states = ["1", "2", "-2", "14", "13", "15", "16", "17", "18"]
+            self.target_states = list(DEFAULT_TARGET_STATES)
         if self.auto_resolve_reporters is None:
             self.auto_resolve_reporters = []
 
@@ -686,7 +674,7 @@ class ServiceNowAutoAssign:
             "sysparm_limit": str(limit)
         }
         
-        url = f"{self.instance_url}/api/now/table/x_redha_red_hat_tr_x_red_hat_training"
+        url = rht_task_table_url(self.instance_url)
         try:
             response = self.session.get(url, params=params)
             response.raise_for_status()
@@ -697,7 +685,7 @@ class ServiceNowAutoAssign:
 
     def update_ticket(self, ticket_sys_id: str, updates: Dict[str, Any]) -> bool:
         """Update a ticket with the provided data"""
-        url = f"{self.instance_url}/api/now/table/x_redha_red_hat_tr_x_red_hat_training/{ticket_sys_id}"
+        url = f"{rht_task_table_url(self.instance_url)}/{ticket_sys_id}"
         
         try:
             logger.debug(f"Updating ticket {ticket_sys_id} with data: {updates}")
@@ -1057,7 +1045,7 @@ class ServiceNowAutoAssign:
             
         # Query for tickets with notifications from Jira
         query_parts = [
-            f"stateIN1,2,-2,14,13,15,16,17,18",
+            f"stateIN{','.join(DEFAULT_TARGET_STATES)}",
             "active=true",
             "short_descriptionLIKEnew Jira"
         ]
@@ -1068,7 +1056,7 @@ class ServiceNowAutoAssign:
             "sysparm_limit": "100"
         }
         
-        url = f"{self.instance_url}/api/now/table/x_redha_red_hat_tr_x_red_hat_training"
+        url = rht_task_table_url(self.instance_url)
         
         try:
             response = self.session.get(url, params=params)

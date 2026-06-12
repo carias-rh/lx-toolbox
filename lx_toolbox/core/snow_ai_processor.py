@@ -19,6 +19,7 @@ from ..utils.helpers import step_logger, reset_step_counter
 from .lab_manager import LabManager
 from .jira_handler import JiraHandler
 from .servicenow_handler import ServiceNowHandler
+from .servicenow_constants import RHT_TASK_TABLE, rht_task_field
 
 
 class SnowAIProcessor:
@@ -242,8 +243,8 @@ class SnowAIProcessor:
         self.logger(f"Getting SNOW info for ticket {snow_id}")
         self.snow_handler.navigate_to_ticket(snow_id)
 
-        description = self.driver.find_element(By.XPATH, '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]').get_attribute('value')
-        full_name = self.driver.find_element(By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute('value')
+        description = self.driver.find_element(By.XPATH, f'//*[@id="sys_original.{RHT_TASK_TABLE}.description"]').get_attribute('value')
+        full_name = self.driver.find_element(By.XPATH, f'//*[@id="{rht_task_field("contact_source")}"]').get_attribute('value')
 
         issue = re.search(r"Description:\s*(.*?)\s*Copyright", description, re.DOTALL).group(1).strip()
         course = re.findall("Course:.*", description)[0].split(":  ")[1].upper().split(" ")[0].strip()
@@ -577,7 +578,7 @@ For example:
             work_note = f"""Summary:\n{analysis_response_json.get('summary', 'No summary available')}\n
 LLM Analysis: {analysis_response_json.get('analysis', '')}\n"""
             try:
-                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(work_note)
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("work_notes")}"]'))).send_keys(work_note)
             except Exception:
                 pass
 
@@ -592,9 +593,9 @@ LLM Analysis: {analysis_response_json.get('analysis', '')}\n"""
                     f"Thanks again for your contributions to improving the course guide! \n\n"
                 )
                 try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\nDEFAULT RESPONSE:")
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(default_jira_reply + signature)
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("comments")}"]'))).send_keys(reply_text + signature)
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("work_notes")}"]'))).send_keys("\n\nDEFAULT RESPONSE:")
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("work_notes")}"]'))).send_keys(default_jira_reply + signature)
                 except Exception:
                     pass
             elif classification_data.get("is_video_issue_ticket", False):
@@ -614,8 +615,8 @@ LLM Analysis: {analysis_response_json.get('analysis', '')}\n"""
                         f"for video availability.\n\n"
                     )
                     try:
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\nVIDEO NOT READY - No Jira needed. Videos for this course version are still being produced.")
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("comments")}"]'))).send_keys(reply_text + signature)
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("work_notes")}"]'))).send_keys("\n\nVIDEO NOT READY - No Jira needed. Videos for this course version are still being produced.")
                     except Exception:
                         pass
                 else:
@@ -628,9 +629,9 @@ LLM Analysis: {analysis_response_json.get('analysis', '')}\n"""
                         f"Thanks for helping us improve the video content!\n\n"
                     )
                     try:
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\nVIDEO ISSUE - Jira ticket created with 'Video Content' component.")
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(default_jira_reply + signature)
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("comments")}"]'))).send_keys(reply_text + signature)
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("work_notes")}"]'))).send_keys("\n\nVIDEO ISSUE - Jira ticket created with 'Video Content' component.")
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("work_notes")}"]'))).send_keys(default_jira_reply + signature)
                     except Exception:
                         pass
             elif classification_data.get("is_environment_issue_ticket", False) and self.is_openshift_lab_first_boot(snow_info, analysis_response_json):
@@ -642,14 +643,14 @@ LLM Analysis: {analysis_response_json.get('analysis', '')}\n"""
                     f"Please, let me know if the issue persists.\n\n"
                 )
                 try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("comments")}"]'))).send_keys(reply_text + signature)
                 except Exception:
                     pass
             else:
                 crafted = self.craft_llm_response(snow_info, analysis_response_json)
                 reply_text = crafted.get("response", "")
                 try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, f'//*[@id="{rht_task_field("comments")}"]'))).send_keys(reply_text + signature)
                 except Exception:
                     pass
         except Exception as e:

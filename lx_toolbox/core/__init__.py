@@ -6,6 +6,7 @@ from .link_checker import LinkChecker
 from .jira_handler import JiraHandler
 from .servicenow_handler import ServiceNowHandler
 from .servicenow_autoassign import ServiceNowAutoAssign
+from .servicenow_constants import TicketState, PendingReason, ClosedReason
 
 __all__ = [
     'BaseSeleniumDriver',
@@ -14,4 +15,7 @@ __all__ = [
     'JiraHandler',
     'ServiceNowHandler',
     'ServiceNowAutoAssign',
+    'TicketState',
+    'PendingReason',
+    'ClosedReason',
 ]
