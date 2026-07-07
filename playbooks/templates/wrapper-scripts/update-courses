@@ -1,0 +1,44 @@
+#!/bin/bash
+# LX Toolbox Wrapper - Update Courses List
+# Usage: update-courses [options]
+# Example: update-courses
+#          update-courses --commit
+#          update-courses --env factory --commit
+
+set -e
+
+# Auto-detect lx-tool location
+if command -v lx-tool &> /dev/null; then
+    LX_TOOL="lx-tool"
+elif [[ -n "${LX_TOOLBOX_DIR}" ]] && [[ -x "${LX_TOOLBOX_DIR}/scripts/lx-tool" ]]; then
+    LX_TOOL="${LX_TOOLBOX_DIR}/scripts/lx-tool"
+elif [[ -x "/opt/lx-toolbox/scripts/lx-tool" ]]; then
+    LX_TOOL="/opt/lx-toolbox/scripts/lx-tool"
+else
+    echo "Error: lx-tool not found. Please install lx-toolbox or set LX_TOOLBOX_DIR environment variable." >&2
+    exit 1
+fi
+
+show_help() {
+    echo "Usage: update-courses [options]"
+    echo ""
+    echo "Scrape the ROL catalog and update courses-list.txt with all courses"
+    echo "and their available versions."
+    echo ""
+    echo "Options:"
+    echo "  --env ENV        Lab environment (rol, factory, china)"
+    echo "  --commit         Git commit and push after updating"
+    echo "  --no-headless    Run browser in headed mode (default: headless)"
+    echo ""
+    echo "Examples:"
+    echo "  update-courses"
+    echo "  update-courses --commit"
+    echo "  update-courses --env factory --no-headless"
+}
+
+if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+    show_help
+    exit 0
+fi
+
+exec $LX_TOOL lab update-courses "$@"
