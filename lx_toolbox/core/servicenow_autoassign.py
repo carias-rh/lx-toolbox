@@ -1109,7 +1109,25 @@ class ServiceNowAutoAssign:
                         round_robin_data = round_robin_response.json()
                         assignee_name = round_robin_data.get("name")
                         logger.debug(f"[{team_config.team_name}] Round-robin assignee: {assignee_name}")
-                        return assignee_name                    
+                        return assignee_name
+                    else:
+                        shift_url = f"{team_config.frontend_shift_manager_url}/api/shift"   
+                        shift_response = requests.get(shift_url, params=group_params)
+                        shift_response.raise_for_status()
+                        shift_data = shift_response.json()
+                        assignee_name = shift_data.get("name")
+                        if assignee_name and assignee_name != "None":
+                            logger.debug(
+                                f"[{team_config.team_name}] Shift assignee: {assignee_name} "
+                                f"| round_robin={is_round_robin_enabled} | group={group_params.get('group', '-')}"
+                            )
+                            return assignee_name
+                        else:
+                            logger.debug(
+                                f"[{team_config.team_name}] No one on shift "
+                                f"| group={group_params.get('group', '-')}"
+                            )
+                            return "None"
                 except Exception as e:
                     logger.warning(f"[{team_config.team_name}] Round-robin endpoint failed: {e}")
             else:
