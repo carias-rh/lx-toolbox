@@ -157,7 +157,7 @@ class LabManager:
             raise ValueError(f"Base URL for environment '{environment}' not configured.")
 
         # Navigate to a generic course page to trigger login
-        self.selenium_driver.go_to_url(base_url + "rh124-9.3")
+        self.selenium_driver.go_to_url(base_url + "rh124-10.0")
 
         username, password, auth_helper = self._get_credentials(environment)
 
@@ -165,13 +165,14 @@ class LabManager:
             if environment == "rol":
                 # ROL redirects through SSO; wait for all redirections to settle
                 # before interacting with the page.
-                time.sleep(3)
-                self.selenium_driver.accept_trustarc_cookies(timeout=5)
+                time.sleep(2)
+                self.selenium_driver.accept_trustarc_cookies(timeout=3)
                 
                 if username:
                     self.wait.until(EC.element_to_be_clickable(
                         (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
                     )).send_keys(f"{username}@redhat.com")
+                    time.sleep(2)
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
                     
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
