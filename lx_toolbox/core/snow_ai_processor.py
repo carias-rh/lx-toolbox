@@ -3,7 +3,6 @@ import os
 import re
 import json
 import time
-import subprocess
 import logging
 import traceback
 from urllib.parse import quote
@@ -56,9 +55,11 @@ class SnowAIProcessor:
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:12b")
-        self.OLLAMA_COMMAND = os.environ.get("OLLAMA_COMMAND", "/usr/local/bin/ollama")
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
+        #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:12b")
+        self.OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+        self.OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "600"))
+        self.OLLAMA_MAX_NUM_CTX = int(os.environ.get("OLLAMA_MAX_NUM_CTX", "32768"))
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
 
@@ -185,84 +186,106 @@ class SnowAIProcessor:
             combined,
         )
 
+    # Ollama defaults to a small runtime context window (commonly 4096
+    # tokens) regardless of the model's trained maximum. Long guide_text
+    # excerpts embedded in prompts can silently exceed that: Ollama then
+    # truncates the *input* to fit, which can leave zero/one token of room
+    # for the model to actually generate a response (observed in the wild
+    # as a bare "{" reply that fails JSON parsing). We size num_ctx per
+    # request based on the prompt length so this can't happen.
+    _OLLAMA_MIN_NUM_CTX = 4096
+    _OLLAMA_OUTPUT_RESERVE_TOKENS = 2048
+    _OLLAMA_CHARS_PER_TOKEN_ESTIMATE = 3
+
+    def _estimate_num_ctx(self, prompt: str) -> int:
+        """Pick a context window large enough to hold prompt + response.
+
+        Token count isn't known without calling the tokenizer, so we
+        conservatively estimate ~3 chars/token (real English text is closer
+        to ~4, but a smaller divisor overestimates tokens which is the safe
+        direction here) and reserve headroom for the model's own output.
+        """
+        estimated_prompt_tokens = max(1, len(prompt) // self._OLLAMA_CHARS_PER_TOKEN_ESTIMATE)
+        needed = estimated_prompt_tokens + self._OLLAMA_OUTPUT_RESERVE_TOKENS
+        num_ctx = self._OLLAMA_MIN_NUM_CTX
+        while num_ctx < needed and num_ctx < self.OLLAMA_MAX_NUM_CTX:
+            num_ctx *= 2
+        return min(num_ctx, self.OLLAMA_MAX_NUM_CTX)
+
     def _ask_ollama(self, prompt: str) -> str:
+        logger = logging.getLogger(__name__)
+        # Models that emit chain-of-thought (Thinking... / ...done thinking.)
+        # don't reliably include that text when constrained to JSON output,
+        # so we skip the format=json constraint for them, then strip the
+        # thinking block and extract the JSON from the raw text ourselves.
+        use_format_json = not self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gemma"))
+        num_ctx = self._estimate_num_ctx(prompt)
+        payload = {
+            "model": self.OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"num_ctx": num_ctx},
+        }
+        if use_format_json:
+            payload["format"] = "json"
+
         try:
-            # Pass the prompt via stdin to avoid shell-escaping issues and
-            # ollama misinterpreting special characters as a file path.
-            # Models that emit chain-of-thought (Thinking... / ...done thinking.)
-            # do not include that text in stdout when --format json is used; run
-            # without JSON mode so thinking can be logged, then strip it and parse JSON.
-            if self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gemma")):
-                cmd = [self.OLLAMA_COMMAND, "run", self.OLLAMA_MODEL]
-            else:
-                cmd = [self.OLLAMA_COMMAND, "run", self.OLLAMA_MODEL, "--format", "json"]
-            result = subprocess.run(
-                cmd,
-                input=prompt,
-                capture_output=True,
-                text=True
+            resp = requests.post(
+                f"{self.OLLAMA_HOST}/api/generate",
+                json=payload,
+                timeout=self.OLLAMA_TIMEOUT_SECONDS,
             )
-            response = result.stdout or ""
-            if result.returncode != 0:
-                logging.getLogger(__name__).error(
-                    "LLM[ollama:%s] exited with code %d; stderr: %s",
-                    self.OLLAMA_MODEL,
-                    result.returncode,
-                    (result.stderr or "")[:2000],
-                )
-            if not response.strip():
-                logging.getLogger(__name__).warning(
-                    "LLM[ollama:%s] returned empty stdout (returncode=%d, "
-                    "stderr=%r, prompt_len=%d chars)",
-                    self.OLLAMA_MODEL,
-                    result.returncode,
-                    (result.stderr or "")[:500],
-                    len(prompt),
-                )
-            elif result.stderr and result.stderr.strip():
-                logging.getLogger(__name__).debug(
-                    "LLM[ollama:%s] stderr: %s",
-                    self.OLLAMA_MODEL,
-                    result.stderr[:2000],
-                )
-
-            # Ollama's streaming display uses ESC[nD (cursor back n) +
-            # ESC[K (erase to EOL) to re-wrap words across lines.  We must
-            # *simulate* the erase (delete the preceding n chars) rather
-            # than just strip the codes, otherwise both copies of the
-            # word survive.
-            _rewrite = re.compile(r'\x1b\[(\d+)D\x1b\[K')
-            for m in reversed(list(_rewrite.finditer(response))):
-                n = int(m.group(1))
-                erase_from = max(0, m.start() - n)
-                response = response[:erase_from] + response[m.end():]
-            # Strip any remaining ANSI escape sequences (colors, etc.)
-            response = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', response)
-
-            self._log_llm_thinking_if_present(response)
-
-            if self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gpt-oss", "glm", "gemma")):
-                response = re.sub(r'Thinking.*?done thinking\.', '', response, flags=re.DOTALL).strip()
-                response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
-                response = re.sub(r'</think>', '', response).strip()
-                response = re.sub(r'Thinking\.\.\.\s*', '', response)
-                response = re.sub(r'\.\.\.done thinking\.\s*', '', response)
-                response = re.sub(r'\.\.\.done thinking\.', '', response).strip()
-                # For glm and similar models that output thinking without clear end markers,
-                # extract JSON by finding the first '{' if response doesn't start with it
-                if not response.strip().startswith('{') and '{' in response:
-                    json_start = response.find('{')
-                    response = response[json_start:]
-
-            response = re.sub(r'```json\s*', '', response)
-            response = re.sub(r'```\s*$', '', response)
-            response = response.strip()
-            logging.getLogger(__name__).debug(f"LLM[ollama:{self.OLLAMA_MODEL}] response: {response[:1000]}")
-            return response
-        except Exception as e:
-            logging.getLogger(__name__).error(f"Could not run Ollama: {e}")
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.exceptions.RequestException as e:
+            logger.error("Could not reach Ollama API at %s: %s", self.OLLAMA_HOST, e)
+            return ""
+        except ValueError as e:
+            logger.error("Ollama API returned non-JSON payload: %s", e)
             return ""
 
+        response = data.get("response") or ""
+        prompt_eval_count = data.get("prompt_eval_count")
+
+        if prompt_eval_count is not None and prompt_eval_count >= num_ctx - 8:
+            logger.warning(
+                "LLM[ollama:%s] prompt used %s/%s context tokens (nearly/fully filled "
+                "num_ctx); response may have been truncated or empty. "
+                "Consider shortening the prompt or raising OLLAMA_MAX_NUM_CTX.",
+                self.OLLAMA_MODEL, prompt_eval_count, num_ctx,
+            )
+
+        if not response.strip():
+            logger.warning(
+                "LLM[ollama:%s] returned empty response (prompt_len=%d chars, "
+                "num_ctx=%d, prompt_eval_count=%s, done_reason=%s)",
+                self.OLLAMA_MODEL, len(prompt), num_ctx, prompt_eval_count,
+                data.get("done_reason"),
+            )
+
+        self._log_llm_thinking_if_present(response)
+
+        if self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gpt-oss", "glm", "gemma")):
+            response = re.sub(r'Thinking.*?done thinking\.', '', response, flags=re.DOTALL).strip()
+            response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+            response = re.sub(r'</think>', '', response).strip()
+            response = re.sub(r'Thinking\.\.\.\s*', '', response)
+            response = re.sub(r'\.\.\.done thinking\.\s*', '', response)
+            response = re.sub(r'\.\.\.done thinking\.', '', response).strip()
+            # For glm and similar models that output thinking without clear end markers,
+            # extract JSON by finding the first '{' if response doesn't start with it
+            if not response.strip().startswith('{') and '{' in response:
+                json_start = response.find('{')
+                response = response[json_start:]
+
+        response = re.sub(r'```json\s*', '', response)
+        response = re.sub(r'```\s*$', '', response)
+        response = response.strip()
+        logger.debug(
+            "LLM[ollama:%s] response (num_ctx=%d, prompt_eval_count=%s): %s",
+            self.OLLAMA_MODEL, num_ctx, prompt_eval_count, response[:1000],
+        )
+        return response
 
     def ask_llm(self, prompt: str) -> str:
         """Ask the LLM a question and return the response using some LLM provider such as ollama."""
@@ -829,10 +852,11 @@ Instructions:
     def fetch_guide_text_from_website(self) -> str:
         """Open course page, expand solutions, and return course content wrapper text."""
         self.logger("Fetching guide text from website")
-        self.lab_mgr.select_lab_environment_tab("course")
-
+        self.lab_mgr.dismiss_pendo_overlay()
         self.lab_mgr.toggle_video_player(state=False)
         self.lab_mgr.dismiss_active_alerts()
+        self.lab_mgr.dismiss_pendo_overlay()
+        self.lab_mgr.select_lab_environment_tab("course")
 
         try:
             clicked_ids = set()
@@ -850,13 +874,25 @@ Instructions:
                     clicked_ids.add(btn.id)
                     time.sleep(0.3)
                 time.sleep(0.5)
+            # Extra wait for Bootstrap collapse CSS transitions to fully complete
+            time.sleep(1)
         except Exception:
             pass
 
         container = WebDriverWait(self.driver, 10).until(
             EC.presence_of_element_located((By.XPATH, "//*[@class='course__content-wrapper']"))
         )
-        return container.text
+        # Use innerText via JS — more reliable than .text for dynamically expanded content
+        parts = [self.driver.execute_script("return arguments[0].innerText", container) or ""]
+
+        # Solution panel bodies may live outside course__content-wrapper in the DOM.
+        # Collect each expanded panel's text separately and append it if not already present.
+        for panel_body in self.driver.find_elements(By.CSS_SELECTOR, ".panel-collapse.in .panel-body"):
+            panel_text = self.driver.execute_script("return arguments[0].innerText", panel_body) or ""
+            if panel_text and panel_text.strip() not in parts[0]:
+                parts.append(panel_text)
+
+        return "\n\n".join(filter(None, (p.strip() for p in parts)))
 
     # --------------------------
     # ServiceNow helpers (delegated to ServiceNowSeleniumHandler)
@@ -874,8 +910,8 @@ Instructions:
         self.logger(f"Getting SNOW info for ticket {snow_id}")
         self.snow_handler.navigate_to_ticket(snow_id)
 
-        description = self.driver.find_element(By.XPATH, '//*[@id="sys_original.x_redha_red_hat_tr_x_red_hat_training.description"]').get_attribute('value')
-        full_name = self.driver.find_element(By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.contact_source"]').get_attribute('value')
+        description = self.driver.find_element(By.XPATH, '//*[@id="x_redha_rht_task.description"]').get_attribute('value')
+        full_name = self.driver.find_element(By.XPATH, '//*[@id="x_redha_rht_task.contact_source"]').get_attribute('value')
 
         issue = re.search(r"Description:\s*(.*?)\s*Copyright", description, re.DOTALL).group(1).strip()
         course = re.findall("Course:.*", description)[0].split(":  ")[1].upper().split(" ")[0].strip()
@@ -1276,16 +1312,22 @@ For example:
         self.logger("Replying to student and adding summary notes")
         signature = f"\n\nBest Regards,\n{self.SIGNATURE_NAME}\nRed Hat Learner Experience Team"
 
-        try:
-            # Ensure we are inside the ticket iframe
-            self.switch_to_iframe()
+        # NOTE: hub.redhat.com's classic form ships a hidden legacy duplicate
+        # at '//*[@id="x_redha_rht_task.work_notes"]' / '.comments' that is no
+        # longer wired to anything - typing into it is silently discarded.
+        # The real, visible journal inputs are the Angular activity-stream
+        # textareas below, which must be submitted via the shared "Post"
+        # button (button.activity-submit) to actually create the entry.
+        WORK_NOTES_XPATH = '//*[@id="activity-stream-work_notes-textarea"]'
+        COMMENTS_XPATH = '//*[@id="activity-stream-comments-textarea"]'
 
+        try:
             # Add work note with summary of analysis
             summary = self._clean_llm_text(analysis_response_json.get('summary', 'No summary available'))
             analysis = self._clean_llm_text(analysis_response_json.get('analysis', ''))
             work_note = f"Summary:\n{summary}\n\nLLM Analysis:\n{analysis}\n"
             try:
-                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(work_note)
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(work_note)
             except Exception:
                 pass
 
@@ -1300,9 +1342,9 @@ For example:
                     f"Thanks again for your contributions to improving the course guide! \n\n"
                 )
                 try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\nDEFAULT RESPONSE:")
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(default_jira_reply + signature)
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys("\n\nDEFAULT RESPONSE:")
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(default_jira_reply + signature)
                 except Exception:
                     pass
             elif classification_data.get("is_video_issue_ticket", False):
@@ -1325,8 +1367,8 @@ For example:
                         f"for video availability.\n\n"
                     )
                     try:
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\nVIDEO NOT READY - No Jira needed. Videos for this course version are still being produced.")
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys("\n\nVIDEO NOT READY - No Jira needed. Videos for this course version are still being produced.")
                     except Exception:
                         pass
                 else:
@@ -1339,9 +1381,9 @@ For example:
                         f"Thanks for helping us improve the video content!\n\n"
                     )
                     try:
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys("\n\nVIDEO ISSUE - Jira ticket created with 'Video Content' component.")
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]'))).send_keys(default_jira_reply + signature)
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys("\n\nVIDEO ISSUE - Jira ticket created with 'Video Content' component.")
+                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(default_jira_reply + signature)
                     except Exception:
                         pass
             elif classification_data.get("is_environment_issue_ticket", False) and self.is_long_boot_lab_first_start(snow_info, analysis_response_json):
@@ -1353,16 +1395,20 @@ For example:
                     f"Please, let me know if the issue persists.\n\n"
                 )
                 try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
                 except Exception:
                     pass
             else:
                 crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
                 reply_text = crafted.get("response", "")
                 try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]'))).send_keys(reply_text + signature)
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
                 except Exception:
                     pass
+
+            # Do NOT click the Post button automatically.
+            # The journal fields are pre-filled for human review;
+            # the agent operator is responsible for clicking Post manually.
         except Exception as e:
             logging.getLogger(__name__).warning(f"Failed to add work note / reply for {snow_info.get('snow_id','')}: {e}")
 
@@ -1702,6 +1748,14 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # Collect tickets if none provided
         if not tickets:
             tickets = self.get_ticket_ids_from_queue()
+            if not tickets:
+                logging.getLogger(__name__).warning(
+                    "No tickets found in the queue. "
+                    "Check that the browser is on the correct SNOW queue URL and the iframe loaded successfully.\n"
+                    f"  Expected queue URL: {self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL}"
+                )
+                return
+            logging.getLogger(__name__).info(f"Found {len(tickets)} ticket(s) in queue: {tickets}")
 
         for snow_id in tickets:
             try:
@@ -1711,7 +1765,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 ticket_window = self.driver.current_window_handle
 
                 # Tab 1: ServiceNow ticket
-                self.driver.get(f"{self.SNOW_BASE_URL}/surl.do?n={snow_id}")
+                self.driver.get(f"{self.SNOW_BASE_URL}/api/redha/surl?n={snow_id}")
                 time.sleep(3)
                 tab_snow = self.driver.current_window_handle
 
@@ -1739,10 +1793,17 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 try:
                     self.driver.switch_to.window(tab_rol)
                     course_id = snow_info["Course"].lower() + "-" + snow_info["Version"]
-                    if snow_info.get("Section"):
-                        chapter_section=f"ch{ snow_info.get("Chapter", "01") }s{ snow_info.get("Section", "01") }"
+                    chapter = snow_info.get("Chapter") or ""
+                    section = snow_info.get("Section") or ""
+                    if chapter and section:
+                        chapter_section = f"ch{chapter}s{section}"
+                    elif chapter:
+                        chapter_section = f"ch{chapter}"
                     else:
-                        chapter_section=f"ch{ snow_info.get("Chapter", "01") }"
+                        # No chapter/section (e.g. preamble pages like pr01, ap01)
+                        # Extract the page slug directly from the URL
+                        url_page_match = re.search(r'/pages/([^/?#]+)', snow_info.get("URL", ""))
+                        chapter_section = url_page_match.group(1) if url_page_match else "pr01"
                     
                     # Determine issue type from classification
                     needs_lab = classification.get("needs_lab_verification", False)

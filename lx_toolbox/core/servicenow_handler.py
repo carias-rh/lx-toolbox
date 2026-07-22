@@ -8,6 +8,7 @@ This is separate from servicenow_autoassign.py which uses the REST API.
 import os
 import time
 import logging
+import traceback
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -173,21 +174,10 @@ class ServiceNowHandler:
     
     def switch_to_iframe(self):
         """
-        Switch to ServiceNow content iframe through macroponent shadow DOM.
-        
-        ServiceNow uses a complex iframe structure with shadow DOM.
-        This method navigates through it to access the actual content.
+        No-op on hub.redhat.com: the classic .do form renders directly in the
+        main document without an iframe.  Kept for call-site compatibility.
         """
-        try:
-            self.driver.switch_to.default_content()
-            macroponent = WebDriverWait(self.driver, 3).until(
-                EC.presence_of_element_located((By.XPATH, '//*[starts-with(local-name(), "macro")]'))
-            )
-            shadow_root = self.driver.execute_script('return arguments[0].shadowRoot', macroponent)
-            iframe = shadow_root.find_element(By.CSS_SELECTOR, 'iframe#gsft_main')
-            WebDriverWait(self.driver, 3).until(EC.frame_to_be_available_and_switch_to_it(iframe))
-        except Exception as e:
-            raise RuntimeError(f"Unable to switch to ServiceNow iframe: {e}")
+        self.driver.switch_to.default_content()
     
     def switch_to_default_content(self):
         """Switch back to default content from iframe."""
@@ -195,14 +185,13 @@ class ServiceNowHandler:
     
     def navigate_to_ticket(self, ticket_id: str):
         """
-        Navigate to a specific ticket by ID.
-        
-        Args:
-            ticket_id: The ServiceNow ticket number (e.g., RITM0123456)
+        Navigate to a specific ticket in the classic form view.
+
+        Goes directly to the classic .do URL using the ticket number query
+        parameter, bypassing the workspace redirect entirely.
         """
-        self.driver.get(f"{self.base_url}/surl.do?n={ticket_id}")
+        self.driver.get(f"{self.base_url}/x_redha_rht_task.do?sysparm_query=number={ticket_id}")
         time.sleep(5)
-        self.switch_to_iframe()
     
     def navigate_to_feedback_queue(self):
         """Navigate to the default feedback queue."""
@@ -211,40 +200,47 @@ class ServiceNowHandler:
     
     def get_ticket_ids_from_queue(self) -> list:
         """
-        Get list of ticket IDs from the current queue view.
-        
+        Get list of ticket IDs from the feedback queue.
+
+        On hub.redhat.com the classic task-list page is served at a direct
+        .do URL with no surrounding iframe, so we navigate there explicitly
+        and query the formlink anchors directly from the main document.
+
         Returns:
             List of ticket ID strings, empty if none found
         """
         ticket_ids = []
         try:
-            self.switch_to_iframe()
-            tickets_in_line = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training"]/div[1]')
-                )
-            ).text
-            
-            if tickets_in_line.strip() == 'No records to display':
+            # Navigate to the classic list URL (already set as feedback_queue_url)
+            self.driver.get(self.feedback_queue_url)
+            time.sleep(3)
+
+            # Check for empty queue
+            page_text = self.driver.find_element(By.TAG_NAME, 'body').text
+            if 'No records to display' in page_text:
                 return ticket_ids
-            
-            table_body = WebDriverWait(self.driver, 3).until(
-                EC.presence_of_element_located(
-                    (By.XPATH, '//tbody[@class="list2_body -sticky-group-headers"]')
+
+            ticket_elements = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_all_elements_located(
+                    (By.CSS_SELECTOR, 'a.linked.formlink')
                 )
             )
-            ticket_elements = table_body.find_elements(
-                By.XPATH, './/a[@class="linked formlink"]'
-            )
-            
+
             for ticket in ticket_elements:
                 ticket_id = ticket.text.strip()
                 if ticket_id:
                     ticket_ids.append(ticket_id)
-                    
+
         except Exception as e:
-            logging.getLogger(__name__).error(f"Error retrieving ticket IDs: {e}")
-        
+            current_url = self.driver.current_url
+            page_title = self.driver.title
+            logging.getLogger(__name__).error(
+                f"Error retrieving ticket IDs from queue: {e}\n"
+                f"  Current URL: {current_url}\n"
+                f"  Page title: {page_title}\n"
+                f"{traceback.format_exc()}"
+            )
+
         return ticket_ids
     
     def get_field_value(self, field_id: str) -> str:
@@ -280,39 +276,6 @@ class ServiceNowHandler:
         except Exception as e:
             logging.getLogger(__name__).warning(f"Could not set field {field_id}: {e}")
     
-    def add_work_note(self, note: str):
-        """
-        Add a work note to the current ticket.
-        
-        Args:
-            note: The work note text to add
-        """
-        try:
-            work_notes_field = self.wait.until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.work_notes"]')
-                )
-            )
-            work_notes_field.send_keys(note)
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"Could not add work note: {e}")
-    
-    def add_customer_comment(self, comment: str):
-        """
-        Add a customer-visible comment to the current ticket.
-        
-        Args:
-            comment: The comment text to add
-        """
-        try:
-            comments_field = self.wait.until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, '//*[@id="x_redha_red_hat_tr_x_red_hat_training.comments"]')
-                )
-            )
-            comments_field.send_keys(comment)
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"Could not add comment: {e}")
     
     def get_customer_updates(self, max_entries: int = 10) -> list[dict]:
         """

@@ -68,13 +68,13 @@ class LabManager:
                 '//button[contains(@aria-label, "Table of Contents") or contains(@aria-label, "Toggle Table of Contents")]'
             )))
             self._interface_type = self.INTERFACE_NEW
-            self.logger(f"Detected interface type: NEW (PF5)")
+            logging.getLogger(__name__).debug("Detected interface type: NEW (PF5)")
         except:
             # Check for old interface elements
             try:
                 self.wait.until(EC.presence_of_element_located((By.XPATH, '//div[@class="progress-map"]')))
                 self._interface_type = self.INTERFACE_OLD
-                self.logger(f"Detected interface type: OLD")
+                logging.getLogger(__name__).debug("Detected interface type: OLD")
             except:
                 # Default to new if can't determine
                 self._interface_type = self.INTERFACE_NEW
@@ -163,6 +163,9 @@ class LabManager:
 
         try:
             if environment == "rol":
+                # ROL redirects through SSO; wait for all redirections to settle
+                # before interacting with the page.
+                time.sleep(3)
                 self.selenium_driver.accept_trustarc_cookies(timeout=5)
                 
                 if username:
@@ -349,7 +352,7 @@ class LabManager:
                 self.logger("Enabled video player")
             elif not state and is_pressed:
                 video_btn.click()
-                self.logger("Disabled video player")
+                logging.getLogger(__name__).debug("Disabled video player")
         except Exception:
             pass
 
@@ -414,13 +417,32 @@ class LabManager:
         except Exception:
             pass
 
+    def dismiss_pendo_overlay(self):
+        """Dismiss any active Pendo guide/tour overlay that may intercept clicks."""
+        try:
+            # Try the Pendo JS API first (cleanest — stops all active guides)
+            self.driver.execute_script(
+                "if (window.pendo && typeof window.pendo.stopGuides === 'function') { window.pendo.stopGuides(); }"
+            )
+        except Exception:
+            pass
+        try:
+            # Remove any lingering backdrop/overlay elements from the DOM
+            self.driver.execute_script(
+                "document.querySelectorAll('._pendo-backdrop, [id^=\"pendo-backdrop\"], [id^=\"pendo-guide\"], ._pendo-step-overlay-top').forEach(el => el.remove());"
+            )
+            logging.getLogger(__name__).debug("Dismissed Pendo overlay")
+        except Exception:
+            pass
+
     def select_lab_environment_tab(self, tab_name: str):
         """
         Selects a tab like 'index', 'course', or 'lab'.
         Uses detected interface type to select the appropriate method.
         """
-        # Dismiss any active alerts on the page
+        # Dismiss any active alerts or Pendo overlays on the page
         self.dismiss_active_alerts()
+        self.dismiss_pendo_overlay()
 
         # Map tab names to both old and new interface selectors
         tab_selectors = {

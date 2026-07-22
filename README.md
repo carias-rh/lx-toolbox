@@ -132,7 +132,9 @@ LLM_PROVIDER=ollama
 
 # Ollama Configuration
 OLLAMA_MODEL=ministral-3:8b
-OLLAMA_COMMAND=/usr/local/bin/ollama
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_TIMEOUT_SECONDS=600
+OLLAMA_MAX_NUM_CTX=32768
 
 # Your signature for responses
 SIGNATURE_NAME=Your Name
@@ -520,9 +522,10 @@ If you encounter "Username not configured":
 For SNOW AI Processor issues:
 1. Verify Ollama is running: `ollama list`
 2. Test the model directly: `ollama run ministral-3:8b "Hello"`
-3. Check `OLLAMA_COMMAND` path in `.env` is correct
+3. Check `OLLAMA_HOST` in `.env` points to a reachable Ollama server (default `http://127.0.0.1:11434`)
 4. Ensure the model specified in `OLLAMA_MODEL` is downloaded
 5. For slow responses, consider a smaller model (e.g., `qwen3:8b`)
+6. If LLM JSON parsing fails on a bare `{` response, the prompt likely exceeded Ollama's context window and got truncated; raise `OLLAMA_MAX_NUM_CTX` in `.env` (the app already auto-sizes `num_ctx` per request based on prompt length, up to this cap)
 
 For ServiceNow issues:
 1. Test connections with `lx-tool snow test`

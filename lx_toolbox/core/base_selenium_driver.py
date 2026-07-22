@@ -54,6 +54,7 @@ class BaseSeleniumDriver:
         wait = WebDriverWait(self.driver, timeout)
         agree_xpath = "//a[@class='call'][normalize-space(text())='Agree and proceed with standard settings']"
         clicked = False
+        used_legacy_iframe = False
 
         try:
             # Legacy TrustArc iframe (older ROL pages).
@@ -69,6 +70,7 @@ class BaseSeleniumDriver:
             )
             agree_button.click()
             clicked = True
+            used_legacy_iframe = True
         except Exception:
             self.driver.switch_to.default_content()
         else:
@@ -104,11 +106,34 @@ class BaseSeleniumDriver:
 
         self.driver.switch_to.default_content()
 
-        if clicked:
-            # Legacy iframe flow needed a refresh; shadow-root modal dismisses in place.
-            if self.driver.find_elements(By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]'):
-                self.driver.refresh()
-                time.sleep(1)
+        if clicked and used_legacy_iframe:
+            # Only the legacy iframe flow requires a page refresh to apply the cookie consent;
+            # the shadow-root modal dismisses in place without reloading.
+            self.driver.refresh()
+            time.sleep(3)
+        elif clicked:
+            # Shadow-root overlay dismisses in place but the DIV lingers in the DOM and
+            # can intercept clicks until it's fully removed.  Wait up to 10 s for it to go.
+            overlay_selectors = (
+                '.trustarc_newcm_container, .truste_popframe, '
+                '[name="trustarc_cm"], [id^="pop-frame"]'
+            )
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, overlay_selectors))
+                )
+            except Exception:
+                # If still present, force-remove it via JS so it doesn't block further clicks.
+                try:
+                    self.driver.execute_script(
+                        """
+                        document.querySelectorAll(
+                          '.trustarc_newcm_container, .truste_popframe, [name="trustarc_cm"], [id^="pop-frame"]'
+                        ).forEach(el => el.remove());
+                        """
+                    )
+                except Exception:
+                    pass
 
     def wait_for_element_clickable(self, by: By, value: str, timeout: int = 5):
         return WebDriverWait(self.driver, timeout).until(EC.element_to_be_clickable((by, value)))
