@@ -279,102 +279,141 @@ class ServiceNowHandler:
     
     def get_customer_updates(self, max_entries: int = 10) -> list[dict]:
         """
-        Extract customer update entries from the ticket activity journal.
+        Extract journal entries (customer messages and our own replies) from
+        the ticket activity journal.
 
-        ServiceNow renders journal entry content inside shadow DOM elements
-        created by its encapsulate() function.  This method pierces those
-        shadow roots to retrieve the plain-text content.  Falls back to
-        parsing the raw HTML template script tag when the shadow root is
-        not yet attached.
+        hub.redhat.com wraps the classic .do form inside iframe#gsft_main,
+        which itself sits inside the shadow root of a MACROPONENT element.
+        All DOM queries must therefore pierce that shadow root to reach the
+        iframe's contentDocument.
 
-        Must be called while the driver is switched into the ticket iframe
-        (i.e. after navigate_to_ticket or switch_to_iframe).
+        Relevant entries appear as li.h-card with type label:
+          - "Additional comments" — a direct reply typed in the portal
+          - "Email received" — an email sent by the student to the hub address
+          - "Email sent" — an email we sent to the student (contains our own
+            investigation reply; kept so downstream code has visibility into
+            what was already communicated, and can be filtered by author)
+        System / api_snow_autoassign entries are skipped.
+
+        For "Additional comments" the text is inline in
+        .sn-widget-textblock-body_formatted. For "Email received"/"Email
+        sent" the actual body is NOT in the DOM until the "Show email
+        details" link is clicked, which lazily injects a nested
+        <iframe class="activity-stream-email-iframe"> pointing at
+        /email_display.do?email_id=... — that iframe's contentDocument holds
+        the real message text. This method clicks any unexpanded links first,
+        waits for the nested iframes to load, then reads their body text.
+        Falls back to the visible metadata table (subject/from) if a body
+        never becomes available.
 
         Args:
             max_entries: Maximum number of entries to return (newest first)
 
         Returns:
-            List of dicts with 'timestamp' and 'text' keys
+            List of dicts with 'timestamp', 'author', 'type', and 'text' keys
         """
         try:
             _log = logging.getLogger(__name__)
 
-            # Scroll the activity stream into view to trigger lazy loading
-            self.driver.execute_script("""
-                var el = document.querySelector('#sn_form_inline_stream_entries');
+            FIND_GSFT_DOC_JS = """
+                function findGsftDoc() {
+                    // Walk every element's shadow root looking for iframe#gsft_main.
+                    // This avoids hardcoding the MACROPONENT-<sys_id> tag name which
+                    // can change across ServiceNow upgrades or instance migrations.
+                    var all = document.querySelectorAll('*');
+                    for (var i = 0; i < all.length; i++) {
+                        var sr = all[i].shadowRoot;
+                        if (!sr) continue;
+                        var fr = sr.querySelector('iframe#gsft_main');
+                        if (fr) return fr.contentDocument || fr.contentWindow.document;
+                    }
+                    return document;
+                }
+            """
+
+            # Scroll the activity stream into view inside the iframe
+            self.driver.execute_script(FIND_GSFT_DOC_JS + """
+                var doc = findGsftDoc();
+                var el = doc.querySelector('#sn_form_inline_stream_entries')
+                         || doc.querySelector('.activities-form');
                 if (el) el.scrollIntoView({block: 'center'});
             """)
             time.sleep(2)
 
-            # The activity stream lives inside <ul class="activities-form">
-            # with each entry as a <li class="h-card">.  Inside each <li>:
-            #   - a meta div has the type label ("Customer update") and timestamp
-            #   - a sibling div#activity_* has the journal content
-            # Content appears in two patterns:
-            #   A) encapsulate() shadow root on <span id="journal-content_*">
-            #   B) direct HTML in <span class="sn-widget-textblock-body_formatted">
-            updates = self.driver.execute_script("""
+            # Expand every collapsed "Show email details" link so the nested
+            # email-body iframes get injected into the DOM. Entries that are
+            # already expanded show "Hide email details" and are skipped.
+            num_expanded = self.driver.execute_script(FIND_GSFT_DOC_JS + """
+                var doc = findGsftDoc();
+                var links = doc.querySelectorAll('a.stream-action[action-type="show-email"]');
+                for (var i = 0; i < links.length; i++) {
+                    links[i].click();
+                }
+                return links.length;
+            """)
+            if num_expanded:
+                time.sleep(2)  # let the nested email_display.do iframes load
+
+            updates = self.driver.execute_script(FIND_GSFT_DOC_JS + """
+                var doc = findGsftDoc();
+
                 var results = [];
                 var maxEntries = arguments[0];
-                var cards = document.querySelectorAll('li.h-card');
+                var SKIP_AUTHORS = ['api_snow_autoassign', 'System'];
+                var RELEVANT_LABELS = ['Additional comments', 'Email received', 'Email sent'];
+
+                var cards = doc.querySelectorAll('li.h-card');
 
                 for (var i = 0; i < cards.length && results.length < maxEntries; i++) {
                     var card = cards[i];
 
-                    // Check if this card is a "Customer update"
                     var timeSpan = card.querySelector('.sn-card-component-time');
                     if (!timeSpan) continue;
                     var typeLabel = timeSpan.querySelector('span:first-child');
-                    if (!typeLabel || typeLabel.textContent.trim() !== 'Customer update')
-                        continue;
+                    if (!typeLabel) continue;
+                    var label = typeLabel.textContent.trim();
+                    if (RELEVANT_LABELS.indexOf(label) === -1) continue;
 
-                    // Skip api_snow_autoassign entries
                     var createdBy = card.querySelector('.sn-card-component-createdby');
-                    if (createdBy &&
-                        createdBy.textContent.trim() === 'api_snow_autoassign')
-                        continue;
-
                     var author = createdBy ? createdBy.textContent.trim() : '';
+                    if (SKIP_AUTHORS.indexOf(author) !== -1) continue;
 
                     var dateEl = card.querySelector('.date-calendar');
                     var timestamp = dateEl ? dateEl.textContent.trim() : '';
 
                     var text = '';
 
-                    // Pattern A: shadow root from encapsulate()
-                    var jSpans = card.querySelectorAll(
-                        '[id^="journal-content_"]:not([id*="value"])'
-                    );
-                    for (var j = 0; j < jSpans.length; j++) {
-                        if (jSpans[j].shadowRoot) {
-                            text = jSpans[j].shadowRoot.textContent || '';
-                            if (text.trim()) break;
+                    // "Additional comments": text is inline in .sn-widget-textblock-body_formatted
+                    var bodySpans = card.querySelectorAll('.sn-widget-textblock-body_formatted');
+                    for (var b = 0; b < bodySpans.length; b++) {
+                        var bt = bodySpans[b].textContent || '';
+                        if (bt.trim()) { text = bt; break; }
+                    }
+
+                    // "Email received"/"Email sent": real body lives in a nested
+                    // iframe injected after clicking "Show email details" above.
+                    if (!text.trim()) {
+                        var emailIframe = card.querySelector('iframe.activity-stream-email-iframe');
+                        if (emailIframe) {
+                            try {
+                                var emailDoc = emailIframe.contentDocument || emailIframe.contentWindow.document;
+                                if (emailDoc && emailDoc.body) {
+                                    text = emailDoc.body.innerText || '';
+                                }
+                            } catch (e) { /* cross-origin or not-yet-loaded, fall through */ }
                         }
                     }
 
-                    // Pattern B: direct content in textblock-body span
+                    // Last resort: visible metadata table (subject/from) when the
+                    // body iframe never loaded in time.
                     if (!text.trim()) {
-                        var bodySpans = card.querySelectorAll(
-                            '.sn-widget-textblock-body_formatted'
-                        );
-                        for (var b = 0; b < bodySpans.length; b++) {
-                            var bt = bodySpans[b].textContent || '';
-                            if (bt.trim()) { text = bt; break; }
+                        var cells = card.querySelectorAll('.sn-widget-list-table-cell');
+                        var parts = [];
+                        for (var c = 0; c < cells.length; c++) {
+                            var ct = cells[c].textContent.trim();
+                            if (ct) parts.push(ct);
                         }
-                    }
-
-                    // Pattern C: fallback to HTML template script tag
-                    if (!text.trim()) {
-                        var scripts = card.querySelectorAll(
-                            'script[type="text/html-template"]'
-                        );
-                        for (var k = 0; k < scripts.length; k++) {
-                            var tmp = document.createElement('div');
-                            tmp.innerHTML = scripts[k].textContent
-                                         || scripts[k].innerHTML || '';
-                            text = tmp.textContent || '';
-                            if (text.trim()) break;
-                        }
+                        text = parts.join(' | ');
                     }
 
                     text = (text || '').trim();
@@ -382,6 +421,7 @@ class ServiceNowHandler:
                         results.push({
                             timestamp: timestamp,
                             author: author,
+                            type: label,
                             text: text
                         });
                     }
@@ -392,6 +432,11 @@ class ServiceNowHandler:
             _log.info(
                 f"Extracted {len(updates or [])} customer update(s) from activity journal"
             )
+            for u in (updates or []):
+                _log.debug(
+                    f"  [{u.get('timestamp','')}] ({u.get('type','')}) "
+                    f"{u.get('author','')}: {u.get('text','')[:500]}"
+                )
             return updates or []
         except Exception as e:
             logging.getLogger(__name__).warning(f"Failed to extract customer updates: {e}")

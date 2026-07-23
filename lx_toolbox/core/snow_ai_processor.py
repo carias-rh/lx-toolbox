@@ -212,13 +212,13 @@ class SnowAIProcessor:
             num_ctx *= 2
         return min(num_ctx, self.OLLAMA_MAX_NUM_CTX)
 
-    def _ask_ollama(self, prompt: str) -> str:
+    def _ask_ollama(self, prompt: str, plain_text: bool = False) -> str:
         logger = logging.getLogger(__name__)
         # Models that emit chain-of-thought (Thinking... / ...done thinking.)
         # don't reliably include that text when constrained to JSON output,
         # so we skip the format=json constraint for them, then strip the
         # thinking block and extract the JSON from the raw text ourselves.
-        use_format_json = not self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gemma"))
+        use_format_json = (not plain_text) and (not self.OLLAMA_MODEL.startswith(("qwen", "deepseek", "gemma")))
         num_ctx = self._estimate_num_ctx(prompt)
         payload = {
             "model": self.OLLAMA_MODEL,
@@ -287,11 +287,18 @@ class SnowAIProcessor:
         )
         return response
 
-    def ask_llm(self, prompt: str) -> str:
-        """Ask the LLM a question and return the response using some LLM provider such as ollama."""
+    def ask_llm(self, prompt: str, plain_text: bool = False) -> str:
+        """Ask the LLM a question and return the response using some LLM provider such as ollama.
+
+        Args:
+            prompt: The prompt to send to the LLM.
+            plain_text: If True, skip the format=json constraint so the model can
+                        return unstructured plain text. Use for prompts that explicitly
+                        ask for prose rather than JSON output.
+        """
         provider = self.LLM_PROVIDER
         logging.getLogger(__name__).debug(f"LLM request via provider={provider}")
-        return self._ask_ollama(prompt)
+        return self._ask_ollama(prompt, plain_text=plain_text)
 
     @staticmethod
     def _normalize_suggested_correction(value) -> str:
@@ -443,18 +450,20 @@ class SnowAIProcessor:
         return result
 
     def _filter_and_clean_updates(self, raw_updates: list[dict]) -> list[dict]:
-        """Filter out our own replies and clean up each update's text."""
+        """Clean up each update's text and tag whether it came from the
+        customer or from our own team (kept as context, e.g. a prior
+        investigation reply, rather than dropped outright)."""
         agent_name = self.SIGNATURE_NAME
         cleaned: list[dict] = []
         seen_texts: set[str] = set()
         for update in raw_updates:
             author = update.get("author", "")
-            if author and agent_name and agent_name.lower() in author.lower():
-                continue
+            is_agent = bool(author and agent_name and agent_name.lower() in author.lower())
             text = self._strip_email_quote_chain(update.get("text", ""))
             if not text or len(text) < 5:
                 continue
-            # De-duplicate near-identical messages
+            # De-duplicate near-identical messages (e.g. the same message
+            # appearing as both "Additional comments" and "Email received")
             fingerprint = re.sub(r"\s+", " ", text[:200]).strip().lower()
             if fingerprint in seen_texts:
                 continue
@@ -462,6 +471,7 @@ class SnowAIProcessor:
             cleaned.append({
                 "timestamp": update.get("timestamp", ""),
                 "author": author,
+                "role": "agent" if is_agent else "customer",
                 "text": text,
             })
         return cleaned
@@ -473,53 +483,54 @@ class SnowAIProcessor:
         updates = snow_info.get("customer_updates")
         if not updates:
             return ""
-        # Build a condensed input for the LLM (text only, no raw PII dump)
+        # Build a condensed input for the LLM (text only, no raw PII dump).
+        # Each entry is labeled by role so the LLM can use our own prior
+        # replies as context without mistaking them for new customer input.
         update_block = ""
         for u in updates:
             ts = u.get("timestamp", "")
+            role = u.get("role", "customer")
+            role_label = "OUR TEAM (previous reply)" if role == "agent" else "CUSTOMER"
             text = u.get("text", "").strip()
             if len(text) > 1500:
                 text = text[:1500] + " …"
-            update_block += f"[{ts}]\n{text}\n\n"
+            update_block += f"[{ts}] ({role_label})\n{text}\n\n"
 
-        prompt = f"""You are summarizing customer follow-up messages on a Red Hat Training support ticket.
+        prompt = f"""You are summarizing the follow-up activity on a Red Hat Training support ticket.
 
 Original ticket description:
 {snow_info.get("Description", "")}
 
-Customer follow-up messages (newest first):
+Follow-up journal entries (newest first), each labeled as either CUSTOMER or OUR TEAM (a previous reply we already sent):
 {update_block}
 
 Instructions:
-- Extract ONLY new technical facts, clarifications, or additional issues the customer raised beyond the original description.
+- First, if there are any OUR TEAM entries, summarize in 1-3 sentences the concrete findings or conclusions from our own prior investigation/reply (e.g. what was checked, what was found, what explanation or fix was already given). Preserve specific technical details (names, commands, paths, image/version names) rather than vague statements like "already addressed".
+- Then, extract any NEW technical facts, clarifications, or additional issues the CUSTOMER raised beyond the original description AND beyond what our own prior reply already covered.
+- Never present our own prior reply as if it were new information from the customer — clearly attribute investigation findings to "our team" / "we".
 - Omit greetings, thank-yous, signatures, email addresses, phone numbers, and any personal information.
-- Omit anything that simply repeats the original description.
+- Omit anything that simply repeats the original ticket description.
 - If a follow-up mentions a different course page URL or section than the original, note that explicitly.
 - If the customer provided a screenshot reference or image, mention that briefly.
-- If none of the follow-ups add new information, return exactly: "No additional information."
-- Be concise: 2-5 sentences maximum.
+- Only return exactly "No additional information." if there are NO OUR TEAM entries with findings to preserve AND the customer raised nothing new.
+- Be concise: 3-6 sentences maximum.
 - Return plain text only, no JSON.
 - Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 """
-        response = self.ask_llm(prompt)
-        # The LLM may return JSON-wrapped text; extract plain text
-        if response.strip().startswith("{"):
-            parsed = self._parse_llm_json(response, context="customer update summary")
-            for key in ("summary", "text", "result", "response"):
-                if key in parsed and isinstance(parsed[key], str):
-                    return self._clean_llm_text(parsed[key])
-            for v in parsed.values():
-                if isinstance(v, str):
-                    return self._clean_llm_text(v)
+        response = self.ask_llm(prompt, plain_text=True)
+        _log = logging.getLogger(__name__)
+        _log.debug("Customer updates sent to LLM:\n%s", update_block)
+        _log.debug("LLM raw response for customer updates summary:\n%s", response)
         return self._clean_llm_text(response)
 
     def _build_full_description(self, snow_info: dict) -> str:
-        """Combine the original description with a summary of customer follow-ups."""
+        """Combine the original description with a summary of ticket follow-up
+        activity (customer replies and/or our own prior investigation)."""
         desc = snow_info.get("Description", "")
         summary = snow_info.get("customer_updates_summary", "")
         if not summary or summary == "No additional information.":
             return desc
-        return f"{desc}\n\n--- Additional information from customer follow-ups ---\n{summary}"
+        return f"{desc}\n\n--- Follow-up activity (customer replies and/or our prior investigation) ---\n{summary}"
 
     @staticmethod
     def _infer_course_family(course: str) -> str:
@@ -569,7 +580,7 @@ Instructions:
         summary = snow_info.get("customer_updates_summary", "")
         if summary and summary != "No additional information.":
             context += (
-                f"\nAdditional context from customer follow-ups:\n"
+                f"\nFollow-up activity (customer replies and/or our prior investigation):\n"
                 f"{summary}\n"
             )
 
@@ -858,26 +869,7 @@ Instructions:
         self.lab_mgr.dismiss_pendo_overlay()
         self.lab_mgr.select_lab_environment_tab("course")
 
-        try:
-            clicked_ids = set()
-            for _ in range(10):
-                buttons = self.driver.find_elements(By.XPATH, "//button[text()='Show Solution']")
-                unclicked = [b for b in buttons if b.id not in clicked_ids]
-                if not unclicked:
-                    break
-                for btn in unclicked:
-                    try:
-                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-                        btn.click()
-                    except Exception:
-                        pass
-                    clicked_ids.add(btn.id)
-                    time.sleep(0.3)
-                time.sleep(0.5)
-            # Extra wait for Bootstrap collapse CSS transitions to fully complete
-            time.sleep(1)
-        except Exception:
-            pass
+        self.lab_mgr.click_on_show_solution_buttons()
 
         container = WebDriverWait(self.driver, 10).until(
             EC.presence_of_element_located((By.XPATH, "//*[@class='course__content-wrapper']"))
@@ -919,6 +911,8 @@ Instructions:
         url = re.findall("URL:.*", description)[0].split(":  ")[1].strip()
         if "role.rhu.redhat.com/rol-rhu" in url:
             url = url.replace("role.rhu.redhat.com/rol-rhu", "rol.redhat.com/rol")
+        elif "role.rhu.redhat.com/rol" in url:
+            url = url.replace("role.rhu.redhat.com/rol", "rol.redhat.com/rol")
         # ROL sometimes embeds course slugs like do180f-4.18; canonical path uses do180-4.18
         url = re.sub(r"([A-Za-z]{2}\d{3})f(?=-)", r"\1", url)
 
