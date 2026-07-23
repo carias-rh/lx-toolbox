@@ -167,12 +167,12 @@ class LabManager:
                 # before interacting with the page.
                 time.sleep(2)
                 self.selenium_driver.accept_trustarc_cookies(timeout=3)
-                
+                time.sleep(2)
+
                 if username:
                     self.wait.until(EC.element_to_be_clickable(
                         (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
                     )).send_keys(f"{username}@redhat.com")
-                    time.sleep(2)
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
                     
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
@@ -258,6 +258,7 @@ class LabManager:
             
             self.wait_for_site_to_be_ready(environment)
         except Exception as e:
+            self.wait_for_site_to_be_ready(environment, timeout=10)
             pass
 
     def wait_for_site_to_be_ready(self, environment: str, timeout: int = 10):
