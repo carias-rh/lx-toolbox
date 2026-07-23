@@ -1075,7 +1075,7 @@ For example:
             "\n        \"is_valid_issue\": true," +
             "\n        \"suggested_correction\": \"If the issue is valid, indicate what words, lines, or commands that should be changed in the guide_text to fix the issue. If the issue is valid but there is not enough information it could be possible that a deeper investigation within the lab environment is required. Do not include any explanations or markdown formatting outside the JSON object.\"," +
             "\n        \"summary\": \"a short/medium summary of the 'analysis' field\"," +
-            "\n        \"jira_title\": \"a short and precise title of the issue at hand\"\n        }"
+            "\n        \"jira_title\": \"a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes\"\n        }"
         )
 
         prompt_text = f"""
@@ -1109,7 +1109,7 @@ For example:
 
     def analyze_environment_issue(self, user_issue: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing environment issue using LLM")
-        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "jira_title": "a very short title focused only on the core defect, without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes"}'
+        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "jira_title": "a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes"}'
         prompt_text = f"""
         You are an expert in Red Hat Training lab environments.
         {self._build_operational_context("environment", snow_info)}
@@ -1145,7 +1145,7 @@ For example:
         
         video_context = "The video player IS available on the page, so videos should be accessible." if video_available else "The video player button is NOT available on the page, which typically means videos for this course version are still being produced."
         
-        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "jira_title": "a very short title focused only on the core defect, without mentioning the exercise type, course section, or course name"}'
+        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "jira_title": "a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes"}'
         
         prompt_text = f"""
         You are an expert in Red Hat Training video content issues.
@@ -1179,7 +1179,7 @@ For example:
         - video_issue_type: one of "videos_not_ready", "content_mismatch", "subtitle_issue", "technical_issue", "other"
         - suggested_correction: what needs to be fixed (empty if videos_not_ready)
         - summary: short summary of the analysis
-        - jira_title: a very short title focused only on the core defect, without mentioning the exercise type, course section, or course name (empty if no Jira needed)
+        - jira_title: a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes
         
         Do not include any explanations, xml or markdown formatting outside the JSON object.
         {self._json_output_rules()}
