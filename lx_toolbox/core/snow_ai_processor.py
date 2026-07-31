@@ -61,6 +61,18 @@ class SnowAIProcessor:
         self.OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "600"))
         self.OLLAMA_MAX_NUM_CTX = int(os.environ.get("OLLAMA_MAX_NUM_CTX", "32768"))
 
+        # OpenAI-compatible provider (e.g. granite-4.1-8b via Red Hat STC AI)
+        self.OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "ibm-granite/granite-4.1-8b")
+        self.OPENAI_BASE_URL = os.environ.get(
+            "OPENAI_BASE_URL",
+            "https://granite-4-1-8b--apicast-production.apps.int.stc.ai.prod.us-east-1.aws.paas.redhat.com/v1",
+        ).rstrip("/")
+        # USER_KEY is preferred: OPENAI_API_KEY is shadowed by the real OpenAI key in the shell env
+        # and load_dotenv will not override an already-set env var.
+        self.OPENAI_API_KEY = os.environ.get("USER_KEY", os.environ.get("OPENAI_API_KEY", ""))
+        self.OPENAI_TIMEOUT_SECONDS = int(os.environ.get("OPENAI_TIMEOUT_SECONDS", "600"))
+        self.OPENAI_MAX_TOKENS = int(os.environ.get("OPENAI_MAX_TOKENS", "4096"))
+
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
 
         # ServiceNow URLs from handler
@@ -287,6 +299,62 @@ class SnowAIProcessor:
         )
         return response
 
+    def _ask_openai(self, prompt: str, plain_text: bool = False) -> str:
+        """Call an OpenAI-compatible chat completions endpoint (e.g. granite-4.1-8b)."""
+        logger = logging.getLogger(__name__)
+        messages = [{"role": "user", "content": prompt}]
+        payload: dict = {
+            "model": self.OPENAI_MODEL,
+            "messages": messages,
+            "max_tokens": self.OPENAI_MAX_TOKENS,
+        }
+        if not plain_text:
+            payload["response_format"] = {"type": "json_object"}
+
+        headers = {
+            "Authorization": f"Bearer {self.OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            resp = requests.post(
+                f"{self.OPENAI_BASE_URL}/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=self.OPENAI_TIMEOUT_SECONDS,
+                verify=False,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.exceptions.RequestException as e:
+            logger.error("Could not reach OpenAI-compatible API at %s: %s", self.OPENAI_BASE_URL, e)
+            return ""
+        except ValueError as e:
+            logger.error("OpenAI-compatible API returned non-JSON payload: %s", e)
+            return ""
+
+        try:
+            response = data["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError) as e:
+            logger.error("Unexpected response structure from OpenAI-compatible API: %s | data=%s", e, data)
+            return ""
+
+        response = re.sub(r'```json\s*', '', response)
+        response = re.sub(r'```\s*$', '', response)
+        response = response.strip()
+
+        usage = data.get("usage", {})
+        logger.debug(
+            "LLM[openai:%s] response (prompt_tokens=%s, completion_tokens=%s): %s",
+            self.OPENAI_MODEL,
+            usage.get("prompt_tokens"),
+            usage.get("completion_tokens"),
+            response[:1000],
+        )
+        return response
+
     def ask_llm(self, prompt: str, plain_text: bool = False) -> str:
         """Ask the LLM a question and return the response using some LLM provider such as ollama.
 
@@ -298,6 +366,8 @@ class SnowAIProcessor:
         """
         provider = self.LLM_PROVIDER
         logging.getLogger(__name__).debug(f"LLM request via provider={provider}")
+        if provider == "openai":
+            return self._ask_openai(prompt, plain_text=plain_text)
         return self._ask_ollama(prompt, plain_text=plain_text)
 
     @staticmethod
@@ -1543,19 +1613,27 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             # Change Work type to "Bug" -- the input is obscured by the value
             # overlay so we JS-focus it, then type + Enter to select.
             try:
-                work_type_input = WebDriverWait(self.driver, 10).until(
+                WebDriverWait(self.driver, 5).until(
                     EC.presence_of_element_located((By.XPATH,
-                        '//input[starts-with(@id, "type-picker-")]'
+                        '//div[@data-testid="issue-field-select-base.ui.format-option-label.c-label" and text()="Bug"]'
                     ))
                 )
-                self.driver.execute_script("arguments[0].focus(); arguments[0].click();", work_type_input)
-                time.sleep(0.5)
-                work_type_input.send_keys("Bug")
-                time.sleep(1)
-                work_type_input.send_keys(Keys.RETURN)
-                time.sleep(2)
-            except Exception as e:
-                logging.getLogger(__name__).warning(f"Could not set Work type to Bug: {e}")
+                # Already set to Bug, nothing to do
+            except Exception:
+                try:
+                    work_type_input = WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.XPATH,
+                            '//input[starts-with(@id, "type-picker-")]'
+                        ))
+                    )
+                    self.driver.execute_script("arguments[0].focus(); arguments[0].click();", work_type_input)
+                    time.sleep(0.5)
+                    work_type_input.send_keys("Bug")
+                    time.sleep(1)
+                    work_type_input.send_keys(Keys.RETURN)
+                    time.sleep(2)
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"Could not set Work type to Bug: {e}")
 
             # Fill in Summary
             summary_value = f"{snow_info.get('Course','')}: ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} - {analysis.get('jira_title', '')} - {snow_info.get('snow_id','')}"
