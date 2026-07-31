@@ -431,6 +431,13 @@ class ServiceNowHandler:
 
             _log.info(
                 f"Extracted {len(updates or [])} customer update(s) from activity journal"
+                + (
+                    ":\n " + "\n ".join(
+                        f"[{u.get('timestamp','')}] {u.get('author','')}: {u.get('text','')[:200]}"
+                        for u in updates
+                    )
+                    if updates else ""
+                )
             )
             for u in (updates or []):
                 _log.debug(
