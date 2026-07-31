@@ -56,7 +56,7 @@ class SnowAIProcessor:
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
         self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
-        #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:12b")
+        #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "laguna-xs-2.1:latest")
         self.OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
         self.OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "600"))
         self.OLLAMA_MAX_NUM_CTX = int(os.environ.get("OLLAMA_MAX_NUM_CTX", "32768"))

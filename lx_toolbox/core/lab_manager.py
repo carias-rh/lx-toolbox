@@ -261,7 +261,7 @@ class LabManager:
             self.wait_for_site_to_be_ready(environment, timeout=10)
             pass
 
-    def wait_for_site_to_be_ready(self, environment: str, timeout: int = 10):
+    def wait_for_site_to_be_ready(self, environment: str, timeout: int = 5):
         """
         Wait for the site to be ready after login or navigation.
         Checks for environment-specific elements that indicate the page is loaded.
