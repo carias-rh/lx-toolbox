@@ -1588,9 +1588,22 @@ class LabManager:
         sections = []
         
         try:
-            # Wait for any backdrop/modal overlay to disappear
+            # Dismiss any survey/feedback banners (Bootstrap alert-dismissable)
             try:
-                WebDriverWait(self.driver, 15).until(
+                survey_close = self.driver.find_element(
+                    By.XPATH,
+                    '//div[@id="survey-dialog"]//button[contains(@class,"close")] | '
+                    '//*[contains(@class,"alert-dismissable")]//button[contains(@class,"close")]'
+                )
+                self.driver.execute_script("arguments[0].click();", survey_close)
+                time.sleep(0.5)
+                logging.getLogger(__name__).debug("Dismissed survey/feedback banner")
+            except:
+                pass
+
+            # Wait for any PF5 backdrop/modal overlay to disappear
+            try:
+                WebDriverWait(self.driver, 10).until(
                     EC.invisibility_of_element_located((By.XPATH, '//div[contains(@class, "pf-v5-c-backdrop")]'))
                 )
             except TimeoutException:
@@ -1600,115 +1613,114 @@ class LabManager:
                     time.sleep(0.5)
                 except:
                     pass
-            
-            # Click on "Toggle Table of Contents panel" button to open TOC
-            toc_button = self.wait.until(EC.element_to_be_clickable(
+
+            # Find and click "Toggle Table of Contents panel" button to open TOC
+            toc_button = WebDriverWait(self.driver, 15).until(EC.element_to_be_clickable(
                 (By.XPATH, '//button[contains(@aria-label, "Table of Contents") or contains(@aria-label, "Toggle Table of Contents")]')
             ))
-            
-            # Check if TOC is already open
-            try:
-                toc_region = self.driver.find_element(By.XPATH, '//div[contains(@class, "ToC")] | //div[@aria-label="Table of contents"]')
-                if not toc_region.is_displayed():
-                    self.driver.execute_script("arguments[0].click();", toc_button)
-                    time.sleep(1)
-            except:
+
+            # Check if TOC is already open by looking for a TOC link in the DOM
+            toc_already_open = bool(self.driver.find_elements(
+                By.XPATH, '//a[@data-analytics-id="toc-link-ole-lp"]'
+            ))
+            if not toc_already_open:
                 self.driver.execute_script("arguments[0].click();", toc_button)
-                time.sleep(1)
-            
-            # Click on "Expand all" toggle switch to show all chapters
+                # Wait until TOC links are actually in the DOM (up to 5 seconds)
+                try:
+                    WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, '//a[@data-analytics-id="toc-link-ole-lp"]'))
+                    )
+                except TimeoutException:
+                    time.sleep(2)
+
+            # Click the "Expand all" checkbox to expand all chapters at once
             try:
-                expand_all_selectors = [
-                    '//label[contains(@class, "pf-v5-c-switch") and .//span[contains(text(), "Expand all")]]',
-                    '//span[contains(@class, "pf-v5-c-switch__label") and contains(text(), "Expand all")]/..',
-                    '//input[following-sibling::*[contains(text(), "Expand all")]]',
-                    '//button[contains(text(), "Expand all")]',
-                    '//*[contains(text(), "Expand all")]/ancestor::label[contains(@class, "switch")]//input',
-                ]
-                
-                expand_all = None
-                for selector in expand_all_selectors:
-                    try:
-                        expand_all = self.driver.find_element(By.XPATH, selector)
-                        if expand_all.is_displayed():
-                            break
-                    except:
-                        continue
-                
-                if expand_all and expand_all.is_displayed():
-                    is_checked = expand_all.get_attribute('aria-checked') == 'true' or expand_all.get_attribute('checked')
-                    if not is_checked:
-                        self.driver.execute_script("arguments[0].click();", expand_all)
-                        time.sleep(1)
-                        self.logger("  Clicked 'Expand all' toggle")
+                # Target the INPUT directly via its aria-label (most reliable)
+                expand_input = WebDriverWait(self.driver, 3).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, '//input[@aria-label="Expand all chapters" or @aria-label="Expand all"]')
+                    )
+                )
+                already_checked = self.driver.execute_script("return arguments[0].checked;", expand_input)
+                if not already_checked:
+                    # Click the associated label (the input may be visually hidden)
+                    label = self.driver.find_element(By.XPATH, f'//label[@for="{expand_input.get_attribute("id")}"]')
+                    self.driver.execute_script("arguments[0].click();", label)
+                    time.sleep(1.5)
+                    self.logger("  Clicked 'Expand all' toggle")
                 else:
-                    self.logger("  'Expand all' toggle not found, expanding chapters manually...")
+                    logging.getLogger(__name__).debug("'Expand all' toggle already checked")
             except Exception as e:
                 logging.getLogger(__name__).debug(f"Could not use 'Expand all' toggle: {e}")
-            
-            # Expand any collapsed chapter accordions
+                self.logger("  'Expand all' toggle not found, expanding chapters manually...")
+                # Fallback: expand each collapsed chapter accordion individually
+                try:
+                    collapsed_chapters = self.driver.find_elements(
+                        By.XPATH,
+                        '//button[contains(@class, "pf-v5-c-accordion__toggle") and @aria-expanded="false"]'
+                    )
+                    if collapsed_chapters:
+                        self.logger(f"  Expanding {len(collapsed_chapters)} collapsed chapters...")
+                        for btn in collapsed_chapters:
+                            try:
+                                self.driver.execute_script("arguments[0].click();", btn)
+                                time.sleep(0.2)
+                            except:
+                                continue
+                        time.sleep(1)
+                except Exception as ex:
+                    logging.getLogger(__name__).debug(f"Error expanding chapters: {ex}")
+
+            # Wait for TOC links to be present (handles any remaining render delay)
             try:
-                collapsed_chapters = self.driver.find_elements(
-                    By.XPATH,
-                    '//button[contains(@class, "pf-v5-c-accordion__toggle") and @aria-expanded="false"]'
+                WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, '//a[@data-analytics-id="toc-link-ole-lp"]'))
                 )
-                
-                if collapsed_chapters:
-                    self.logger(f"  Expanding {len(collapsed_chapters)} collapsed chapters...")
-                    for btn in collapsed_chapters:
-                        try:
-                            self.driver.execute_script("arguments[0].click();", btn)
-                            time.sleep(0.3)
-                        except:
-                            continue
-                    time.sleep(0.5)
-            except Exception as e:
-                logging.getLogger(__name__).debug(f"Error expanding chapters: {e}")
-            
-            # Get all section links from TOC
+            except TimeoutException:
+                logging.getLogger(__name__).debug("Timed out waiting for TOC links after expand")
+
+            # Collect all section links from TOC
             section_links = self.driver.find_elements(
                 By.XPATH,
                 '//a[contains(@href, "/pages/") and @data-analytics-id="toc-link-ole-lp"]'
             )
-            
-            # If no links found with specific data-analytics-id, try broader search
+
             if not section_links:
                 section_links = self.driver.find_elements(
                     By.XPATH,
                     '//div[contains(@class, "ToC")]//a[contains(@href, "/pages/")]'
                 )
-            
-            # If still no links, try even broader search
+
             if not section_links:
                 section_links = self.driver.find_elements(
                     By.XPATH,
                     '//a[contains(@href, "/pages/")]'
                 )
-            
+
+            logging.getLogger(__name__).debug(f"Found {len(section_links)} raw TOC links")
+
             # Process and filter sections based on section_type
             seen_sections = set()
             for link in section_links:
                 try:
                     url = link.get_attribute('href')
                     title = link.text.strip()
-                    
+
                     if not url or not title or '/pages/' not in url:
                         continue
-                    
-                    # Extract chapter_section from URL
+
+                    # Extract chapter_section from URL (e.g. ch01s04)
                     try:
                         chapter_section = str(re.findall(r"ch[0-9]*s[0-9]*", url)[0])
                     except (IndexError, TypeError):
                         continue
-                    
-                    # Skip duplicates
+
                     if chapter_section in seen_sections:
                         continue
-                    
-                    # Filter based on section_type
+
                     is_exercise = any(kw in title for kw in self.EXERCISE_KEYWORDS)
                     is_excluded_theory = any(kw in title for kw in self.EXCLUDED_THEORY_KEYWORDS)
-                    
+
                     include = False
                     if section_type == "exercises":
                         include = is_exercise
@@ -1716,7 +1728,7 @@ class LabManager:
                         include = not is_excluded_theory
                     elif section_type == "all":
                         include = True
-                    
+
                     if include:
                         seen_sections.add(chapter_section)
                         sections.append({
@@ -1725,10 +1737,10 @@ class LabManager:
                             'chapter_section': chapter_section
                         })
                         print(f"{title} -> {chapter_section}")
-                        
+
                 except:
                     continue
-            
+
         except TimeoutException:
             self.logger(f"Timeout waiting for TOC in new interface")
         except Exception as e:
