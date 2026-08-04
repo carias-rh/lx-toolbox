@@ -843,28 +843,59 @@ class LabManager:
         self.logger(f"{description} for course {course_id} ({times} times)")
         self.select_lab_environment_tab("lab-environment")
         try:
-
             self.driver.execute_script("document.body.style.zoom = '0.70'")
-            # Wait until lab is in a state where adjustments can be made (e.g., running)
-            # The original script checked for "CREATING" or "STARTING" states before clicking.
-            # This implies we should wait until those are done.
-            WebDriverWait(self.driver, 300).until(EC.presence_of_element_located((By.XPATH, '//button[text()="Open Console"]')))
-            
-            # Scroll to bottom of the lab environment tab to ensure all controls/buttons are visible
+
+            # Wait until lab console button is visible (lab is running)
+            WebDriverWait(self.driver, 300).until(
+                EC.presence_of_element_located((By.XPATH, '//button[text()="Open Console"] | //a[text()="Open Console"]'))
+            )
+
+            # Scroll to bottom so auto-stop/auto-destroy controls are visible
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(0.3)
-            
-            button_xpath = f'//*[@id="tab-course-lab-environment"]/div/table/tr[{button_xpath_part}]/td[2]/button'
-            WebDriverWait(self.driver, 3).until(EC.visibility_of_element_located((By.XPATH, button_xpath)))
-            adj_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, button_xpath)))
-            for _ in range(times):
-                adj_button.click()
-                time.sleep(0.1) # Small pause between clicks
+
+            interface = self._detect_interface_type()
+
+            if interface == self.INTERFACE_NEW:
+                # New PF5 interface: buttons identified by data-analytics-id
+                # button_xpath_part "1" = auto-stop, "2" = auto-destroy
+                new_button_map = {
+                    "1": '//button[@data-analytics-id="auto-stop-vt-dash-lp" or @title="Add One Hour"]',
+                    "2": '//button[@data-analytics-id="auto-destroy-vt-dash-lp" or @title="Add One Day"]',
+                }
+                button_xpath = new_button_map.get(button_xpath_part)
+                if not button_xpath:
+                    logging.getLogger(__name__).warning(
+                        f"Unknown button_xpath_part '{button_xpath_part}' for new interface"
+                    )
+                    return
+                adj_button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, button_xpath))
+                )
+                for _ in range(times):
+                    # Re-locate to avoid stale element; stop if button becomes disabled
+                    try:
+                        btn = self.driver.find_element(By.XPATH, button_xpath)
+                        if btn.get_attribute("aria-disabled") == "true":
+                            logging.getLogger(__name__).debug(f"{description}: button is disabled (max reached), stopping early")
+                            break
+                        self.driver.execute_script("arguments[0].click();", btn)
+                        time.sleep(0.2)
+                    except Exception:
+                        break
+            else:
+                # Old interface: table-based layout under #tab-course-lab-environment
+                button_xpath = f'//*[@id="tab-course-lab-environment"]/div/table/tr[{button_xpath_part}]/td[2]/button'
+                WebDriverWait(self.driver, 3).until(EC.visibility_of_element_located((By.XPATH, button_xpath)))
+                adj_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, button_xpath)))
+                for _ in range(times):
+                    adj_button.click()
+                    time.sleep(0.1)
+
         except TimeoutException:
-            #logging.getLogger(__name__).error(f"Timeout finding {description} button for {course_id}. Lab might not be ready or button not found.")
-            pass
+            logging.getLogger(__name__).warning(f"Timeout finding {description} button for {course_id}")
         except Exception as e:
-            pass
+            logging.getLogger(__name__).warning(f"Error clicking {description} button for {course_id}: {e}")
 
     def get_autostop_hours_remaining(self) -> int:
         """
@@ -878,14 +909,29 @@ class LabManager:
             self.select_lab_environment_tab("lab-environment")
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(0.3)
-            
-            # Read the whole auto-stop cell because the remaining time is not
-            # always wrapped in a <time> element, especially for minute values.
-            time_cell = WebDriverWait(self.driver, 30).until(
-                EC.presence_of_element_located((By.XPATH, '//table/tr[1]/td[1]'))
-            )
-            text = time_cell.text.lower().strip()
-            
+
+            interface = self._detect_interface_type()
+            text = ""
+
+            if interface == self.INTERFACE_NEW:
+                # New PF5 interface: auto-stop text is in .autostop-timers-container
+                # e.g. <span>Auto-stop <span>in 1 hour</span>.</span>
+                # or   <span>Auto-stop <span>in 39 minutes</span>.</span>
+                time_cell = WebDriverWait(self.driver, 30).until(
+                    EC.presence_of_element_located((By.XPATH,
+                        '//div[contains(@class,"autostop-timers-container")][.//button[@title="Add One Hour" or @data-analytics-id="auto-stop-vt-dash-lp"]]/span'
+                    ))
+                )
+                text = time_cell.text.lower().strip()
+            else:
+                # Old interface: auto-stop text is in the first table cell
+                time_cell = WebDriverWait(self.driver, 30).until(
+                    EC.presence_of_element_located((By.XPATH, '//table/tr[1]/td[1]'))
+                )
+                text = time_cell.text.lower().strip()
+
+            logging.getLogger(__name__).debug(f"Auto-stop text: '{text}'")
+
             hours = 0
             hour_match = re.search(r'\b(an|\d+)\s+hours?\b', text)
             if hour_match:
