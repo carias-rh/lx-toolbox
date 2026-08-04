@@ -932,18 +932,18 @@ class LabManager:
             return
 
         try:
-            self.driver.refresh() # Refresh current page
-            self.wait_for_site_to_be_ready(environment) # Ensure site is loaded
+            #self.driver.refresh() # Refresh current page
+            #self.wait_for_site_to_be_ready(environment) # Ensure site is loaded
 
             # Click on Switch user (text might vary by platform/language)
             # Using a more general XPath that looks for the text "Switch user" within a button or link
             switch_user_button = self.wait.until(EC.element_to_be_clickable(
-                (By.XPATH, '//*[(self::button or self::a) and normalize-space(.)="Switch user"] | //*[text()="Switch user"]')
+                (By.XPATH, '//*[text()="Switch user"]')
             ))
             switch_user_button.click()
             
             # Introduce username
-            username_field = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="formInlineUsername"]')))
+            username_field = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//input[@id="formInlineUsername"]')))
             username_field.send_keys(impersonate_username)
             
             # Click on switch button (text might vary)

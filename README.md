@@ -3,7 +3,7 @@
 Automation tools for various work tasks including lab operations, ServiceNow, and Jira. 
 
 ## Features
-- **ServiceNow to Jira AI Processor**: LLM-powered ticket classification, analysis, and Jira ticket preparation using Ollama
+- **ServiceNow to Jira AI Processor**: LLM-powered ticket classification, analysis, and Jira ticket preparation — supports [Models.corp](https://developer.models.corp.redhat.com/) (Red Hat internal cloud) or a local Ollama instance
 - **QA Automation**: Run automated QA tests on lab exercises
 - **Lab Operations**: Create, start, stop, delete, and manage labs
 - **User Impersonation**: Switch to different users for testing
@@ -115,26 +115,40 @@ lx-tool lab impersonate rh124-9.3 student01
 ```
 ## ServiceNow to Jira AI Processor
 
-The ServiceNow to Jira AI Processor uses a local LLM (Ollama) to analyze and classify ServiceNow Feedback tickets, automatically preparing Jira tickets for content or environment issues.
+The ServiceNow to Jira AI Processor uses an LLM to analyze and classify ServiceNow Feedback tickets, automatically preparing Jira tickets for content or environment issues. It supports two providers: **Models.corp** (Red Hat internal cloud, recommended) and a **local Ollama** instance.
 
 ### Prerequisites
 
-- **Ollama**: Install from [ollama.ai](https://ollama.ai)
-- **LLM Model**: Download a model (e.g., `ollama pull ministral-3:8b`)
+**Option A — Models.corp (recommended, no local install)**
+
+Get your user key and browse available models at [models.corp.redhat.com](https://developer.models.corp.redhat.com/).
+Full getting-started guide: [Models.corp — Your First Chatbot](https://gitlab.cee.redhat.com/models-corp/user-documentation/-/blob/main/tutorials/01-your-first-chatbot.md).
+
+**Option B — Local Ollama**
+
+- Install Ollama from [ollama.ai](https://ollama.ai)
+- Pull a model: `ollama pull ministral-3:8b`
 
 ### Configuration
 
-Add the following to your `.env` file:
+Add one of the following blocks to your `.env` file:
 
 ```bash
-# LLM Provider (default: ollama)
-LLM_PROVIDER=ollama
+# ── Option A: Models.corp ───────────────────────────────────────────────────
+# Browse models and get your key at https://developer.models.corp.redhat.com/
+LLM_PROVIDER=openai
+OPENAI_MODEL=ibm-granite/granite-4.1-8b
+OPENAI_BASE_URL=https://granite-4-1-8b--apicast-production.apps.int.stc.ai.prod.us-east-1.aws.paas.redhat.com/v1
+USER_KEY=<your-models-corp-user-key>
+OPENAI_TIMEOUT_SECONDS=600
+OPENAI_MAX_TOKENS=4096
 
-# Ollama Configuration
-OLLAMA_MODEL=ministral-3:8b
-OLLAMA_HOST=http://127.0.0.1:11434
-OLLAMA_TIMEOUT_SECONDS=600
-OLLAMA_MAX_NUM_CTX=32768
+# ── Option B: Local Ollama ───────────────────────────────────────────────────
+# LLM_PROVIDER=ollama
+# OLLAMA_MODEL=ministral-3:8b
+# OLLAMA_HOST=http://127.0.0.1:11434
+# OLLAMA_TIMEOUT_SECONDS=600
+# OLLAMA_MAX_NUM_CTX=32768
 
 # Your signature for responses
 SIGNATURE_NAME=Your Name
@@ -520,6 +534,13 @@ If you encounter "Username not configured":
 
 
 For SNOW AI Processor issues:
+
+**Models.corp provider (`LLM_PROVIDER=openai`)**
+1. Verify your `USER_KEY` in `.env` — get it from [models.corp.redhat.com](https://developer.models.corp.redhat.com/) (see the [getting-started guide](https://gitlab.cee.redhat.com/models-corp/user-documentation/-/blob/main/tutorials/01-your-first-chatbot.md))
+2. Do not set `OPENAI_API_KEY` in `.env`; use `USER_KEY` instead to avoid collision with a real OpenAI key that may be set in your shell environment
+3. The endpoint uses a self-signed certificate — SSL verification is disabled automatically for this provider
+
+**Local Ollama provider (`LLM_PROVIDER=ollama`)**
 1. Verify Ollama is running: `ollama list`
 2. Test the model directly: `ollama run ministral-3:8b "Hello"`
 3. Check `OLLAMA_HOST` in `.env` points to a reachable Ollama server (default `http://127.0.0.1:11434`)
