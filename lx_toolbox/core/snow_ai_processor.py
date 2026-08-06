@@ -1563,15 +1563,25 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
     def extract_jira_keyword(self, snow_info: dict) -> str:
         prompt = (
-            "You are an expert technical keyword extractor. "
-            "From the folowing feedback information, identify ONE single defining technical term that will be used to search into a database of tickets. "
-            f"<feedback> {snow_info.get('Description','')} </feedback>"
-            "Output JSON example: {\"keyword\": \"PosgreSQL\"}\n"
+            "You are an expert technical keyword extractor for course exercise feedback. "
+            "From the learner's feedback below, extract a single search term to find an existing bug ticket. "
+            "The ticket database is already filtered to the right course and chapter, "
+            "so the term must be the most unique artifact name in this specific exercise.\n\n"
+            "Prefer in this strict order:\n"
+            "1. Filenames or script names — e.g. 'run-app.sh', 'Containerfile', 'deploy.yaml'\n"
+            "2. Fully-qualified image references — e.g. 'registry.redhat.io/ubi9/nodejs-18'\n"
+            "3. Specific named resources — e.g. 'openshift-config' (namespace), 'frontend' (Deployment), 'db-secret' (Secret)\n"
+            "4. A specific API kind ONLY when it is the exercise's clear subject and no named instance appears in the text\n\n"
+            "If none of the above can be identified, return null. "
+            "NEVER return a bare generic word such as 'image', 'operator', 'container', 'pod', or 'deployment' without a qualifying name. "
+            "NEVER return a course code or course ID (e.g. 'DO188', 'rh124') or a section identifier (e.g. 'ch01s02') — those are already in the search query.\n\n"
+            f"<feedback>\n{snow_info.get('Description', '')}\n</feedback>\n\n"
+            'Output JSON: {"keyword": "<value>"} or {"keyword": null}\n'
             f"{self._json_output_rules()}"
         )
         llm_response = self.ask_llm(prompt)
         parsed = self._parse_llm_json(llm_response, context="LLM keyword extraction")
-        keyword = parsed.get("keyword", "")
+        keyword = parsed.get("keyword") or ""
         logging.getLogger(__name__).info(f"Extracted Jira keyword: {keyword if keyword else '[none]'}")
         return keyword
 
