@@ -23,7 +23,6 @@ from .servicenow_api import ServiceNowAPIClient, ServiceNowAPIError
 
 
 class SnowAIProcessor:
-    """Port of snow-ai.py.j2 logic that relies on LabManager for ROL navigation."""
 
     def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None):
         self.config = config
@@ -1614,19 +1613,29 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         self.jira_handler.login(use_session=True)
 
     def prelogin_all(self, environment: str = "rol"):
-        # 1) ServiceNow queue (base window)
+        # 1) ServiceNow queue — navigate directly to the classic .do list URL,
+        #    bypassing the nav/ui/classic redirect entirely.
         self.driver.get(self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL)
-        # Pre-set the TrustArc consent cookie now that we have a redhat.com domain context.
-        self.lab_mgr.preset_trustarc_cookie()
+        # Wait for the auth to finish the redirection and go directly to the plain queue
+        self.driver.get(self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL)
+
+
+        # Check login state by looking for the navbar rather than waiting for the
+        # SSO page: if navbar-header is present we are already authenticated.
         try:
-            WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[@id="username"]')))
-            self.login_snow()
+            WebDriverWait(self.driver, 3).until(
+                EC.presence_of_element_located((By.XPATH, '//div[@class="navbar-header"]'))
+            )
+            self.logger("ServiceNow session already active")
         except Exception:
-            pass
+            self.login_snow()
 
         # Track base window and tabs for visual verification
         self.base_window_handle = self.driver.current_window_handle
         self.login_tab_handles = {}
+
+        # Pre-set the TrustArc consent cookie now that we have a redhat.com domain context.
+        self.lab_mgr.preset_trustarc_cookie()
 
         # 2) ROL login in new tab (within base window)
         self.driver.switch_to.new_window('tab')

@@ -152,9 +152,9 @@ class LabManager:
             if environment == "rol":
                 # ROL redirects through SSO; wait for all redirections to settle
                 # before interacting with the page.
-                time.sleep(2)
+                #time.sleep(2)
                 self.selenium_driver.accept_trustarc_cookies(timeout=3)
-                time.sleep(2)
+                #time.sleep(2)
 
                 if username:
                     self.wait.until(EC.element_to_be_clickable(
@@ -199,9 +199,9 @@ class LabManager:
                         "Credentials not configured. Please complete the login manually."
                     )
             
-            self.wait_for_site_to_be_ready(environment)
+            self.wait_for_site_to_be_ready(environment, timeout=3)
         except Exception as e:
-            self.wait_for_site_to_be_ready(environment, timeout=10)
+            #self.wait_for_site_to_be_ready(environment, timeout=10)
             pass
 
     def wait_for_site_to_be_ready(self, environment: str, timeout: int = 5):

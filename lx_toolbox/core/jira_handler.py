@@ -71,7 +71,7 @@ class JiraHandler:
         
         input("Press Enter once you have completed the login...")
     
-    def _is_logged_in(self, timeout: int = 5) -> bool:
+    def _is_logged_in(self, timeout: int = 2) -> bool:
         """
         Check if already logged into Jira by looking for logged-in indicators.
         
@@ -129,7 +129,7 @@ class JiraHandler:
 
             # Check for Atlassian Cloud login page (id.atlassian.com)
             try:
-                atlassian_email_field = WebDriverWait(self.driver, 10).until(
+                atlassian_email_field = WebDriverWait(self.driver, 3).until(
                     EC.presence_of_element_located((By.XPATH,
                         '//input[@name="username"]'
                     ))
@@ -138,7 +138,7 @@ class JiraHandler:
                     atlassian_email_field.clear()
                     atlassian_email_field.send_keys(f"{username}@redhat.com")
                     try:
-                        WebDriverWait(self.driver, 5).until(
+                        WebDriverWait(self.driver, 3).until(
                             EC.element_to_be_clickable((By.XPATH,
                                 '//*[@id="login-submit"] | '
                                 '//button[@type="submit"] | '
@@ -151,7 +151,7 @@ class JiraHandler:
 
                     # Check for "Create" button — indicates user is already logged in
                     try:
-                        create_btn = WebDriverWait(self.driver, 10).until(
+                        create_btn = WebDriverWait(self.driver, 5).until(
                             EC.element_to_be_clickable((By.XPATH, '//button/span[text()="Create"]'))
                         )
                         if create_btn:
