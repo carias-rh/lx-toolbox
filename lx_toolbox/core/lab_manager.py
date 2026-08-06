@@ -211,7 +211,7 @@ class LabManager:
         """
         self.driver.execute_script("document.body.style.zoom = '0.70'")
         self.driver.execute_script("window.scrollTo(0, 0);")
-        self.logger("Waiting for site to be ready...")
+        logging.getLogger(__name__).debug("Waiting for site to be ready...")
         self.dismiss_active_alerts()
         
         # Define expected elements per environment
