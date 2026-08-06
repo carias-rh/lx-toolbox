@@ -10,6 +10,7 @@ from enum import Enum
 
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger
+from .servicenow_api import FEEDBACK_TABLE
 
 # Configure logging with environment fallback only if no handlers exist yet
 if not logging.getLogger().hasHandlers():
@@ -519,7 +520,7 @@ Best Regards,
             "sysparm_limit": str(limit)
         }
         
-        url = f"{self.instance_url}/api/now/table/x_redha_red_hat_tr_x_red_hat_training"
+        url = f"{self.instance_url}/api/now/table/{FEEDBACK_TABLE}"
         try:
             response = self.session.get(url, params=params)
             response.raise_for_status()
@@ -530,7 +531,7 @@ Best Regards,
 
     def update_ticket(self, ticket_sys_id: str, updates: Dict[str, Any]) -> bool:
         """Update a ticket with the provided data"""
-        url = f"{self.instance_url}/api/now/table/x_redha_red_hat_tr_x_red_hat_training/{ticket_sys_id}"
+        url = f"{self.instance_url}/api/now/table/{FEEDBACK_TABLE}/{ticket_sys_id}"
         
         try:
             logger.debug(f"Updating ticket {ticket_sys_id} with data: {updates}")
@@ -795,8 +796,8 @@ Best Regards,
             "sysparm_limit": "100"
         }
         
-        url = f"{self.instance_url}/api/now/table/x_redha_red_hat_tr_x_red_hat_training"
-        
+        url = f"{self.instance_url}/api/now/table/{FEEDBACK_TABLE}"
+
         try:
             response = self.session.get(url, params=params)
             response.raise_for_status()

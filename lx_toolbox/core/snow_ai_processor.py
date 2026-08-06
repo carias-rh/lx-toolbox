@@ -19,6 +19,7 @@ from ..utils.helpers import step_logger, reset_step_counter
 from .lab_manager import LabManager
 from .jira_handler import JiraHandler
 from .servicenow_handler import ServiceNowHandler
+from .servicenow_api import ServiceNowAPIClient, ServiceNowAPIError
 
 
 class SnowAIProcessor:
@@ -52,6 +53,16 @@ class SnowAIProcessor:
             config=config,
             logger=self.logger
         )
+
+        # API fast-path: attempt to create a REST client; fall back to DOM scraping
+        # when credentials are absent.  See ADR-0001.
+        _log = logging.getLogger(__name__)
+        try:
+            self._snow_api: ServiceNowAPIClient | None = ServiceNowAPIClient(config)
+            _log.info("SNOW API available — using REST for ticket info")
+        except ServiceNowAPIError:
+            self._snow_api = None
+            _log.info("SNOW API credentials not found — using browser scraping")
 
         # LLM provider configuration (matches j2 script semantics)
         self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
@@ -968,13 +979,38 @@ Instructions:
         self.snow_handler.switch_to_iframe()
 
     def get_snow_info(self, snow_id: str) -> dict:
-        """Open ticket page and parse key fields from description and form controls."""
+        """
+        Return key Feedback ticket fields.
+
+        Uses the REST API fast-path when ``self._snow_api`` is set (ADR-0001);
+        falls back to Selenium DOM scraping otherwise.  Both paths return a dict
+        with the same keys: ``snow_id``, ``full_name``, ``Description``,
+        ``Course``, ``Version``, ``URL``, ``Chapter``, ``Section``, ``Title``,
+        ``RHNID``, ``customer_updates``, ``customer_updates_summary``.
+        """
         self.logger(f"Getting SNOW info for ticket {snow_id}")
-        self.snow_handler.navigate_to_ticket(snow_id)
 
-        description = self.driver.find_element(By.XPATH, '//*[@id="x_redha_rht_task.description"]').get_attribute('value')
-        full_name = self.driver.find_element(By.XPATH, '//*[@id="x_redha_rht_task.contact_source"]').get_attribute('value')
+        if self._snow_api is not None:
+            info = self._get_snow_info_via_api(snow_id)
+        else:
+            info = self._get_snow_info_via_dom(snow_id)
 
+        if info["customer_updates"]:
+            self.logger("Summarizing customer follow-up messages")
+            info["customer_updates_summary"] = self._summarize_customer_updates(info)
+            logging.getLogger(__name__).info(
+                f"Customer updates summary: {info['customer_updates_summary']}"
+            )
+
+        logging.getLogger(__name__).info(f"ServiceNow ticket info: {json.dumps({k: v for k, v in info.items() if k != 'customer_updates'}, indent=2)}")
+        return info
+
+    # ------------------------------------------------------------------
+    # get_snow_info() path implementations (API and DOM)
+    # ------------------------------------------------------------------
+
+    def _parse_description_fields(self, description: str) -> dict:
+        """Extract structured fields from the Feedback ticket description text."""
         issue = re.search(r"Description:\s*(.*?)\s*Copyright", description, re.DOTALL).group(1).strip()
         course = re.findall("Course:.*", description)[0].split(":  ")[1].upper().split(" ")[0].strip()
         version = re.findall("Version:.*", description)[0].split(":  ")[1].strip()
@@ -996,35 +1032,75 @@ Instructions:
             section = ""
         title = re.findall("Section Title:.*", description)[0].split(":  ")[1]
         rhnid = re.findall("User Name:.*", description)[0].split(":  ")[1]
+        return {
+            "issue": issue,
+            "course": course,
+            "version": version,
+            "url": url,
+            "chapter": chapter,
+            "section": section,
+            "title": title,
+            "rhnid": rhnid,
+        }
+
+    def _get_snow_info_via_api(self, snow_id: str) -> dict:
+        """Fetch ticket info using the REST API fast-path (ADR-0001)."""
+        record = self._snow_api.get_ticket(snow_id)
+        description = record.get("description", "")
+        full_name = record.get("contact_source", "")
+        sys_id = record.get("sys_id", "")
+
+        fields = self._parse_description_fields(description)
+
+        raw_updates = self._snow_api.get_journal_entries(sys_id)
+        customer_updates = self._filter_and_clean_updates(raw_updates)
+
+        return {
+            "snow_id": snow_id,
+            "full_name": full_name,
+            "Description": fields["issue"],
+            "Course": fields["course"],
+            "Version": fields["version"],
+            "URL": fields["url"],
+            "Chapter": fields["chapter"],
+            "Section": fields["section"],
+            "Title": fields["title"],
+            "RHNID": fields["rhnid"],
+            "customer_updates": customer_updates,
+            "customer_updates_summary": "",
+        }
+
+    def _get_snow_info_via_dom(self, snow_id: str) -> dict:
+        """Fetch ticket info using the existing Selenium DOM-scraping path."""
+        self.snow_handler.navigate_to_ticket(snow_id)
+
+        description = self.driver.find_element(
+            By.XPATH, '//*[@id="x_redha_rht_task.description"]'
+        ).get_attribute("value")
+        full_name = self.driver.find_element(
+            By.XPATH, '//*[@id="x_redha_rht_task.contact_source"]'
+        ).get_attribute("value")
+
+        fields = self._parse_description_fields(description)
 
         raw_updates = self.snow_handler.get_customer_updates()
         customer_updates = self._filter_and_clean_updates(raw_updates)
 
         self.driver.refresh()
-        info = {
+        return {
             "snow_id": snow_id,
             "full_name": full_name,
-            "Description": issue,
-            "Course": course,
-            "Version": version,
-            "URL": url,
-            "Chapter": chapter,
-            "Section": section,
-            "Title": title,
-            "RHNID": rhnid,
+            "Description": fields["issue"],
+            "Course": fields["course"],
+            "Version": fields["version"],
+            "URL": fields["url"],
+            "Chapter": fields["chapter"],
+            "Section": fields["section"],
+            "Title": fields["title"],
+            "RHNID": fields["rhnid"],
             "customer_updates": customer_updates,
             "customer_updates_summary": "",
         }
-
-        if customer_updates:
-            self.logger("Summarizing customer follow-up messages")
-            info["customer_updates_summary"] = self._summarize_customer_updates(info)
-            logging.getLogger(__name__).info(
-                f"Customer updates summary: {info['customer_updates_summary']}"
-            )
-
-        logging.getLogger(__name__).info(f"ServiceNow ticket info: {json.dumps({k: v for k, v in info.items() if k != 'customer_updates'}, indent=2)}")
-        return info
 
     def get_ticket_ids_from_queue(self) -> list:
         """Get list of ticket IDs from the current queue view."""
@@ -1500,6 +1576,28 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
     # --------------------------
     # High-level helpers
     # --------------------------
+    def _navigate_to_course_page(self, course_id: str, chapter_section: str, environment: str = "rol"):
+        """
+        Fast course navigation for the snowai per-ticket flow.
+
+        Bypasses ``go_to_url()`` (2 s sleep) and ``wait_for_site_to_be_ready()``
+        (5-15 s) because ``prelogin_all()`` already confirmed the ROL session.
+        Uses ``driver.get()`` directly and waits for the course content wrapper,
+        which is the correct readiness signal for this path.
+
+        ``go_to_course()``, ``go_to_url()``, and ``wait_for_site_to_be_ready()``
+        remain unchanged for QA and standalone lab callers.
+        """
+        base_url = self.config.get_lab_base_url(environment)
+        if not base_url:
+            raise ValueError(f"Base URL for environment '{environment}' not configured.")
+        self.driver.get(f"{base_url}{course_id}/pages/{chapter_section}")
+        WebDriverWait(self.driver, 30).until(
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, ".course__content-wrapper")
+            )
+        )
+
     def start_lab_for_course(self, course_id: str, chapter_section: str = "pr01", environment: str = "rol"):
         self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
         primary_status, secondary_status = self.lab_mgr.check_lab_status()
@@ -1528,6 +1626,8 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
     def prelogin_all(self, environment: str = "rol"):
         # 1) ServiceNow queue (base window)
         self.driver.get(self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL)
+        # Pre-set the TrustArc consent cookie now that we have a redhat.com domain context.
+        self.lab_mgr.selenium_driver._preset_trustarc_cookie()
         try:
             WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[@id="username"]')))
             self.login_snow()
@@ -1604,12 +1704,11 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
     def open_jira_create_prefilled(self, snow_info: dict, analysis: dict, classification: dict):
         self.driver.get("https://redhat.atlassian.net/jira/software/c/projects/PTL/issues")
-        time.sleep(5)
         self.driver.execute_script("document.body.style.zoom = '0.8'")
 
         try:
             # Click Create button in the top nav bar
-            create_btn = WebDriverWait(self.driver, 10).until(
+            create_btn = WebDriverWait(self.driver, 15).until(
                 EC.element_to_be_clickable((By.XPATH,
                     '//button[text()="Create"] | '
                     '//button[contains(@data-testid, "create-button")]'
@@ -1848,9 +1947,8 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 self.driver.switch_to.new_window('window')
                 ticket_window = self.driver.current_window_handle
 
-                # Tab 1: ServiceNow ticket
-                self.driver.get(f"{self.SNOW_BASE_URL}/api/redha/surl?n={snow_id}")
-                time.sleep(3)
+                # Tab 1: ServiceNow ticket — open directly on the classic .do form
+                self.snow_handler.navigate_to_ticket(snow_id)
                 tab_snow = self.driver.current_window_handle
 
                 # Zoom in the ServiceNow ticket page
@@ -1898,21 +1996,19 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                     # For video issues, just navigate and check video player availability
                     if is_video_issue:
                         self.logger("Video issue detected - navigating to course page without starting lab")
-                        self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
-                        time.sleep(2)
+                        self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
                         video_player_available = self.lab_mgr.check_video_player_available()
                         analysis = self.analyze_video_issue(full_description, video_player_available, snow_info)
-                    elif is_content_issue:                        
+                    elif is_content_issue:
                         # Navigate to the course page
-                        self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
-                        time.sleep(2)
-                        
+                        self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
+
                         # Fetch guide text for "content guide" issue analysis
                         try:
                             self.lab_mgr.select_lab_environment_tab("course")
                         except Exception:
                             pass
-                        
+
                         guide_text = ""
                         try:
                             guide_text = self.fetch_guide_text_from_website()
@@ -1935,13 +2031,12 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                             logging.getLogger(__name__).warning(f"Failed to start lab: {e}")
                     else:
                         self.logger("No lab verification needed - navigating to course page only")
-                        self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                        self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
                         self.lab_mgr.select_lab_environment_tab("course")
                         if is_video_issue:
                             self.lab_mgr.toggle_video_player(state=True)
                         else:
                             self.lab_mgr.toggle_video_player(state=False)
-                        time.sleep(2)
 
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"ROL tab setup failed for {snow_id}: {e}\n{traceback.format_exc()}")

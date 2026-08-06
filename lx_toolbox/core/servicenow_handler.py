@@ -161,12 +161,21 @@ class ServiceNowHandler:
         parameter, bypassing the workspace redirect entirely.
         """
         self.driver.get(f"{self.base_url}/x_redha_rht_task.do?sysparm_query=number={ticket_id}")
-        time.sleep(5)
-    
+        WebDriverWait(self.driver, 30).until(
+            EC.presence_of_element_located(
+                (By.XPATH, '//*[@id="x_redha_rht_task.description"]')
+            )
+        )
+
     def navigate_to_feedback_queue(self):
         """Navigate to the default feedback queue."""
         self.driver.get(self.feedback_queue_url)
-        time.sleep(3)
+        WebDriverWait(self.driver, 30).until(
+            lambda driver: (
+                driver.find_elements(By.CSS_SELECTOR, "a.linked.formlink")
+                or "No records to display" in driver.find_element(By.TAG_NAME, "body").text
+            )
+        )
     
     def get_ticket_ids_from_queue(self) -> list:
         """

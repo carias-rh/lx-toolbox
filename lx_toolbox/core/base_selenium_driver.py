@@ -49,7 +49,39 @@ class BaseSeleniumDriver:
         self.driver.get(url)
         time.sleep(2)
 
-    def accept_trustarc_cookies(self, timeout: int = 5):
+    def _preset_trustarc_cookie(self):
+        """
+        Inject the TrustArc opt-in cookie so the consent banner is never shown.
+
+        Must be called after at least one ``driver.get()`` to a redhat.com
+        domain so the browser has a domain to attach the cookie to.
+        """
+        try:
+            self.driver.add_cookie({
+                "name": "notice_behavior",
+                "value": "expressed,eu",
+                "domain": ".redhat.com",
+                "path": "/",
+                "secure": True,
+            })
+            self.driver.add_cookie({
+                "name": "notice_gdpr_prefs",
+                "value": "0|1|2:",
+                "domain": ".redhat.com",
+                "path": "/",
+                "secure": True,
+            })
+            self.driver.add_cookie({
+                "name": "cmapi_cookie_privacy",
+                "value": "permit 1 2 3",
+                "domain": ".redhat.com",
+                "path": "/",
+                "secure": True,
+            })
+        except Exception:
+            pass
+
+    def accept_trustarc_cookies(self, timeout: int = 2):
         """Handles TrustArc Cookie Consent Manager if present."""
         wait = WebDriverWait(self.driver, timeout)
         agree_xpath = "//a[@class='call'][normalize-space(text())='Agree and proceed with standard settings']"
