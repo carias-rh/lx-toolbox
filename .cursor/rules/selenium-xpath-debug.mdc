@@ -1,0 +1,33 @@
+---
+description: Auto-use MCP Selenium when debugging XPath, CSS selectors, or DOM elements in Selenium automation code
+globs: lx_toolbox/core/**/*.py
+alwaysApply: false
+---
+
+# Selenium XPath Debugging
+
+When the user asks to inspect, debug, verify, or fix an XPath or CSS selector — or reports an element not being found — **always use the `user-selenium` MCP tools** to interact with the live browser. Do not guess or rely solely on static code analysis.
+
+## Default Workflow
+
+1. `start_browser` if no session is active (check with `diagnostics` first).
+2. `navigate` to the relevant URL (course page, lab environment tab, etc.).
+3. `execute_script` to run JS queries (`document.querySelector`, `document.evaluate`, etc.) and inspect real DOM structure.
+4. `take_screenshot` to visually confirm what the page looks like before and after.
+5. Use findings to update the XPath/selector in the Python source.
+
+## Key MCP Tools
+
+| Tool | When to use |
+|---|---|
+| `execute_script` | Query DOM, inspect attributes, simulate clicks via JS |
+| `take_screenshot` | Visual verification of page state |
+| `interact` | Click elements, fill inputs |
+| `navigate` | Go to a specific URL |
+| `diagnostics` | Check if a browser session already exists |
+
+## Notes
+
+- Factory environment (`rol-factory.ole.redhat.com`) requires GitHub 2FA — the user must complete login manually if not already authenticated.
+- ROL environment (`rol.redhat.com`) authenticates via Red Hat SSO / VPN automatically.
+- After login, always scroll to the relevant section before inspecting elements.

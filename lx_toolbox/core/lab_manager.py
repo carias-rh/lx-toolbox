@@ -1,10 +1,10 @@
 import time
-import os
 import re
 import logging
 from pathlib import Path
 from typing import Optional
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 # Assuming WebDriver exceptions like TimeoutException might be caught
@@ -21,9 +21,6 @@ class QAQuitException(Exception):
     pass
 
 class LabManager:
-    # External service verification field IDs (from third-party login pages)
-    _GITHUB_VERIFY_FIELD = "app_totp"
-    
     # Interface type constants
     INTERFACE_OLD = "old"
     INTERFACE_NEW = "new"  # PF5 interface
@@ -67,13 +64,13 @@ class LabManager:
                 '//button[contains(@aria-label, "Table of Contents") or contains(@aria-label, "Toggle Table of Contents")]'
             )))
             self._interface_type = self.INTERFACE_NEW
-            self.logger(f"Detected interface type: NEW (PF5)")
+            logging.getLogger(__name__).debug("Detected interface type: NEW (PF5)")
         except:
             # Check for old interface elements
             try:
                 self.wait.until(EC.presence_of_element_located((By.XPATH, '//div[@class="progress-map"]')))
                 self._interface_type = self.INTERFACE_OLD
-                self.logger(f"Detected interface type: OLD")
+                logging.getLogger(__name__).debug("Detected interface type: OLD")
             except:
                 # Default to new if can't determine
                 self._interface_type = self.INTERFACE_NEW
@@ -107,37 +104,19 @@ class LabManager:
 
     def _get_credentials(self, environment: str):
         """
-        Helper to fetch credentials for a given environment.
-        
+        Helper to fetch the username for a given environment.
+
         Returns:
-            Tuple of (username, password, auth_helper_cmd)
+            The configured username string, or None if not set.
         """
         if environment == "rol":
-            username = self.config.get("Credentials", "RH_USERNAME")
-            password = self.config.get("Credentials", "RH_PASSWORD")
-            auth_helper = self.config.get("Credentials", "RH_AUTH_HELPER")
-            return username, password, auth_helper
+            return self.config.get("Credentials", "RH_USERNAME")
         elif environment == "factory":
-            username = self.config.get("Credentials", "GITHUB_USERNAME")
-            password = self.config.get("Credentials", "GITHUB_PASSWORD")
-            auth_helper = self.config.get("Credentials", "GITHUB_AUTH_HELPER")
-            return username, password, auth_helper
+            return self.config.get("Credentials", "GITHUB_USERNAME")
         elif environment == "china":
-            username = self.config.get("Credentials", "CHINA_USERNAME")
-            password = self.config.get("Credentials", "CHINA_PASSWORD")
-            return username, password, None
+            return self.config.get("Credentials", "CHINA_USERNAME")
         else:
             raise ValueError(f"Unknown environment for credentials: {environment}")
-
-    def _get_auth_token(self, auth_helper: str) -> str:
-        """Execute auth helper command and return the token."""
-        if not auth_helper:
-            return ""
-        try:
-            return os.popen(auth_helper).read().replace('\n', '')
-        except Exception as e:
-            logging.getLogger(__name__).debug(f"Auth helper returned empty: {e}")
-            return ""
 
     def login(self, environment: str):
         """
@@ -156,32 +135,27 @@ class LabManager:
             raise ValueError(f"Base URL for environment '{environment}' not configured.")
 
         # Navigate to a generic course page to trigger login
-        self.selenium_driver.go_to_url(base_url + "rh124-9.3")
+        self.selenium_driver.go_to_url(base_url + "rh124-10.0")
 
-        username, password, auth_helper = self._get_credentials(environment)
+        username = self._get_credentials(environment)
 
         try:
             if environment == "rol":
-                self.selenium_driver.accept_trustarc_cookies(timeout=5)
-                
+                # ROL redirects through SSO; wait for all redirections to settle
+                # before interacting with the page.
+                time.sleep(2)
+                self.selenium_driver.accept_trustarc_cookies(timeout=3)
+                time.sleep(2)
+
                 if username:
                     self.wait.until(EC.element_to_be_clickable(
                         (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
                     )).send_keys(f"{username}@redhat.com")
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
-                    
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
-                    
-                    if password:
-                        # Build full credential string
-                        auth_token = self._get_auth_token(auth_helper)
-                        full_credential = str(password).replace('\n', '') + str(auth_token)
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(full_credential)
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
-                    else:
-                        self._prompt_for_manual_login(
-                            "Username autofilled. Please enter your password and complete authentication."
-                        )
+                    self._prompt_for_manual_login(
+                        "Username autofilled. Please enter your password and complete authentication."
+                    )
                 else:
                     self._prompt_for_manual_login(
                         "Credentials not configured. Please complete the login manually."
@@ -190,42 +164,12 @@ class LabManager:
             elif environment == "factory":
                 self.selenium_driver.accept_trustarc_cookies(timeout=1)
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click()
-                
+
                 if username:
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_field"]'))).send_keys(username)
-                    
-                    if password:
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password)
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//input[@type="submit"]'))).click()
-                        
-                        # Handle additional verification if needed
-                        if auth_helper:
-                            try:
-                                verify_field = self.wait.until(EC.element_to_be_clickable(
-                                    (By.XPATH, f'//*[@id="{self._GITHUB_VERIFY_FIELD}"]')
-                                ))
-                                verify_field.click()
-                                auth_token = self._get_auth_token(auth_helper)
-                                if auth_token:
-                                    verify_field.send_keys(auth_token)
-                            except TimeoutException:
-                                pass
-                        else:
-                            try:
-                                WebDriverWait(self.driver, 3).until(
-                                    EC.presence_of_element_located(
-                                        (By.XPATH, f'//*[@id="{self._GITHUB_VERIFY_FIELD}"]')
-                                    )
-                                )
-                                self._prompt_for_manual_login(
-                                    "Additional verification required. Please complete it in the browser."
-                                )
-                            except TimeoutException:
-                                pass
-                    else:
-                        self._prompt_for_manual_login(
-                            "Username autofilled. Please enter your password and complete authentication."
-                        )
+                    self._prompt_for_manual_login(
+                        "Username autofilled. Please enter your password and complete authentication."
+                    )
                 else:
                     self._prompt_for_manual_login(
                         "Credentials not configured. Please complete the login manually."
@@ -235,17 +179,12 @@ class LabManager:
                 china_login_url = self.config.get_lab_base_url("china").replace("courses/", "login/local")
                 self.selenium_driver.go_to_url(china_login_url)
                 self.selenium_driver.accept_trustarc_cookies()
-                
+
                 if username:
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
-                    
-                    if password:
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password)
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_button"]'))).click()
-                    else:
-                        self._prompt_for_manual_login(
-                            "Username autofilled. Please enter your password and complete authentication."
-                        )
+                    self._prompt_for_manual_login(
+                        "Username autofilled. Please enter your password and complete authentication."
+                    )
                 else:
                     self._prompt_for_manual_login(
                         "Credentials not configured. Please complete the login manually."
@@ -253,9 +192,10 @@ class LabManager:
             
             self.wait_for_site_to_be_ready(environment)
         except Exception as e:
+            self.wait_for_site_to_be_ready(environment, timeout=10)
             pass
 
-    def wait_for_site_to_be_ready(self, environment: str, timeout: int = 10):
+    def wait_for_site_to_be_ready(self, environment: str, timeout: int = 5):
         """
         Wait for the site to be ready after login or navigation.
         Checks for environment-specific elements that indicate the page is loaded.
@@ -348,7 +288,7 @@ class LabManager:
                 self.logger("Enabled video player")
             elif not state and is_pressed:
                 video_btn.click()
-                self.logger("Disabled video player")
+                logging.getLogger(__name__).debug("Disabled video player")
         except Exception:
             pass
 
@@ -413,13 +353,32 @@ class LabManager:
         except Exception:
             pass
 
+    def dismiss_pendo_overlay(self):
+        """Dismiss any active Pendo guide/tour overlay that may intercept clicks."""
+        try:
+            # Try the Pendo JS API first (cleanest — stops all active guides)
+            self.driver.execute_script(
+                "if (window.pendo && typeof window.pendo.stopGuides === 'function') { window.pendo.stopGuides(); }"
+            )
+        except Exception:
+            pass
+        try:
+            # Remove any lingering backdrop/overlay elements from the DOM
+            self.driver.execute_script(
+                "document.querySelectorAll('._pendo-backdrop, [id^=\"pendo-backdrop\"], [id^=\"pendo-guide\"], ._pendo-step-overlay-top').forEach(el => el.remove());"
+            )
+            logging.getLogger(__name__).debug("Dismissed Pendo overlay")
+        except Exception:
+            pass
+
     def select_lab_environment_tab(self, tab_name: str):
         """
         Selects a tab like 'index', 'course', or 'lab'.
         Uses detected interface type to select the appropriate method.
         """
-        # Dismiss any active alerts on the page
+        # Dismiss any active alerts or Pendo overlays on the page
         self.dismiss_active_alerts()
+        self.dismiss_pendo_overlay()
 
         # Map tab names to both old and new interface selectors
         tab_selectors = {
@@ -818,54 +777,107 @@ class LabManager:
         self.logger(f"{description} for course {course_id} ({times} times)")
         self.select_lab_environment_tab("lab-environment")
         try:
-
             self.driver.execute_script("document.body.style.zoom = '0.70'")
-            # Wait until lab is in a state where adjustments can be made (e.g., running)
-            # The original script checked for "CREATING" or "STARTING" states before clicking.
-            # This implies we should wait until those are done.
-            WebDriverWait(self.driver, 300).until(EC.presence_of_element_located((By.XPATH, '//button[text()="Open Console"]')))
-            
-            # Scroll to bottom of the lab environment tab to ensure all controls/buttons are visible
+
+            # Wait until lab console button is visible (lab is running)
+            WebDriverWait(self.driver, 300).until(
+                EC.presence_of_element_located((By.XPATH, '//button[text()="Open Console"] | //a[text()="Open Console"]'))
+            )
+
+            # Scroll to bottom so auto-stop/auto-destroy controls are visible
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(0.3)
-            
-            button_xpath = f'//*[@id="tab-course-lab-environment"]/div/table/tr[{button_xpath_part}]/td[2]/button'
-            WebDriverWait(self.driver, 3).until(EC.visibility_of_element_located((By.XPATH, button_xpath)))
-            adj_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, button_xpath)))
-            for _ in range(times):
-                adj_button.click()
-                time.sleep(0.1) # Small pause between clicks
+
+            interface = self._detect_interface_type()
+
+            if interface == self.INTERFACE_NEW:
+                # New PF5 interface: buttons identified by data-analytics-id
+                # button_xpath_part "1" = auto-stop, "2" = auto-destroy
+                new_button_map = {
+                    "1": '//button[@data-analytics-id="auto-stop-vt-dash-lp" or @title="Add One Hour"]',
+                    "2": '//button[@data-analytics-id="auto-destroy-vt-dash-lp" or @title="Add One Day"]',
+                }
+                button_xpath = new_button_map.get(button_xpath_part)
+                if not button_xpath:
+                    logging.getLogger(__name__).warning(
+                        f"Unknown button_xpath_part '{button_xpath_part}' for new interface"
+                    )
+                    return
+                adj_button = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, button_xpath))
+                )
+                for _ in range(times):
+                    # Re-locate to avoid stale element; stop if button becomes disabled
+                    try:
+                        btn = self.driver.find_element(By.XPATH, button_xpath)
+                        if btn.get_attribute("aria-disabled") == "true":
+                            logging.getLogger(__name__).debug(f"{description}: button is disabled (max reached), stopping early")
+                            break
+                        self.driver.execute_script("arguments[0].click();", btn)
+                        time.sleep(0.2)
+                    except Exception:
+                        break
+            else:
+                # Old interface: table-based layout under #tab-course-lab-environment
+                button_xpath = f'//*[@id="tab-course-lab-environment"]/div/table/tr[{button_xpath_part}]/td[2]/button'
+                WebDriverWait(self.driver, 3).until(EC.visibility_of_element_located((By.XPATH, button_xpath)))
+                adj_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, button_xpath)))
+                for _ in range(times):
+                    adj_button.click()
+                    time.sleep(0.1)
+
         except TimeoutException:
-            #logging.getLogger(__name__).error(f"Timeout finding {description} button for {course_id}. Lab might not be ready or button not found.")
-            pass
+            logging.getLogger(__name__).warning(f"Timeout finding {description} button for {course_id}")
         except Exception as e:
-            pass
+            logging.getLogger(__name__).warning(f"Error clicking {description} button for {course_id}: {e}")
 
     def get_autostop_hours_remaining(self) -> int:
         """
         Get the number of hours remaining before auto-stop.
-        Parses text like "in an hour", "in 2 hours", "in 9 hours".
-        Returns hours as int, or 0 if unable to determine.
+        Parses text like "Auto-stop in 39 minutes", "in an hour",
+        "in 2 hours", or "in 1 hour 30 minutes".
+        Returns the remaining time rounded up to the next hour as int,
+        or 0 if unable to determine.
         """
         try:
             self.select_lab_environment_tab("lab-environment")
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(0.3)
-            
-            # Get the time element text from the auto-stop row (tr[1]/td[1])
-            time_element = WebDriverWait(self.driver, 30).until(
-                EC.presence_of_element_located((By.XPATH, '//table/tr[1]/td[1]/time'))
-            )
-            text = time_element.text.lower()  # e.g., "in an hour", "in 2 hours"
-            
-            if "an hour" in text:
-                return 1
-            
-            # Extract number from text like "in 2 hours"
-            match = re.search(r'(\d+)', text)
-            if match:
-                hours = int(match.group(1))
-                return hours
+
+            interface = self._detect_interface_type()
+            text = ""
+
+            if interface == self.INTERFACE_NEW:
+                # New PF5 interface: auto-stop text is in .autostop-timers-container
+                # e.g. <span>Auto-stop <span>in 1 hour</span>.</span>
+                # or   <span>Auto-stop <span>in 39 minutes</span>.</span>
+                time_cell = WebDriverWait(self.driver, 30).until(
+                    EC.presence_of_element_located((By.XPATH,
+                        '//div[contains(@class,"autostop-timers-container")][.//button[@title="Add One Hour" or @data-analytics-id="auto-stop-vt-dash-lp"]]/span'
+                    ))
+                )
+                text = time_cell.text.lower().strip()
+            else:
+                # Old interface: auto-stop text is in the first table cell
+                time_cell = WebDriverWait(self.driver, 30).until(
+                    EC.presence_of_element_located((By.XPATH, '//table/tr[1]/td[1]'))
+                )
+                text = time_cell.text.lower().strip()
+
+            logging.getLogger(__name__).debug(f"Auto-stop text: '{text}'")
+
+            hours = 0
+            hour_match = re.search(r'\b(an|\d+)\s+hours?\b', text)
+            if hour_match:
+                hours = 1 if hour_match.group(1) == "an" else int(hour_match.group(1))
+
+            minutes = 0
+            minute_match = re.search(r'\b(a|\d+)\s+minutes?\b', text)
+            if minute_match:
+                minutes = 1 if minute_match.group(1) == "a" else int(minute_match.group(1))
+
+            if hours or minutes:
+                return hours + (1 if minutes > 0 else 0)
         except Exception as e:
             logging.getLogger(__name__).warning(f"Could not determine auto-stop time: {e}")
         return 0
@@ -900,18 +912,18 @@ class LabManager:
             return
 
         try:
-            self.driver.refresh() # Refresh current page
-            self.wait_for_site_to_be_ready(environment) # Ensure site is loaded
+            #self.driver.refresh() # Refresh current page
+            #self.wait_for_site_to_be_ready(environment) # Ensure site is loaded
 
             # Click on Switch user (text might vary by platform/language)
             # Using a more general XPath that looks for the text "Switch user" within a button or link
             switch_user_button = self.wait.until(EC.element_to_be_clickable(
-                (By.XPATH, '//*[(self::button or self::a) and normalize-space(.)="Switch user"] | //*[text()="Switch user"]')
+                (By.XPATH, '//*[text()="Switch user"]')
             ))
             switch_user_button.click()
             
             # Introduce username
-            username_field = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="formInlineUsername"]')))
+            username_field = self.wait.until(EC.element_to_be_clickable((By.XPATH, '//input[@id="formInlineUsername"]')))
             username_field.send_keys(impersonate_username)
             
             # Click on switch button (text might vary)
@@ -1223,7 +1235,7 @@ class LabManager:
         """
         self.logger("Tunning the lab environment with Ricardo DaCosta's tools!")
         
-        time.sleep(10) # Wait for the workstation to be ready
+        time.sleep(60) # Wait for the workstation to be ready
         self._login_as_student()
         
         self._open_terminal()
@@ -1257,8 +1269,8 @@ class LabManager:
 
     def introduce_command_to_console(self, command: str, auto_enter: bool = True):
         """
-        Introduces a command to the console using the text dialog.
-        
+        Introduces a command to the console using the Guacamole "Send Text to Client" dialog.
+
         Args:
             command: The command to send
             auto_enter: Whether to press Enter after sending the command
@@ -1266,56 +1278,93 @@ class LabManager:
         if not command:
             return
 
-        try:
-            # Open text dialog
+        _log = logging.getLogger(__name__)
+        short_cmd = command[:60] + ("..." if len(command) > 60 else "")
 
-            send_text_dialog_button = self.wait.until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="showSendTextDialog"]'))
+        def _close_dialog_if_open():
+            """Best-effort dialog cleanup so the UI is never left in a broken state."""
+            try:
+                close_btn = self.driver.find_element(
+                    By.XPATH,
+                    '//*[@id="sendTextDialog"]//button[contains(@class,"close") or contains(text(),"Close")]'
+                    ' | //button[@data-dismiss="modal"]'
+                )
+                self.driver.execute_script("arguments[0].click();", close_btn)
+            except Exception:
+                pass
+
+        # --- Step 1: Open the "Send Text to Client" dialog ---
+        try:
+            send_text_dialog_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="showSendTextDialog"]'))
             )
             send_text_dialog_button.click()
+        except TimeoutException:
+            _log.error(f"[console] Step 1 FAILED: 'Send Text' button not found within 10s (cmd: {short_cmd})")
+            return
+        except Exception as e:
+            _log.error(f"[console] Step 1 FAILED: unexpected error clicking dialog button: {e} (cmd: {short_cmd})")
+            return
 
-            # Paste command into text box
-            text_input_area = self.wait.until(
+        # --- Step 2: Wait for modal and find the textarea ---
+        try:
+            # Give the Bootstrap modal animation time to complete
+            WebDriverWait(self.driver, 5).until(
+                EC.visibility_of_element_located((By.XPATH, '//*[@id="sendTextInput"]'))
+            )
+            text_input_area = WebDriverWait(self.driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, '//*[@id="sendTextInput"]'))
             )
-            text_input_area.send_keys(command)
+        except TimeoutException:
+            _log.error(f"[console] Step 2 FAILED: textarea #sendTextInput not visible/clickable after dialog open (cmd: {short_cmd})")
+            _close_dialog_if_open()
+            return
+        except Exception as e:
+            _log.error(f"[console] Step 2 FAILED: unexpected error finding textarea: {e} (cmd: {short_cmd})")
+            _close_dialog_if_open()
+            return
 
-            # Click Send button to send the command
-            send_text_button = self.wait.until(
+        # --- Step 3: Type the command ---
+        try:
+            text_input_area.clear()
+            text_input_area.send_keys(command)
+        except Exception as e:
+            _log.error(f"[console] Step 3 FAILED: could not type into textarea: {e} (cmd: {short_cmd})")
+            _close_dialog_if_open()
+            return
+
+        # --- Step 4: Click Send ---
+        try:
+            send_text_button = WebDriverWait(self.driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, '//*[@id="sendTextButton"]'))
             )
             send_text_button.click()
-            
-            # Wait proportional to command length
-            self._wait_for_command_to_paste(command)
-
-            # Click Enter on virtual keyboard
-            if auto_enter:
-                # Wait for modal backdrop to disappear before clicking Enter
-                try:
-                    WebDriverWait(self.driver, 5).until(
-                        EC.invisibility_of_element_located((By.CSS_SELECTOR, ".modal-backdrop"))
-                    )
-                except TimeoutException:
-                    # Modal may have already closed, continue
-                    pass
-
-                # Using the specific XPath from the original implementation
-                enter_key_xpath = '/html/body/div[9]/div/div/div[3]/div/div[1]/div[3]/div[13]/div/div'
-                try:
-                    enter_key = WebDriverWait(self.driver, 10).until(
-                        EC.element_to_be_clickable((By.XPATH, enter_key_xpath))
-                    )
-                    enter_key.click()
-                except TimeoutException:
-                    # Fallback to generic Enter key search
-                    try:
-                        self._click_virtual_keyboard_key("Enter")
-                    except Exception as e_enter:
-                        self.logger(f"Could not press Enter key: {e_enter}")
-
+        except TimeoutException:
+            _log.error(f"[console] Step 4 FAILED: 'Send' button #sendTextButton not clickable (cmd: {short_cmd})")
+            _close_dialog_if_open()
+            return
         except Exception as e:
-            self.logger(f"Error introducing command '{command[:50]}...': {e}")
+            _log.error(f"[console] Step 4 FAILED: unexpected error clicking Send: {e} (cmd: {short_cmd})")
+            _close_dialog_if_open()
+            return
+
+        # Wait proportional to command length for VNC session to receive the text
+        self._wait_for_command_to_paste(command)
+
+        # --- Step 5: Wait for modal backdrop to close ---
+        try:
+            WebDriverWait(self.driver, 5).until(
+                EC.invisibility_of_element_located((By.CSS_SELECTOR, ".modal-backdrop"))
+            )
+        except TimeoutException:
+            _log.debug("[console] Step 5: modal backdrop still present after Send — continuing anyway")
+
+        # --- Step 6: Press Enter on the virtual keyboard ---
+        if auto_enter:
+            try:
+                self._click_virtual_keyboard_key("Enter")
+            except Exception as e_enter:
+                _log.warning(f"[console] Step 6: could not press Enter key: {e_enter} (cmd: {short_cmd})")
 
     def click_on_show_solution_buttons(self):
         """Click all 'Show Solution' buttons on the current page, starting from the bottom."""
@@ -1556,9 +1605,22 @@ class LabManager:
         sections = []
         
         try:
-            # Wait for any backdrop/modal overlay to disappear
+            # Dismiss any survey/feedback banners (Bootstrap alert-dismissable)
             try:
-                WebDriverWait(self.driver, 15).until(
+                survey_close = self.driver.find_element(
+                    By.XPATH,
+                    '//div[@id="survey-dialog"]//button[contains(@class,"close")] | '
+                    '//*[contains(@class,"alert-dismissable")]//button[contains(@class,"close")]'
+                )
+                self.driver.execute_script("arguments[0].click();", survey_close)
+                time.sleep(0.5)
+                logging.getLogger(__name__).debug("Dismissed survey/feedback banner")
+            except:
+                pass
+
+            # Wait for any PF5 backdrop/modal overlay to disappear
+            try:
+                WebDriverWait(self.driver, 10).until(
                     EC.invisibility_of_element_located((By.XPATH, '//div[contains(@class, "pf-v5-c-backdrop")]'))
                 )
             except TimeoutException:
@@ -1568,115 +1630,130 @@ class LabManager:
                     time.sleep(0.5)
                 except:
                     pass
-            
-            # Click on "Toggle Table of Contents panel" button to open TOC
-            toc_button = self.wait.until(EC.element_to_be_clickable(
+
+            # Find and click "Toggle Table of Contents panel" button to open TOC
+            toc_button = WebDriverWait(self.driver, 15).until(EC.element_to_be_clickable(
                 (By.XPATH, '//button[contains(@aria-label, "Table of Contents") or contains(@aria-label, "Toggle Table of Contents")]')
             ))
-            
-            # Check if TOC is already open
-            try:
-                toc_region = self.driver.find_element(By.XPATH, '//div[contains(@class, "ToC")] | //div[@aria-label="Table of contents"]')
-                if not toc_region.is_displayed():
-                    self.driver.execute_script("arguments[0].click();", toc_button)
-                    time.sleep(1)
-            except:
+
+            # Check if TOC is already open by looking for a TOC link in the DOM
+            toc_already_open = bool(self.driver.find_elements(
+                By.XPATH, '//a[@data-analytics-id="toc-link-ole-lp"]'
+            ))
+            if not toc_already_open:
                 self.driver.execute_script("arguments[0].click();", toc_button)
-                time.sleep(1)
-            
-            # Click on "Expand all" toggle switch to show all chapters
+                # Wait until TOC links are actually in the DOM (up to 5 seconds)
+                try:
+                    WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, '//a[@data-analytics-id="toc-link-ole-lp"]'))
+                    )
+                except TimeoutException:
+                    time.sleep(2)
+
+            # Helper: wait until no accordion chapter is still collapsed (max 10s)
+            def _wait_for_all_expanded(timeout: int = 10):
+                collapsed_xpath = '//button[contains(@class,"pf-v5-c-accordion__toggle") and @aria-expanded="false"]'
+                try:
+                    WebDriverWait(self.driver, timeout).until(
+                        lambda d: len(d.find_elements(By.XPATH, collapsed_xpath)) == 0
+                    )
+                except TimeoutException:
+                    remaining = len(self.driver.find_elements(By.XPATH, collapsed_xpath))
+                    logging.getLogger(__name__).debug(f"  {remaining} chapters still collapsed after {timeout}s wait")
+
+            # Click the "Expand all" checkbox to expand all chapters at once
             try:
-                expand_all_selectors = [
-                    '//label[contains(@class, "pf-v5-c-switch") and .//span[contains(text(), "Expand all")]]',
-                    '//span[contains(@class, "pf-v5-c-switch__label") and contains(text(), "Expand all")]/..',
-                    '//input[following-sibling::*[contains(text(), "Expand all")]]',
-                    '//button[contains(text(), "Expand all")]',
-                    '//*[contains(text(), "Expand all")]/ancestor::label[contains(@class, "switch")]//input',
-                ]
-                
-                expand_all = None
-                for selector in expand_all_selectors:
-                    try:
-                        expand_all = self.driver.find_element(By.XPATH, selector)
-                        if expand_all.is_displayed():
-                            break
-                    except:
-                        continue
-                
-                if expand_all and expand_all.is_displayed():
-                    is_checked = expand_all.get_attribute('aria-checked') == 'true' or expand_all.get_attribute('checked')
-                    if not is_checked:
-                        self.driver.execute_script("arguments[0].click();", expand_all)
-                        time.sleep(1)
-                        self.logger("  Clicked 'Expand all' toggle")
+                # Target the INPUT directly via its aria-label (most reliable)
+                expand_input = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, '//input[@aria-label="Expand all chapters" or @aria-label="Expand all"]')
+                    )
+                )
+                already_checked = self.driver.execute_script("return arguments[0].checked;", expand_input)
+                if not already_checked:
+                    # Click the label associated with the (visually hidden) input
+                    label = self.driver.find_element(By.XPATH, f'//label[@for="{expand_input.get_attribute("id")}"]')
+                    self.driver.execute_script("arguments[0].click();", label)
+                    _wait_for_all_expanded()
+                    self.logger("  Clicked 'Expand all' toggle")
                 else:
-                    self.logger("  'Expand all' toggle not found, expanding chapters manually...")
+                    logging.getLogger(__name__).debug("'Expand all' toggle already checked")
             except Exception as e:
                 logging.getLogger(__name__).debug(f"Could not use 'Expand all' toggle: {e}")
-            
-            # Expand any collapsed chapter accordions
+                self.logger("  'Expand all' toggle not found, expanding chapters manually...")
+                # Fallback: expand each collapsed chapter accordion individually
+                try:
+                    collapsed_chapters = self.driver.find_elements(
+                        By.XPATH,
+                        '//button[contains(@class, "pf-v5-c-accordion__toggle") and @aria-expanded="false"]'
+                    )
+                    if collapsed_chapters:
+                        self.logger(f"  Expanding {len(collapsed_chapters)} collapsed chapters...")
+                        for btn in collapsed_chapters:
+                            try:
+                                self.driver.execute_script("arguments[0].click();", btn)
+                            except Exception:
+                                continue
+                        _wait_for_all_expanded()
+                except Exception as ex:
+                    logging.getLogger(__name__).debug(f"Error expanding chapters: {ex}")
+
+            # Confirm TOC links are present after expansion
             try:
-                collapsed_chapters = self.driver.find_elements(
-                    By.XPATH,
-                    '//button[contains(@class, "pf-v5-c-accordion__toggle") and @aria-expanded="false"]'
+                WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, '//a[@data-analytics-id="toc-link-ole-lp"]'))
                 )
-                
-                if collapsed_chapters:
-                    self.logger(f"  Expanding {len(collapsed_chapters)} collapsed chapters...")
-                    for btn in collapsed_chapters:
-                        try:
-                            self.driver.execute_script("arguments[0].click();", btn)
-                            time.sleep(0.3)
-                        except:
-                            continue
-                    time.sleep(0.5)
-            except Exception as e:
-                logging.getLogger(__name__).debug(f"Error expanding chapters: {e}")
-            
-            # Get all section links from TOC
+            except TimeoutException:
+                logging.getLogger(__name__).debug("Timed out waiting for TOC links after expand")
+
+            # Collect all section links from TOC
             section_links = self.driver.find_elements(
                 By.XPATH,
                 '//a[contains(@href, "/pages/") and @data-analytics-id="toc-link-ole-lp"]'
             )
-            
-            # If no links found with specific data-analytics-id, try broader search
+
             if not section_links:
                 section_links = self.driver.find_elements(
                     By.XPATH,
                     '//div[contains(@class, "ToC")]//a[contains(@href, "/pages/")]'
                 )
-            
-            # If still no links, try even broader search
+
             if not section_links:
                 section_links = self.driver.find_elements(
                     By.XPATH,
                     '//a[contains(@href, "/pages/")]'
                 )
-            
+
+            logging.getLogger(__name__).debug(f"Found {len(section_links)} raw TOC links")
+
             # Process and filter sections based on section_type
             seen_sections = set()
             for link in section_links:
                 try:
                     url = link.get_attribute('href')
+
+                    # link.text is empty for hidden/collapsed elements; fall back to
+                    # textContent (always populated) and normalize internal whitespace.
                     title = link.text.strip()
-                    
+                    if not title:
+                        raw_tc = link.get_attribute('textContent') or ''
+                        title = ' '.join(raw_tc.split())
+
                     if not url or not title or '/pages/' not in url:
                         continue
-                    
-                    # Extract chapter_section from URL
+
+                    # Extract chapter_section from URL (e.g. ch01s04)
                     try:
                         chapter_section = str(re.findall(r"ch[0-9]*s[0-9]*", url)[0])
                     except (IndexError, TypeError):
                         continue
-                    
-                    # Skip duplicates
+
                     if chapter_section in seen_sections:
                         continue
-                    
-                    # Filter based on section_type
+
                     is_exercise = any(kw in title for kw in self.EXERCISE_KEYWORDS)
                     is_excluded_theory = any(kw in title for kw in self.EXCLUDED_THEORY_KEYWORDS)
-                    
+
                     include = False
                     if section_type == "exercises":
                         include = is_exercise
@@ -1684,7 +1761,7 @@ class LabManager:
                         include = not is_excluded_theory
                     elif section_type == "all":
                         include = True
-                    
+
                     if include:
                         seen_sections.add(chapter_section)
                         sections.append({
@@ -1692,11 +1769,17 @@ class LabManager:
                             'url': url,
                             'chapter_section': chapter_section
                         })
-                        print(f"{title} -> {chapter_section}")
-                        
-                except:
+                        logging.getLogger(__name__).debug(f"  {title} -> {chapter_section}")
+
+                except Exception:
                     continue
-            
+
+            if not sections:
+                logging.getLogger(__name__).warning(
+                    f"No sections matched section_type='{section_type}' from {len(section_links)} TOC links. "
+                    f"Exercise keywords: {self.EXERCISE_KEYWORDS}"
+                )
+
         except TimeoutException:
             self.logger(f"Timeout waiting for TOC in new interface")
         except Exception as e:
@@ -2371,64 +2454,88 @@ class LabManager:
         self.selenium_driver.go_to_url(catalog_url)
         time.sleep(2)
 
-    def filter_by_courses(self):
-        """Filter the catalog to show only courses."""
-        self.logger("Filtering catalog by 'Course' delivery format...")
+    def filter_by_format(self, delivery_format: str):
+        """
+        Filter the catalog to show only items of the given delivery format.
+        delivery_format should match the label text exactly, e.g. 'Course' or 'Lesson'.
+        """
+        self.logger(f"Filtering catalog by '{delivery_format}' delivery format...")
+        catalog_wait = WebDriverWait(self.driver, 20)
         try:
-            delivery_formats_btn = self.wait.until(EC.element_to_be_clickable(
+            delivery_formats_btn = catalog_wait.until(EC.element_to_be_clickable(
                 (By.XPATH, '//button[contains(text(), "Delivery formats")]')
             ))
             delivery_formats_btn.click()
             time.sleep(0.5)
 
-            course_checkbox = self.wait.until(EC.element_to_be_clickable(
-                (By.XPATH, '//input[@id="course_checkbox"]')
-            ))
+            # Try by convention id first, then fall back to finding the input
+            # that sits alongside a label containing the format text.
+            checkbox_xpath = (
+                f'//input[@id="{delivery_format.lower()}_checkbox"]'
+                f' | //label[contains(@class, "check__label")'
+                f' and normalize-space(text())="{delivery_format}"]'
+                f'/..//input[@type="checkbox"]'
+            )
+            checkbox = catalog_wait.until(EC.element_to_be_clickable((By.XPATH, checkbox_xpath)))
 
-            if not course_checkbox.is_selected():
-                course_checkbox.click()
+            if not checkbox.is_selected():
+                checkbox.click()
                 time.sleep(1)
 
-            self.logger("Filter applied: Showing courses only")
+            self.logger(f"Filter applied: Showing {delivery_format.lower()}s only")
 
         except TimeoutException:
-            self.logger("Could not apply course filter. Proceeding with current view.")
+            self.logger(f"Could not apply {delivery_format} filter. Proceeding with current view.")
 
-    def _get_courses_from_current_page(self) -> list[dict]:
+    def filter_by_courses(self):
+        """Filter the catalog to show only courses (convenience alias)."""
+        self.filter_by_format('Course')
+
+    def _get_courses_from_current_page(self, version_cache: dict | None = None) -> list[dict]:
         """
-        Extract courses from the current catalog page.
-        Returns a list of dicts with 'id', 'title', and 'url'.
+        Extract courses from the current catalog page (PF5 card layout).
+        Returns a list of dicts with 'id' (versioned when known, e.g. 'do336-4.18'),
+        'sku' (bare, e.g. 'do336'), 'title', and 'url'.
+
+        Versioned IDs are resolved via version_cache (built from courses-list.txt).
+        Courses absent from the cache get a bare SKU as id; update_courses_list
+        handles those with a separate click-and-navigate pass.
         """
         courses = []
 
-        course_links = self.driver.find_elements(
+        cards = self.driver.find_elements(
             By.XPATH,
-            '//a[contains(@href, "/rol/app/courses/") and (text()="Launch" or text()="View" or text()="Access" or text()="LAUNCH")]'
+            '//div[contains(@class, "pf-v5-c-card") and contains(@class, "offering-card")]'
         )
 
-        for link in course_links:
+        for card in cards:
             try:
-                url = link.get_attribute('href')
-                if url and '/rol/app/courses/' in url:
-                    parts = url.split('/rol/app/courses/')
-                    if len(parts) > 1:
-                        course_id = parts[1].split('/')[0]
+                sku_elem = card.find_element(
+                    By.XPATH, './/span[contains(@class, "pf-v5-c-label__text")]'
+                )
+                sku = sku_elem.text.strip().lower()
+                if not sku:
+                    continue
 
-                        try:
-                            parent = link.find_element(By.XPATH, './ancestor::div[contains(@class, "pf-")]')
-                            title_elem = parent.find_element(By.XPATH, './/h4')
-                            title = title_elem.text
-                        except:
-                            title = course_id
+                try:
+                    title_elem = card.find_element(
+                        By.XPATH, './/h4[contains(@class, "title")]'
+                    )
+                    title = title_elem.get_attribute('title') or title_elem.text.strip()
+                except:
+                    title = sku
 
-                        if not any(c['id'] == course_id for c in courses):
-                            courses.append({
-                                'id': course_id,
-                                'title': title,
-                                'url': f"/rol/app/courses/{course_id}"
-                            })
+                versioned_id = version_cache.get(sku, sku) if version_cache else sku
+
+                if not any(c['sku'] == sku for c in courses):
+                    courses.append({
+                        'id': versioned_id,
+                        'sku': sku,
+                        'title': title,
+                        'url': f"/rol/app/courses/{versioned_id}"
+                    })
             except Exception as e:
-                logging.debug(f"Error processing course link: {e}")
+                logging.debug(f"Error processing course card: {e}")
                 continue
 
         return courses
@@ -2439,22 +2546,25 @@ class LabManager:
         Returns 1 if no pagination is found.
         """
         try:
-            pagination = self.driver.find_elements(
+            # PF5: <input aria-label="Current page" max="N"> inside pagination nav
+            page_inputs = self.driver.find_elements(
                 By.XPATH,
-                '//ul[contains(@class, "pagination")]//li[not(contains(., "«")) and not(contains(., "»")) and not(contains(., "‹")) and not(contains(., "›"))]//a'
+                '//nav[contains(@class, "pagination")]//input[@aria-label="Current page"]'
             )
+            if page_inputs:
+                max_pages = page_inputs[0].get_attribute('max')
+                if max_pages and max_pages.isdigit():
+                    return int(max_pages)
 
-            if pagination:
-                page_numbers = []
-                for page_link in pagination:
-                    try:
-                        page_num = int(page_link.text.strip())
-                        page_numbers.append(page_num)
-                    except ValueError:
-                        continue
-
-                if page_numbers:
-                    return max(page_numbers)
+            # PF5 fallback: <span aria-hidden="true">of N</span>
+            of_spans = self.driver.find_elements(
+                By.XPATH,
+                '//nav[contains(@class, "pagination")]//span[contains(normalize-space(.), "of ")]'
+            )
+            if of_spans:
+                match = re.search(r'of\s+(\d+)', of_spans[0].text)
+                if match:
+                    return int(match.group(1))
 
             return 1
         except Exception:
@@ -2466,12 +2576,14 @@ class LabManager:
         Returns True if successful, False otherwise.
         """
         try:
-            page_link = self.driver.find_element(
+            page_input = self.driver.find_element(
                 By.XPATH,
-                f'//ul[contains(@class, "pagination")]//li//a[text()="{page_number}"]'
+                '//nav[contains(@class, "pagination")]//input[@aria-label="Current page"]'
             )
 
-            self.driver.execute_script("arguments[0].click();", page_link)
+            self.driver.execute_script("arguments[0].value = '';", page_input)
+            page_input.send_keys(str(page_number))
+            page_input.send_keys(Keys.RETURN)
             time.sleep(2)
 
             return True
@@ -2483,17 +2595,16 @@ class LabManager:
 
     def _click_next_page(self) -> bool:
         """
-        Click the "next" (›) button to go to the next page.
-        Returns True if successful, False if no next page.
+        Click the "next" button to go to the next page.
+        Returns True if successful, False if no next page or button is disabled.
         """
         try:
             next_button = self.driver.find_element(
                 By.XPATH,
-                '//ul[contains(@class, "pagination")]//li//a[contains(text(), "›")]'
+                '//nav[contains(@class, "pagination")]//button[@data-action="next"]'
             )
 
-            parent_li = next_button.find_element(By.XPATH, './..')
-            if 'disabled' in parent_li.get_attribute('class') or '':
+            if next_button.get_attribute('disabled') or next_button.get_attribute('aria-disabled') == 'true':
                 return False
 
             self.driver.execute_script("arguments[0].click();", next_button)
@@ -2506,17 +2617,18 @@ class LabManager:
             logging.debug(f"Error clicking next page: {e}")
             return False
 
-    def get_all_courses(self) -> list[dict]:
+    def get_all_courses(self, version_cache: dict | None = None) -> list[dict]:
         """
         Get all courses from the catalog, navigating through all pagination pages.
-        Returns a list of dicts with 'id', 'title', and 'url'.
+        Returns a list of dicts with 'id' (versioned), 'sku', 'title', and 'url'.
         """
         self.logger("Getting list of all courses from catalog...")
         all_courses = []
 
         try:
-            self.wait.until(EC.presence_of_element_located(
-                (By.XPATH, '//a[contains(@href, "/rol/app/courses/")]')
+            time.sleep(2)
+            WebDriverWait(self.driver, 30).until(EC.presence_of_element_located(
+                (By.XPATH, '//nav[contains(@class, "pagination")]//input[@aria-label="Current page"]')
             ))
 
             total_pages = self._get_total_pages()
@@ -2526,10 +2638,10 @@ class LabManager:
             while True:
                 self.logger(f"  Fetching courses from page {current_page}/{total_pages}...")
 
-                page_courses = self._get_courses_from_current_page()
+                page_courses = self._get_courses_from_current_page(version_cache)
 
                 for course in page_courses:
-                    if not any(c['id'] == course['id'] for c in all_courses):
+                    if not any(c['sku'] == course['sku'] for c in all_courses):
                         all_courses.append(course)
 
                 self.logger(f"    Found {len(page_courses)} courses on page {current_page}")
@@ -2549,8 +2661,8 @@ class LabManager:
 
             self.logger(f"Found {len(all_courses)} total courses across {current_page} page(s)")
 
-        except TimeoutException:
-            self.logger("Timeout waiting for course list. Catalog might be empty or slow to load.")
+        except TimeoutException as e:
+            self.logger(f"Timeout waiting for course list. Catalog might be empty or slow to load: {e}")
         except Exception as e:
             self.logger(f"Error getting courses: {e}")
 
@@ -2589,11 +2701,28 @@ class LabManager:
                 ))
             )
             self.driver.execute_script("arguments[0].click();", version_dropdown)
-            time.sleep(0.5)
+
+            # Wait for any "Loading" state inside the version selector to clear,
+            # then wait until at least one menu item is actually present.
+            version_selector_xpath = "//div[contains(@class, 'settings-panel-version-selector')]"
+            loading_xpath = f"{version_selector_xpath}//*[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'loading')]"
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.invisibility_of_element_located((By.XPATH, loading_xpath))
+                )
+            except:
+                pass
+
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((
+                    By.XPATH,
+                    f"{version_selector_xpath}//ul[@role='menu']//button[@role='menuitem']"
+                ))
+            )
 
             version_items = self.driver.find_elements(
                 By.XPATH,
-                "//div[contains(@class, 'settings-panel-version-selector')]//ul[@role='menu']//button[@role='menuitem']"
+                f"{version_selector_xpath}//ul[@role='menu']//button[@role='menuitem']"
             )
 
             for item in version_items:
@@ -2620,17 +2749,144 @@ class LabManager:
 
         return versions
 
+    def _scrape_catalog_format(
+        self,
+        delivery_format: str,
+        environment: str,
+        version_cache: dict,
+    ) -> list[str]:
+        """
+        Full scrape cycle for one delivery format ('Course' or 'Lesson').
+
+        1. Navigate to catalog, apply filter.
+        2. Collect all catalog cards across all pages.
+        3. For items not found in version_cache, click Continue page-by-page
+           to discover the versioned URL.
+        4. Open the settings panel for each item and read all available versions.
+
+        Returns a list of versioned entry strings (e.g. ['do336-4.18', 'do336-4.14']).
+        """
+        self.logger(f"\n{'─' * 40}")
+        self.logger(f"Scraping {delivery_format}s from catalog…")
+
+        self.go_to_catalog(environment)
+        time.sleep(3)
+        self.filter_by_format(delivery_format)
+        catalog_items = self.get_all_courses(version_cache=version_cache)
+
+        if not catalog_items:
+            self.logger(f"No {delivery_format.lower()}s found in catalog.")
+            return []
+
+        # Discovery pass for items with no versioned ID in the cache
+        unknown_skus = {c['sku'] for c in catalog_items if '-' not in c['id']}
+        if unknown_skus:
+            self.logger(f"Resolving versioned URLs for {len(unknown_skus)} "
+                        f"{delivery_format.lower()}(s) via Continue button…")
+            resolved: dict[str, str] = {}
+
+            self.go_to_catalog(environment)
+            time.sleep(2)
+            self.filter_by_format(delivery_format)
+            time.sleep(2)
+
+            total_pages_disc = self._get_total_pages()
+            for page_num in range(1, total_pages_disc + 1):
+                if not unknown_skus:
+                    break
+                if page_num > 1:
+                    self._go_to_page(page_num)
+                    time.sleep(2)
+
+                for sku in list(unknown_skus):
+                    try:
+                        btn = self.driver.find_element(
+                            By.XPATH,
+                            f'//button[@data-analytics-id="offering-card-action-button-{sku}"]'
+                        )
+                        self.driver.execute_script("arguments[0].click();", btn)
+                        time.sleep(3)
+                        current_url = self.driver.current_url
+                        # Works regardless of URL path segment (/courses/, /labs/, etc.)
+                        for segment in ('/courses/', '/labs/', '/app/'):
+                            if segment in current_url:
+                                vid = (current_url.split(segment)[-1]
+                                       .split('/')[0].split('?')[0].lower())
+                                if '-' in vid:
+                                    resolved[sku] = vid
+                                    unknown_skus.discard(sku)
+                                    self.logger(f"  Resolved {sku} → {vid}")
+                                break
+                        self.driver.back()
+                        WebDriverWait(self.driver, 20).until(EC.presence_of_element_located(
+                            (By.XPATH, '//nav[contains(@class, "pagination")]'
+                                       '//input[@aria-label="Current page"]')
+                        ))
+                        time.sleep(1)
+                        if page_num > 1:
+                            self._go_to_page(page_num)
+                            time.sleep(1)
+                    except NoSuchElementException:
+                        pass
+                    except Exception as e:
+                        self.logger(f"  ⚠ Could not resolve {sku}: {e}")
+
+            for item in catalog_items:
+                if item['sku'] in resolved:
+                    item['id'] = resolved[item['sku']]
+                    item['url'] = f"/rol/app/courses/{resolved[item['sku']]}"
+
+        # Fetch available versions via the settings panel
+        entries: list[str] = []
+        failed: list[str] = []
+        self.logger(f"Fetching versions for {len(catalog_items)} "
+                    f"{delivery_format.lower()}(s)…")
+
+        for idx, item in enumerate(catalog_items):
+            item_id = item['id']
+            sku = item.get('sku', item_id)
+
+            if '-' not in item_id:
+                self.logger(f"  [{idx + 1}/{len(catalog_items)}] ⚠ {sku} – "
+                             "no versioned URL found, skipping.")
+                failed.append(sku)
+                continue
+
+            item_name, _ = self._parse_course_id(item_id)
+            self.logger(f"  [{idx + 1}/{len(catalog_items)}] {item_id} – "
+                        "fetching versions…")
+
+            try:
+                versions = self.get_available_versions(item_id, environment)
+            except Exception as exc:
+                self.logger(f"    ⚠ Failed: {exc}")
+                failed.append(item_id)
+                entries.append(item_id)
+                continue
+
+            if versions:
+                for ver in versions:
+                    entries.append(f"{item_name}-{ver}")
+                self.logger(f"    Found {len(versions)} version(s): "
+                             f"{', '.join(versions)}")
+            else:
+                entries.append(item_id)
+                self.logger("    No version dropdown – keeping catalog entry")
+
+        if failed:
+            self.logger(f"⚠ Skipped {len(failed)} {delivery_format.lower()}(s): "
+                        f"{', '.join(failed)}")
+        return entries
+
     def update_courses_list(self, environment: str, output_path: Optional[Path] = None) -> Path:
         """
         Scrape the ROL catalog to build a complete courses-list.txt with all
-        courses and their available versions.
+        courses and lessons and their available versions.
 
         Steps:
-            1. Navigate to the catalog and collect every course entry.
-            2. For each unique course base name, open the course settings panel
-               and retrieve all published versions.
-            3. Write sorted ``coursename-version`` entries to *output_path*
-               (defaults to the project-root ``courses-list.txt``).
+            1. Build a version cache from the existing courses-list.txt.
+            2. Scrape Courses, then Lessons (filter → collect → discover → versions).
+            3. Write sorted unique entries to *output_path*.
 
         Returns the Path that was written.
         """
@@ -2642,48 +2898,26 @@ class LabManager:
             except FileNotFoundError:
                 output_path = Path(__file__).resolve().parent.parent.parent / "courses-list.txt"
 
-        self.logger("=" * 60)
-        self.logger("UPDATING COURSES LIST")
-        self.logger("=" * 60)
-
-        self.go_to_catalog(environment)
-        self.filter_by_courses()
-        catalog_courses = self.get_all_courses()
-
-        if not catalog_courses:
-            self.logger("No courses found in catalog – aborting update.")
-            return output_path
-
-        self.logger(f"Catalog returned {len(catalog_courses)} course(s). "
-                     "Fetching versions for each…")
+        # Build {sku: versioned_id} cache so already-known items skip discovery.
+        version_cache: dict[str, str] = {}
+        existing_path = Path(output_path)
+        if existing_path.exists():
+            for line in existing_path.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                m = re.match(r'^([a-zA-Z]+\d+)-(\d+\.\d+.*)$', line)
+                if m:
+                    sku = m.group(1).lower()
+                    if sku not in version_cache:
+                        version_cache[sku] = line
+            self.logger(f"Loaded {len(version_cache)} known entry/entries from cache.")
 
         all_entries: list[str] = []
-        failed_courses: list[str] = []
-
-        for idx, course in enumerate(catalog_courses):
-            course_id = course["id"]
-            course_name, _ = self._parse_course_id(course_id)
-
-            self.logger(f"  [{idx + 1}/{len(catalog_courses)}] {course_id} – "
-                         "fetching versions…")
-
-            try:
-                versions = self.get_available_versions(course_id, environment)
-            except Exception as exc:
-                self.logger(f"    ⚠ Failed to get versions for {course_id}: {exc}")
-                failed_courses.append(course_id)
-                all_entries.append(course_id)
-                continue
-
-            if versions:
-                for ver in versions:
-                    entry = f"{course_name}-{ver}"
-                    all_entries.append(entry)
-                self.logger(f"    Found {len(versions)} version(s): "
-                             f"{', '.join(versions)}")
-            else:
-                all_entries.append(course_id)
-                self.logger(f"    No version dropdown – keeping catalog entry")
+        for fmt in ('Course', 'Lesson'):
+            all_entries.extend(
+                self._scrape_catalog_format(fmt, environment, version_cache)
+            )
 
         unique_entries = sorted(set(all_entries))
 
@@ -2692,10 +2926,6 @@ class LabManager:
 
         self.logger(f"\n{'=' * 60}")
         self.logger(f"Wrote {len(unique_entries)} entries to {output_path}")
-        if failed_courses:
-            self.logger(f"⚠ Failed to fetch versions for "
-                         f"{len(failed_courses)} course(s): "
-                         f"{', '.join(failed_courses)}")
         self.logger("=" * 60)
 
         return output_path

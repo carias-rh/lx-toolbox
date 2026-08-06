@@ -51,17 +51,89 @@ class BaseSeleniumDriver:
 
     def accept_trustarc_cookies(self, timeout: int = 5):
         """Handles TrustArc Cookie Consent Manager if present."""
+        wait = WebDriverWait(self.driver, timeout)
+        agree_xpath = "//a[@class='call'][normalize-space(text())='Agree and proceed with standard settings']"
+        clicked = False
+        used_legacy_iframe = False
+
         try:
-            self.wait.until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')), message="TrustArc iframe not found")
-            agree_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//a[@class='call'][text()='Agree and proceed with standard settings']")), message="TrustArc agree button not found")
+            # Legacy TrustArc iframe (older ROL pages).
+            wait.until(
+                EC.frame_to_be_available_and_switch_to_it(
+                    (By.XPATH, '//iframe[@title="TrustArc Cookie Consent Manager"]')
+                ),
+                message="TrustArc iframe not found",
+            )
+            agree_button = wait.until(
+                EC.element_to_be_clickable((By.XPATH, agree_xpath)),
+                message="TrustArc agree button not found",
+            )
             agree_button.click()
-            self.driver.switch_to.default_content() # Switch back from iframe
+            clicked = True
+            used_legacy_iframe = True
+        except Exception:
+            self.driver.switch_to.default_content()
+        else:
+            self.driver.switch_to.default_content()
+
+        if not clicked:
+            try:
+                # New TrustArc consent renders inside a shadow root on sso.redhat.com.
+                agree_button = wait.until(
+                    lambda driver: driver.execute_script(
+                        """
+                        const selectors = [
+                          '[id^="pop-frame"]',
+                          '[name="trustarc_cm"]',
+                          '.trustarc_newcm_container',
+                          '.truste_popframe',
+                        ];
+                        for (const selector of selectors) {
+                          const host = document.querySelector(selector);
+                          if (!host?.shadowRoot) continue;
+                          const agree = host.shadowRoot.querySelector('a.call');
+                          if (agree) return agree;
+                        }
+                        return null;
+                        """
+                    ),
+                    message="TrustArc shadow-root agree button not found",
+                )
+                agree_button.click()
+                clicked = True
+            except Exception:
+                pass
+
+        self.driver.switch_to.default_content()
+
+        if clicked and used_legacy_iframe:
+            # Only the legacy iframe flow requires a page refresh to apply the cookie consent;
+            # the shadow-root modal dismisses in place without reloading.
             self.driver.refresh()
-            time.sleep(1) # Wait for refresh
-        except Exception as e:
-            # print(f"Cookie consent dialog not found or error: {e}")
-            self.driver.switch_to.default_content() # Ensure we are not stuck in an iframe
-            pass # It's okay if it's not there
+            time.sleep(3)
+        elif clicked:
+            # Shadow-root overlay dismisses in place but the DIV lingers in the DOM and
+            # can intercept clicks until it's fully removed.  Wait up to 10 s for it to go.
+            overlay_selectors = (
+                '.trustarc_newcm_container, .truste_popframe, '
+                '[name="trustarc_cm"], [id^="pop-frame"]'
+            )
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, overlay_selectors))
+                )
+            except Exception:
+                # If still present, force-remove it via JS so it doesn't block further clicks.
+                try:
+                    self.driver.execute_script(
+                        """
+                        document.querySelectorAll(
+                          '.trustarc_newcm_container, .truste_popframe, [name="trustarc_cm"], [id^="pop-frame"]'
+                        ).forEach(el => el.remove());
+                        """
+                    )
+                except Exception:
+                    pass
 
     def wait_for_element_clickable(self, by: By, value: str, timeout: int = 5):
         return WebDriverWait(self.driver, timeout).until(EC.element_to_be_clickable((by, value)))

@@ -577,7 +577,7 @@ def check_links(ctx, course, env, browser, headless, screenshots, screenshots_di
 
 @lab.command('update-courses')
 @click.option('--env', '-e', default='rol', help='Lab environment (rol, factory, china)')
-@click.option('--browser', '-b', default='chrome', help='Browser to use (firefox, chrome)')
+@click.option('--browser', '-b', default='firefox', help='Browser to use (firefox, chrome)')
 @click.option('--headless/--no-headless', default=True, help='Run browser in headless/headful mode')
 @click.option('--commit', is_flag=True, default=False, help='Git commit and push after updating')
 @click.pass_context
