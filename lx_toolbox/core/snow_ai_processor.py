@@ -1708,7 +1708,11 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 create_btn.click()
             except Exception:
                 self.driver.execute_script("arguments[0].click();", create_btn)
-            time.sleep(8)
+            # Wait for the dialog to render — the summary field is always present
+            # in the create form regardless of issue type.
+            WebDriverWait(self.driver, 30).until(
+                EC.presence_of_element_located((By.XPATH, '//input[@id="summary-field"]'))
+            )
             logging.getLogger(__name__).info("Jira create dialog loaded")
 
             # Change Work type to "Bug" -- the input is obscured by the value
@@ -1745,16 +1749,23 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             )
             summary_field.send_keys(summary_value)
 
-            time.sleep(5)
             # Fill the ProseMirror description editor.
             # The "Create Bug" template pre-fills a table with URL / Reporter RHNID /
             # Section Title rows plus an "Issue description" heading.
             # We use JS insertText for instant paste (send_keys types char-by-char).
             translated = classification.get("translated_student_feedback", snow_info.get("Description",""))
 
+            # Wait for the editor and, when the Bug template is active, for its
+            # pre-filled table to appear.  Falls through gracefully if no table.
             desc_editor = WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.ID, 'ak-editor-textarea'))
             )
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    lambda d: desc_editor.find_elements(By.TAG_NAME, "td")
+                )
+            except Exception:
+                pass
 
             def _insert_text_in_editor(text):
                 """Insert text at current cursor position using execCommand (instant, not char-by-char)."""
