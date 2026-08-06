@@ -102,11 +102,15 @@ class ServiceNowAPIClient:
             ServiceNowAPIError: on auth failure or non-200 HTTP response.
         """
         url = f"{self._base_url}/api/now/table/sys_journal_field"
+        # Matches the display labels used by get_customer_updates() on the DOM path.
         RELEVANT_TYPES = {"Additional comments", "Email received", "Email sent"}
         SKIP_AUTHORS = {"api_snow_autoassign", "System"}
 
+        # Filter server-side only by element_id; type/author filtering is done in
+        # Python below so it mirrors get_customer_updates() exactly without
+        # depending on internal element field names that may vary by instance.
         params = {
-            "sysparm_query": f"element_id={sys_id}^elementIN{','.join(RELEVANT_TYPES)}",
+            "sysparm_query": f"element_id={sys_id}",
             "sysparm_fields": "sys_created_on,sys_created_by,element,value",
             "sysparm_limit": "100",
             "sysparm_orderby": "sys_created_on",

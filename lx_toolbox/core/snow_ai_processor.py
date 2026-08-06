@@ -1043,18 +1043,14 @@ Instructions:
             "rhnid": rhnid,
         }
 
-    def _get_snow_info_via_api(self, snow_id: str) -> dict:
-        """Fetch ticket info using the REST API fast-path (ADR-0001)."""
-        record = self._snow_api.get_ticket(snow_id)
-        description = record.get("description", "")
-        full_name = record.get("contact_source", "")
-        sys_id = record.get("sys_id", "")
-
-        fields = self._parse_description_fields(description)
-
-        raw_updates = self._snow_api.get_journal_entries(sys_id)
-        customer_updates = self._filter_and_clean_updates(raw_updates)
-
+    def _build_snow_info(
+        self,
+        snow_id: str,
+        full_name: str,
+        fields: dict,
+        customer_updates: list,
+    ) -> dict:
+        """Assemble the canonical snow_info dict shared by both paths."""
         return {
             "snow_id": snow_id,
             "full_name": full_name,
@@ -1069,6 +1065,14 @@ Instructions:
             "customer_updates": customer_updates,
             "customer_updates_summary": "",
         }
+
+    def _get_snow_info_via_api(self, snow_id: str) -> dict:
+        """Fetch ticket info using the REST API fast-path (ADR-0001)."""
+        record = self._snow_api.get_ticket(snow_id)
+        fields = self._parse_description_fields(record.get("description", ""))
+        raw_updates = self._snow_api.get_journal_entries(record.get("sys_id", ""))
+        customer_updates = self._filter_and_clean_updates(raw_updates)
+        return self._build_snow_info(snow_id, record.get("contact_source", ""), fields, customer_updates)
 
     def _get_snow_info_via_dom(self, snow_id: str) -> dict:
         """Fetch ticket info using the existing Selenium DOM-scraping path."""
@@ -1082,25 +1086,11 @@ Instructions:
         ).get_attribute("value")
 
         fields = self._parse_description_fields(description)
-
         raw_updates = self.snow_handler.get_customer_updates()
         customer_updates = self._filter_and_clean_updates(raw_updates)
 
         self.driver.refresh()
-        return {
-            "snow_id": snow_id,
-            "full_name": full_name,
-            "Description": fields["issue"],
-            "Course": fields["course"],
-            "Version": fields["version"],
-            "URL": fields["url"],
-            "Chapter": fields["chapter"],
-            "Section": fields["section"],
-            "Title": fields["title"],
-            "RHNID": fields["rhnid"],
-            "customer_updates": customer_updates,
-            "customer_updates_summary": "",
-        }
+        return self._build_snow_info(snow_id, full_name, fields, customer_updates)
 
     def get_ticket_ids_from_queue(self) -> list:
         """Get list of ticket IDs from the current queue view."""
@@ -1627,7 +1617,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # 1) ServiceNow queue (base window)
         self.driver.get(self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL)
         # Pre-set the TrustArc consent cookie now that we have a redhat.com domain context.
-        self.lab_mgr.selenium_driver._preset_trustarc_cookie()
+        self.lab_mgr.preset_trustarc_cookie()
         try:
             WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((By.XPATH, '//*[@id="username"]')))
             self.login_snow()
@@ -1708,7 +1698,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
         try:
             # Click Create button in the top nav bar
-            create_btn = WebDriverWait(self.driver, 15).until(
+            create_btn = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH,
                     '//button[text()="Create"] | '
                     '//button[contains(@data-testid, "create-button")]'
@@ -1947,7 +1937,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 self.driver.switch_to.new_window('window')
                 ticket_window = self.driver.current_window_handle
 
-                # Tab 1: ServiceNow ticket — open directly on the classic .do form
+                # Tab 1: Feedback — open directly on the classic .do form
                 self.snow_handler.navigate_to_ticket(snow_id)
                 tab_snow = self.driver.current_window_handle
 

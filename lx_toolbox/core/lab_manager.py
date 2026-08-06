@@ -46,6 +46,15 @@ class LabManager:
         self.driver = self.selenium_driver.get_driver()
         self.wait = self.selenium_driver.wait # Convenience
 
+    def preset_trustarc_cookie(self):
+        """
+        Inject TrustArc consent cookies so the banner never appears.
+
+        Must be called after at least one ``driver.get()`` to a redhat.com
+        domain.  Delegates to ``BaseSeleniumDriver._preset_trustarc_cookie()``.
+        """
+        self.selenium_driver._preset_trustarc_cookie()
+
     def _detect_interface_type(self) -> str:
         """
         Detect whether the current page uses the old or new (PF5) interface.

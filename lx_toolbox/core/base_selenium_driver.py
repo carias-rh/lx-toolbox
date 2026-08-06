@@ -49,35 +49,21 @@ class BaseSeleniumDriver:
         self.driver.get(url)
         time.sleep(2)
 
+    @staticmethod
+    def _trustarc_cookie(name: str, value: str) -> dict:
+        return {"name": name, "value": value, "domain": ".redhat.com", "path": "/", "secure": True}
+
     def _preset_trustarc_cookie(self):
         """
-        Inject the TrustArc opt-in cookie so the consent banner is never shown.
+        Inject the TrustArc opt-in cookies so the consent banner is never shown.
 
         Must be called after at least one ``driver.get()`` to a redhat.com
-        domain so the browser has a domain to attach the cookie to.
+        domain so the browser has a domain to attach the cookies to.
         """
         try:
-            self.driver.add_cookie({
-                "name": "notice_behavior",
-                "value": "expressed,eu",
-                "domain": ".redhat.com",
-                "path": "/",
-                "secure": True,
-            })
-            self.driver.add_cookie({
-                "name": "notice_gdpr_prefs",
-                "value": "0|1|2:",
-                "domain": ".redhat.com",
-                "path": "/",
-                "secure": True,
-            })
-            self.driver.add_cookie({
-                "name": "cmapi_cookie_privacy",
-                "value": "permit 1 2 3",
-                "domain": ".redhat.com",
-                "path": "/",
-                "secure": True,
-            })
+            self.driver.add_cookie(self._trustarc_cookie("notice_behavior", "expressed,eu"))
+            self.driver.add_cookie(self._trustarc_cookie("notice_gdpr_prefs", "0|1|2:"))
+            self.driver.add_cookie(self._trustarc_cookie("cmapi_cookie_privacy", "permit 1 2 3"))
         except Exception:
             pass
 
