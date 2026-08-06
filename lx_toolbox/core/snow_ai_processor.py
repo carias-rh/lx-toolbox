@@ -1613,51 +1613,104 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         self.jira_handler.login(use_session=True)
 
     def prelogin_all(self, environment: str = "rol"):
-        # 1) ServiceNow queue — navigate directly to the classic .do list URL,
-        #    bypassing the nav/ui/classic redirect entirely.
+        # ── Phase 1: parallel tab loading.
+        #
+        # driver.get() blocks until the page finishes loading.
+        # JavaScript window.open() is non-blocking: the tab starts loading in the
+        # background and control returns immediately, so ROL and Jira load in
+        # parallel while we do the SNOW session work.
+        #
+        # Sequence:
+        #   1. First SNOW load (blocking) — establishes hub.redhat.com domain for
+        #      TrustArc cookie pre-set.
+        #   2. window.open(ROL) and window.open(Jira) — both start loading NOW.
+        #   3. Second SNOW load (blocking, direct .do URL) — ROL and Jira keep
+        #      loading in the background during this wait.
+        #   4. Phase 2 login checks — by the time we reach ROL and Jira, they
+        #      have had the full duration of step 3 to load.
+
+        rol_base_url = (
+            self.config.get_lab_base_url(environment)
+            or "https://rol.redhat.com/rol/app/courses/"
+        )
+
+        # Step 1 — first SNOW load
         self.driver.get(self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL)
-        # Wait for the auth to finish the redirection and go directly to the plain queue
         self.driver.get(self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL)
+        # Pre-set the TrustArc consent cookie now that we have a redhat.com domain context.
+        self.lab_mgr.preset_trustarc_cookie()
+
+        self.base_window_handle = self.driver.current_window_handle
+        self.login_tab_handles = {}
+
+        # Step 2 — fire ROL and Jira in background tabs (non-blocking)
+        self.driver.execute_script("window.open(arguments[0], '_blank');", self.jira_handler.JIRA_DASHBOARD_URL)
+        time.sleep(0.1)
+        self.driver.execute_script("window.open(arguments[0], '_blank');", rol_base_url + "rh124-10.0/pages/pr01")
+
+        # Capture handles (window.open is near-instant; wait briefly to be safe)
+        WebDriverWait(self.driver, 5).until(lambda d: len(d.window_handles) >= 3)
+        new_handles = [h for h in self.driver.window_handles if h != self.base_window_handle]
+        self.login_tab_handles['rol'] = new_handles[0]
+        self.login_tab_handles['jira'] = new_handles[1]
 
 
-        # Check login state by looking for the navbar rather than waiting for the
-        # SSO page: if navbar-header is present we are already authenticated.
+        # ── Phase 2: login round-robin — SNOW → ROL → Jira.
         try:
-            WebDriverWait(self.driver, 3).until(
+            WebDriverWait(self.driver, 2).until(
                 EC.presence_of_element_located((By.XPATH, '//div[@class="navbar-header"]'))
             )
             self.logger("ServiceNow session already active")
         except Exception:
             self.login_snow()
 
-        # Track base window and tabs for visual verification
-        self.base_window_handle = self.driver.current_window_handle
-        self.login_tab_handles = {}
-
-        # Pre-set the TrustArc consent cookie now that we have a redhat.com domain context.
-        self.lab_mgr.preset_trustarc_cookie()
-
-        # 2) ROL login in new tab (within base window)
-        self.driver.switch_to.new_window('tab')
-        self.login_tab_handles['rol'] = self.driver.current_window_handle
+        # ROL — page has been loading since Phase 1. Check if SSO session
+        # is already active (header nav button visible) to avoid the costly
+        # go_to_url + accept_trustarc + username-field-timeout sequence.
+        self.driver.switch_to.window(self.login_tab_handles['rol'])
         try:
-            base_url = self.config.get_lab_base_url(environment) or "https://rol.redhat.com/rol/app/courses/"
-            self.driver.get(base_url)
-        except Exception:
-            pass
-        # Use LabManager for robust login
-        try:
-            self.lab_mgr.login(environment=environment)
+
+            username = self.lab_mgr._get_credentials(environment)
+            if username:
+                WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(
+                    (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
+                )).send_keys(f"{username}@redhat.com")
+                WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(
+                    (By.XPATH, '//*[@id="login-show-step2"]'))).click()
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.XPATH,
+                    '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))
+            )
+            self.logger("ROL session already active")
             self._rol_logged_in = True
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"ROL login issue: {e}")
+        except Exception:
+            try:
+                self.lab_mgr.login(environment=environment)
+                self._rol_logged_in = True
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"ROL login issue: {e}")
 
-        # 3) Jira login in new tab (within base window)
-        self.driver.switch_to.new_window('tab')
-        self.login_tab_handles['jira'] = self.driver.current_window_handle
-        self.login_jira()
+        # Jira — page has been loading since Phase 1. Check logged-in state
+        # directly instead of re-navigating (which reloads the page).
+        self.driver.switch_to.window(self.login_tab_handles['jira'])
+        if self.jira_handler._is_logged_in(timeout=1):
+            self.jira_handler._logged_in = True
+            self.logger("Jira session already active")
+        else:
+            try:
+                WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(
+                    (By.XPATH, "//*[@aria-labelledby='username-uid1-label']")
+                )).send_keys(f"{username}@redhat.com")
+                WebDriverWait(self.driver, 2).until(
+                            EC.element_to_be_clickable((By.XPATH,
+                                '//*[@id="login-submit"] | '
+                                '//button[@type="submit"] | '
+                                '//span[text()="Continue"]/parent::button'
+                            ))).click()
+            except Exception:
+                self.login_jira()
 
-        # Return focus to ServiceNow tab in base window for visibility
+        # Return focus to ServiceNow tab.
         self.driver.switch_to.window(self.base_window_handle)
 
     def extract_jira_keyword(self, snow_info: dict) -> str:
