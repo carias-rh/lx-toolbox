@@ -5,7 +5,6 @@ Provides Selenium-based ServiceNow login and common operations.
 This is separate from servicenow_autoassign.py which uses the REST API.
 """
 
-import os
 import time
 import logging
 import traceback
@@ -72,16 +71,6 @@ class ServiceNowHandler:
         
         input("Press Enter once you have completed the login...")
     
-    def _get_auth_token(self, auth_helper: str) -> str:
-        """Execute auth helper command and return the token."""
-        if not auth_helper:
-            return ""
-        try:
-            return os.popen(auth_helper).read().strip()
-        except Exception as e:
-            logging.getLogger(__name__).debug(f"Auth helper returned empty: {e}")
-            return ""
-    
     def _is_logged_in(self) -> bool:
         """
         Check if already logged into ServiceNow.
@@ -119,56 +108,37 @@ class ServiceNowHandler:
         self.logger("Login into ServiceNow")
         
         username = self.config.get("Credentials", "RH_USERNAME")
-        password = self.config.get("Credentials", "RH_PASSWORD")
-        auth_helper = self.config.get("Credentials", "RH_AUTH_HELPER")
-        
+
         try:
             # Check if we're already on the SSO page (username field present)
             try:
                 username_field = WebDriverWait(self.driver, 3).until(
                     EC.presence_of_element_located((By.XPATH, '//*[@id="username"]'))
                 )
-                
+
                 if username:
                     username_field.send_keys(username)
-                    
-                    if password:
-                        # Build full credential string
-                        auth_token = self._get_auth_token(auth_helper)
-                        full_credential = f"{str(password)}{auth_token}"
-                        self.wait.until(EC.element_to_be_clickable(
-                            (By.XPATH, '//*[@id="password"]')
-                        )).send_keys(full_credential)
-                        self.wait.until(EC.element_to_be_clickable(
-                            (By.XPATH, '//*[@id="submit"]')
-                        )).click()
-                        time.sleep(15)
-                        self._logged_in = True
-                        return True
-                    else:
-                        self._prompt_for_manual_login(
-                            "Username autofilled. Please enter your password and complete authentication."
-                        )
-                        self._logged_in = True
-                        return True
+                    self._prompt_for_manual_login(
+                        "Username autofilled. Please enter your password and complete authentication."
+                    )
                 else:
                     self._prompt_for_manual_login(
                         "Credentials not configured. Please complete the login manually."
                     )
-                    self._logged_in = True
-                    return True
-                    
+                self._logged_in = True
+                return True
+
             except TimeoutException:
                 # No SSO page - might already be logged in
                 if use_session and self._is_logged_in():
                     self.logger("Already logged into ServiceNow (session active)")
                     self._logged_in = True
                     return True
-                    
+
         except Exception as e:
             logging.getLogger(__name__).error(f"ServiceNow login failed: {e}")
             return False
-        
+
         self._logged_in = True
         return True
     

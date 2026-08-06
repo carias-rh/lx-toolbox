@@ -1,5 +1,4 @@
 import time
-import os
 import re
 import logging
 from pathlib import Path
@@ -22,9 +21,6 @@ class QAQuitException(Exception):
     pass
 
 class LabManager:
-    # External service verification field IDs (from third-party login pages)
-    _GITHUB_VERIFY_FIELD = "app_totp"
-    
     # Interface type constants
     INTERFACE_OLD = "old"
     INTERFACE_NEW = "new"  # PF5 interface
@@ -108,37 +104,19 @@ class LabManager:
 
     def _get_credentials(self, environment: str):
         """
-        Helper to fetch credentials for a given environment.
-        
+        Helper to fetch the username for a given environment.
+
         Returns:
-            Tuple of (username, password, auth_helper_cmd)
+            The configured username string, or None if not set.
         """
         if environment == "rol":
-            username = self.config.get("Credentials", "RH_USERNAME")
-            password = self.config.get("Credentials", "RH_PASSWORD")
-            auth_helper = self.config.get("Credentials", "RH_AUTH_HELPER")
-            return username, password, auth_helper
+            return self.config.get("Credentials", "RH_USERNAME")
         elif environment == "factory":
-            username = self.config.get("Credentials", "GITHUB_USERNAME")
-            password = self.config.get("Credentials", "GITHUB_PASSWORD")
-            auth_helper = self.config.get("Credentials", "GITHUB_AUTH_HELPER")
-            return username, password, auth_helper
+            return self.config.get("Credentials", "GITHUB_USERNAME")
         elif environment == "china":
-            username = self.config.get("Credentials", "CHINA_USERNAME")
-            password = self.config.get("Credentials", "CHINA_PASSWORD")
-            return username, password, None
+            return self.config.get("Credentials", "CHINA_USERNAME")
         else:
             raise ValueError(f"Unknown environment for credentials: {environment}")
-
-    def _get_auth_token(self, auth_helper: str) -> str:
-        """Execute auth helper command and return the token."""
-        if not auth_helper:
-            return ""
-        try:
-            return os.popen(auth_helper).read().replace('\n', '')
-        except Exception as e:
-            logging.getLogger(__name__).debug(f"Auth helper returned empty: {e}")
-            return ""
 
     def login(self, environment: str):
         """
@@ -159,7 +137,7 @@ class LabManager:
         # Navigate to a generic course page to trigger login
         self.selenium_driver.go_to_url(base_url + "rh124-10.0")
 
-        username, password, auth_helper = self._get_credentials(environment)
+        username = self._get_credentials(environment)
 
         try:
             if environment == "rol":
@@ -174,19 +152,10 @@ class LabManager:
                         (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
                     )).send_keys(f"{username}@redhat.com")
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login-show-step2"]'))).click()
-                    
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
-                    
-                    if password:
-                        # Build full credential string
-                        auth_token = self._get_auth_token(auth_helper)
-                        full_credential = str(password).replace('\n', '') + str(auth_token)
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(full_credential)
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="submit"]'))).click()
-                    else:
-                        self._prompt_for_manual_login(
-                            "Username autofilled. Please enter your password and complete authentication."
-                        )
+                    self._prompt_for_manual_login(
+                        "Username autofilled. Please enter your password and complete authentication."
+                    )
                 else:
                     self._prompt_for_manual_login(
                         "Credentials not configured. Please complete the login manually."
@@ -195,42 +164,12 @@ class LabManager:
             elif environment == "factory":
                 self.selenium_driver.accept_trustarc_cookies(timeout=1)
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, '/html/body/div/div[2]/div/div/div[2]/ul/a/span'))).click()
-                
+
                 if username:
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_field"]'))).send_keys(username)
-                    
-                    if password:
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password)
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//input[@type="submit"]'))).click()
-                        
-                        # Handle additional verification if needed
-                        if auth_helper:
-                            try:
-                                verify_field = self.wait.until(EC.element_to_be_clickable(
-                                    (By.XPATH, f'//*[@id="{self._GITHUB_VERIFY_FIELD}"]')
-                                ))
-                                verify_field.click()
-                                auth_token = self._get_auth_token(auth_helper)
-                                if auth_token:
-                                    verify_field.send_keys(auth_token)
-                            except TimeoutException:
-                                pass
-                        else:
-                            try:
-                                WebDriverWait(self.driver, 3).until(
-                                    EC.presence_of_element_located(
-                                        (By.XPATH, f'//*[@id="{self._GITHUB_VERIFY_FIELD}"]')
-                                    )
-                                )
-                                self._prompt_for_manual_login(
-                                    "Additional verification required. Please complete it in the browser."
-                                )
-                            except TimeoutException:
-                                pass
-                    else:
-                        self._prompt_for_manual_login(
-                            "Username autofilled. Please enter your password and complete authentication."
-                        )
+                    self._prompt_for_manual_login(
+                        "Username autofilled. Please enter your password and complete authentication."
+                    )
                 else:
                     self._prompt_for_manual_login(
                         "Credentials not configured. Please complete the login manually."
@@ -240,17 +179,12 @@ class LabManager:
                 china_login_url = self.config.get_lab_base_url("china").replace("courses/", "login/local")
                 self.selenium_driver.go_to_url(china_login_url)
                 self.selenium_driver.accept_trustarc_cookies()
-                
+
                 if username:
                     self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="username"]'))).send_keys(username)
-                    
-                    if password:
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="password"]'))).send_keys(password)
-                        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="login_button"]'))).click()
-                    else:
-                        self._prompt_for_manual_login(
-                            "Username autofilled. Please enter your password and complete authentication."
-                        )
+                    self._prompt_for_manual_login(
+                        "Username autofilled. Please enter your password and complete authentication."
+                    )
                 else:
                     self._prompt_for_manual_login(
                         "Credentials not configured. Please complete the login manually."
