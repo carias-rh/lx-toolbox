@@ -1707,6 +1707,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                                 '//button[@type="submit"] | '
                                 '//span[text()="Continue"]/parent::button'
                             ))).click()
+                self.logger("Jira session already active")
             except Exception:
                 self.login_jira()
 
@@ -1755,177 +1756,234 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
 
     def open_jira_create_prefilled(self, snow_info: dict, analysis: dict, classification: dict):
-        self.driver.get("https://redhat.atlassian.net/jira/software/c/projects/PTL/issues")
+        _url = "https://redhat.atlassian.net/jira/software/c/projects/PTL/issues"
+        log = logging.getLogger(__name__)
+        for attempt in range(1, 3):
+            try:
+                self._prefill_jira_attempt(snow_info, analysis, classification, _url)
+                return
+            except Exception as e:
+                log.warning(f"Jira prefill attempt {attempt}/2 failed: {e}")
+                if attempt < 2:
+                    log.info("Reloading Jira and retrying prefill…")
+                    try:
+                        discard = self.driver.find_elements(
+                            By.XPATH, '//button[@aria-label="Discard changes"]'
+                        )
+                        if discard:
+                            discard[0].click()
+                            time.sleep(1)
+                    except Exception:
+                        pass
+                    self.driver.get(_url)
+                    time.sleep(2)
+                else:
+                    log.error("Jira prefill failed after 2 attempts")
+
+    def _prefill_jira_attempt(self, snow_info: dict, analysis: dict, classification: dict, url: str):
+        log = logging.getLogger(__name__)
+        self.driver.get(url)
         self.driver.execute_script("document.body.style.zoom = '0.8'")
 
+        # Click Create button in the top nav bar — raises on timeout to trigger retry
+        create_btn = WebDriverWait(self.driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH,
+                '//button[text()="Create"] | '
+                '//button[contains(@data-testid, "create-button")]'
+            ))
+        )
         try:
-            # Click Create button in the top nav bar
-            create_btn = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH,
-                    '//button[text()="Create"] | '
-                    '//button[contains(@data-testid, "create-button")]'
+            create_btn.click()
+        except Exception:
+            self.driver.execute_script("arguments[0].click();", create_btn)
+
+        # Wait for the dialog to render — raises on timeout to trigger retry
+        WebDriverWait(self.driver, 30).until(
+            EC.presence_of_element_located((By.XPATH, '//input[@id="summary-field"]'))
+        )
+        log.info("Jira create dialog loaded")
+
+        # Change Work type to "Bug" if not already set.
+        # Use contains(., "Bug") instead of text()="Bug" — Jira renders the
+        # label text inside a child <span>, so text()= never matches.
+        already_bug = False
+        try:
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.XPATH,
+                    '//div[@data-testid="issue-field-select-base.ui.format-option-label.c-label"]'
+                    '[contains(., "Bug")]'
                 ))
             )
-            try:
-                create_btn.click()
-            except Exception:
-                self.driver.execute_script("arguments[0].click();", create_btn)
-            # Wait for the dialog to render — the summary field is always present
-            # in the create form regardless of issue type.
-            WebDriverWait(self.driver, 30).until(
-                EC.presence_of_element_located((By.XPATH, '//input[@id="summary-field"]'))
-            )
-            logging.getLogger(__name__).info("Jira create dialog loaded")
+            already_bug = True
+            log.info("Work type already set to Bug")
+        except Exception:
+            pass
 
-            # Change Work type to "Bug" -- the input is obscured by the value
-            # overlay so we JS-focus it, then type + Enter to select.
+        if not already_bug:
             try:
-                WebDriverWait(self.driver, 5).until(
+                work_type_input = WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.XPATH,
-                        '//div[@data-testid="issue-field-select-base.ui.format-option-label.c-label" and text()="Bug"]'
+                        '//input[starts-with(@id, "type-picker-")]'
                     ))
                 )
-                # Already set to Bug, nothing to do
-            except Exception:
-                try:
-                    work_type_input = WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.XPATH,
-                            '//input[starts-with(@id, "type-picker-")]'
-                        ))
-                    )
-                    self.driver.execute_script("arguments[0].focus(); arguments[0].click();", work_type_input)
-                    time.sleep(0.5)
-                    work_type_input.send_keys("Bug")
-                    time.sleep(1)
-                    work_type_input.send_keys(Keys.RETURN)
-                    time.sleep(2)
-                except Exception as e:
-                    logging.getLogger(__name__).warning(f"Could not set Work type to Bug: {e}")
-
-            # Fill in Summary
-            summary_value = f"{snow_info.get('Course','')}: ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} - {analysis.get('jira_title', '')} - {snow_info.get('snow_id','')}"
-            summary_field = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH,
-                    '//input[@id="summary-field"]'
-                ))
-            )
-            summary_field.send_keys(summary_value)
-
-            # Fill the ProseMirror description editor.
-            # The "Create Bug" template pre-fills a table with URL / Reporter RHNID /
-            # Section Title rows plus an "Issue description" heading.
-            # We use JS insertText for instant paste (send_keys types char-by-char).
-            translated = classification.get("translated_student_feedback", snow_info.get("Description",""))
-
-            # Wait for the editor and, when the Bug template is active, for its
-            # pre-filled table to appear.  Falls through gracefully if no table.
-            desc_editor = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.ID, 'ak-editor-textarea'))
-            )
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    lambda d: desc_editor.find_elements(By.TAG_NAME, "td")
+                self.driver.execute_script("arguments[0].focus(); arguments[0].click();", work_type_input)
+                time.sleep(0.5)
+                work_type_input.send_keys("Bug")
+                time.sleep(1)
+                work_type_input.send_keys(Keys.RETURN)
+                # The form re-renders after a type change; wait for the summary
+                # field to become interactable (not just present) before proceeding.
+                # Using element_to_be_clickable avoids ElementNotInteractableException
+                # during the transition — this was the root cause of double-crash.
+                WebDriverWait(self.driver, 20).until(
+                    EC.element_to_be_clickable((By.XPATH, '//input[@id="summary-field"]'))
                 )
-            except Exception:
-                pass
+                log.info("Work type changed to Bug, form re-render complete")
+            except Exception as e:
+                log.warning(f"Could not set Work type to Bug: {e}")
 
-            def _insert_text_in_editor(text):
-                """Insert text at current cursor position using execCommand (instant, not char-by-char)."""
+        # Fill in Summary — uses element_to_be_clickable to guard against a
+        # still-rendering form when Bug type was just changed.
+        summary_value = f"{snow_info.get('Course','')}: ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} - {analysis.get('jira_title', '')} - {snow_info.get('snow_id','')}"
+        summary_field = WebDriverWait(self.driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, '//input[@id="summary-field"]'))
+        )
+        summary_field.send_keys(summary_value)
+
+        # Fill the ProseMirror description editor.
+        # The "Create Bug" template pre-fills a table with URL / Reporter RHNID /
+        # Section Title rows plus an "Issue description" heading.
+        # We use JS insertText for instant paste (send_keys types char-by-char).
+        translated = classification.get("translated_student_feedback", snow_info.get("Description", ""))
+
+        # Wait for the editor to be present, then wait for the Bug template's
+        # <td> cells to render.  We intentionally avoid caching the element
+        # reference — Jira's React can re-render the editor DOM after the
+        # template loads, turning any cached ref stale immediately.
+        WebDriverWait(self.driver, 10).until(
+            EC.presence_of_element_located((By.ID, 'ak-editor-textarea'))
+        )
+        try:
+            WebDriverWait(self.driver, 10).until(
+                lambda d: d.find_elements(By.CSS_SELECTOR, '#ak-editor-textarea td')
+            )
+        except Exception:
+            pass
+
+        def _insert_text_in_editor(text):
+            """Insert text at current cursor position using execCommand (instant, not char-by-char)."""
+            self.driver.execute_script(
+                "document.execCommand('insertText', false, arguments[0]);", text
+            )
+
+        # Click the <p> inside each <td> value cell to ensure cursor placement.
+        # Empty cells have a tiny <p> with &nbsp; that's hard to click on the
+        # <td> itself, so we target the inner paragraph.
+        # Always fetch table_cells fresh here (no cached editor ref = no stale ref).
+        table_cells = self.driver.find_elements(By.CSS_SELECTOR, '#ak-editor-textarea td')
+        cell_values = [
+            snow_info.get("URL", ""),
+            snow_info.get("RHNID", ""),
+            snow_info.get("Title", ""),
+        ]
+        if table_cells:
+            for cell, value in zip(table_cells, cell_values):
+                inner_p = cell.find_elements(By.TAG_NAME, 'p')
+                target = inner_p[0] if inner_p else cell
                 self.driver.execute_script(
-                    "document.execCommand('insertText', false, arguments[0]);", text
+                    "var el = arguments[0]; el.focus ? el.focus() : el.click();"
+                    "var range = document.createRange(); range.selectNodeContents(el);"
+                    "var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);"
+                    "sel.collapseToStart();",
+                    target
                 )
+                time.sleep(0.2)
+                _insert_text_in_editor(value)
+        else:
+            # No table — click the editor by locating it fresh, then type inline.
+            editor = self.driver.find_element(By.ID, 'ak-editor-textarea')
+            ActionChains(self.driver).click(editor).perform()
+            time.sleep(0.3)
 
-            # Click the <p> inside each <td> value cell to ensure cursor placement.
-            # Empty cells have a tiny <p> with &nbsp; that's hard to click on the
-            # <td> itself, so we target the inner paragraph.
-            table_cells = desc_editor.find_elements(By.XPATH, './/td')
-            cell_values = [
-                snow_info.get("URL", ""),
-                snow_info.get("RHNID", ""),
-                snow_info.get("Title", ""),
-            ]
-            if table_cells:
-                for cell, value in zip(table_cells, cell_values):
-                    inner_p = cell.find_elements(By.TAG_NAME, 'p')
-                    target = inner_p[0] if inner_p else cell
-                    self.driver.execute_script(
-                        "var el = arguments[0]; el.focus ? el.focus() : el.click();"
-                        "var range = document.createRange(); range.selectNodeContents(el);"
-                        "var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);"
-                        "sel.collapseToStart();",
-                        target
-                    )
-                    time.sleep(0.2)
-                    _insert_text_in_editor(value)
-            else:
-                ActionChains(self.driver).click(desc_editor).perform()
-                time.sleep(0.3)
-
-            # The template already has bold headings: "Issue description",
-            # "Steps to reproduce:", "Workaround:", "Expected result:" with
-            # empty paragraphs below each. We click into those empty <p> elements
-            # and insert just the content.
-            def _fill_section(heading_text, content):
-                """Find the empty <p> after a bold heading and insert content there."""
-                if not content or not content.strip():
-                    return
-                self.driver.execute_script("""
-                    var editor = arguments[0];
-                    var heading = arguments[1];
-                    var text = arguments[2];
-                    var paragraphs = editor.querySelectorAll('p');
-                    for (var i = 0; i < paragraphs.length; i++) {
-                        var strong = paragraphs[i].querySelector('strong');
-                        if (strong && strong.textContent.trim().toLowerCase().startsWith(heading.toLowerCase())) {
-                            // Found the heading -- target the next <p> sibling
-                            var next = paragraphs[i].nextElementSibling;
-                            if (next && next.tagName === 'P') {
-                                var range = document.createRange();
-                                range.selectNodeContents(next);
-                                var sel = window.getSelection();
-                                sel.removeAllRanges();
-                                sel.addRange(range);
-                                sel.collapseToStart();
-                                document.execCommand('insertText', false, text);
-                                return;
-                            }
+        # The template already has bold headings: "Issue description",
+        # "Steps to reproduce:", "Workaround:", "Expected result:" with
+        # empty paragraphs below each. We click into those empty <p> elements
+        # and insert just the content.
+        # _fill_section finds the editor via document.getElementById inside JS
+        # so it is never affected by a stale Python element reference.
+        def _fill_section(heading_text, content):
+            """Find the empty <p> after a bold heading and insert content there."""
+            if not content or not content.strip():
+                return
+            self.driver.execute_script("""
+                var editor = document.getElementById('ak-editor-textarea');
+                var heading = arguments[0];
+                var text = arguments[1];
+                if (!editor) return;
+                var paragraphs = editor.querySelectorAll('p');
+                for (var i = 0; i < paragraphs.length; i++) {
+                    var strong = paragraphs[i].querySelector('strong');
+                    if (strong && strong.textContent.trim().toLowerCase().startsWith(heading.toLowerCase())) {
+                        // Found the heading -- target the next <p> sibling
+                        var next = paragraphs[i].nextElementSibling;
+                        if (next && next.tagName === 'P') {
+                            var range = document.createRange();
+                            range.selectNodeContents(next);
+                            var sel = window.getSelection();
+                            sel.removeAllRanges();
+                            sel.addRange(range);
+                            sel.collapseToStart();
+                            document.execCommand('insertText', false, text);
+                            return;
                         }
                     }
-                """, desc_editor, heading_text, content)
-                time.sleep(0.2)
+                }
+            """, heading_text, content)
+            time.sleep(0.2)
 
-            _fill_section("Issue description", translated)
-            _fill_section("Workaround", self._normalize_suggested_correction(
-                analysis.get('suggested_correction', '')))
+        _fill_section("Issue description", translated)
+        _fill_section("Workaround", self._normalize_suggested_correction(
+            analysis.get('suggested_correction', '')))
 
-            # Priority tab -> set priority to Minor
+        # Priority tab -> set priority to Minor
+        try:
+            time.sleep(1)
+            priority_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH,
+                    '//input[contains(@id, "priority")]'
+                ))
+            )
+            self.driver.execute_script("arguments[0].focus(); arguments[0].click();", priority_field)
+            time.sleep(0.5)
+            priority_field.send_keys("Minor")
+            time.sleep(1)
+            priority_field.send_keys(Keys.RETURN)
+        except Exception as e:
+            log.warning(f"Failed to set Priority: {e}")
+
+        # Components combobox
+        try:
+            components_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH,
+                    '//input[@id="components-field"]'
+                ))
+            )
+            self.driver.execute_script("arguments[0].focus(); arguments[0].click();", components_field)
+            time.sleep(0.5)
+            components_field.send_keys(snow_info.get("Course", ""))
+            time.sleep(1)
             try:
-                #self._click_tab_by_text('Priority')
-                time.sleep(1)
-                priority_field = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH,
-                        '//input[contains(@id, "priority")]'
-                    ))
-                )
-                self.driver.execute_script("arguments[0].focus(); arguments[0].click();", priority_field)
+                WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, '//*[@role="option"]'))
+                ).click()
+            except Exception:
+                components_field.send_keys(Keys.RETURN)
+
+            if classification.get("is_video_issue_ticket", False):
                 time.sleep(0.5)
-                priority_field.send_keys("Minor")
-                time.sleep(1)
-                priority_field.send_keys(Keys.RETURN)
-                #self._click_tab_by_text('Field Tab')
-            except Exception as e:
-                logging.getLogger(__name__).warning(f"Failed to set Priority: {e}")
-
-            # Components combobox
-            try:
-                components_field = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH,
-                        '//input[@id="components-field"]'
-                    ))
-                )
+                components_field = self.driver.find_element(By.XPATH, '//input[@id="components-field"]')
                 self.driver.execute_script("arguments[0].focus(); arguments[0].click();", components_field)
-                time.sleep(0.5)
-                components_field.send_keys(snow_info.get("Course",""))
+                components_field.send_keys("Video Content")
                 time.sleep(1)
                 try:
                     WebDriverWait(self.driver, 5).until(
@@ -1933,48 +1991,32 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                     ).click()
                 except Exception:
                     components_field.send_keys(Keys.RETURN)
-
-                if classification.get("is_video_issue_ticket", False):
-                    time.sleep(0.5)
-                    components_field = self.driver.find_element(By.XPATH, '//input[@id="components-field"]')
-                    self.driver.execute_script("arguments[0].focus(); arguments[0].click();", components_field)
-                    components_field.send_keys("Video Content")
-                    time.sleep(1)
-                    try:
-                        WebDriverWait(self.driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, '//*[@role="option"]'))
-                        ).click()
-                    except Exception:
-                        components_field.send_keys(Keys.RETURN)
-            except Exception as e:
-                logging.getLogger(__name__).warning(f"Failed to set Component: {e}")
-
-            # Chapter number
-            try:
-                chapter_field = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH,
-                        '//input[@id="customfield_10709-field"]'
-                    ))
-                )
-                chapter_field.send_keys(f"{snow_info.get('Chapter','')}")
-            except Exception as e:
-                logging.getLogger(__name__).warning(f"Failed to set Chapter: {e}")
-
-            # Affects versions combobox
-            try:
-                version_field = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH,
-                        '//input[@id="versions-field"]'
-                    ))
-                )
-                self.driver.execute_script("arguments[0].focus(); arguments[0].click();", version_field)
-                time.sleep(0.5)
-                version_field.send_keys(snow_info.get("Course",""))
-
-            except Exception as e:
-                logging.getLogger(__name__).warning(f"Failed to set Affects versions: {e}")
         except Exception as e:
-            logging.getLogger(__name__).warning(f"Prefill Jira create failed: {e}")
+            log.warning(f"Failed to set Component: {e}")
+
+        # Chapter number
+        try:
+            chapter_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH,
+                    '//input[@id="customfield_10709-field"]'
+                ))
+            )
+            chapter_field.send_keys(f"{snow_info.get('Chapter', '')}")
+        except Exception as e:
+            log.warning(f"Failed to set Chapter: {e}")
+
+        # Affects versions combobox
+        try:
+            version_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH,
+                    '//input[@id="versions-field"]'
+                ))
+            )
+            self.driver.execute_script("arguments[0].focus(); arguments[0].click();", version_field)
+            time.sleep(0.5)
+            version_field.send_keys(snow_info.get("Course", ""))
+        except Exception as e:
+            log.warning(f"Failed to set Affects versions: {e}")
 
 
     def _click_tab_by_text(self, tab_text: str):
