@@ -111,6 +111,10 @@ _Avoid_: Lab start (ambiguous with Lab Script)
 A command run inside the Workstation VM: `lab start <exercise>`, `lab grade <exercise>`, or `lab finish <exercise>`. Initializes, evaluates, or cleans up a specific exercise.
 _Avoid_: Lab command
 
+**First Boot**:
+The first time a do/ai-family Lab brings up its OpenShift cluster after Start Lab / `lab start`. Lab Scripts run an OpenShift Cluster Readiness Check (waiting on operators such as authentication, kube-apiserver, network) and may take about 30–40 minutes before the Lab is usable. Expected platform warm-up, not a Defect by itself.
+_Avoid_: Slow lab (ambiguous), certificate error, git clone failure, SSL error
+
 **Workstation**:
 The primary VM in a Lab. The Learner's entry point; all Lab Scripts are run from here. Connects via SSH to other VMs (servera, serverb, utility, etc.).
 
@@ -145,4 +149,5 @@ The time window during which a specific engineer handles incoming tickets. Exter
 - Only GE and Lab Exercise sections have predictable, runnable outcomes in the Lab.
 - Many Feedbacks can map to one Defect (deduplication). One Feedback can produce multiple Defects.
 - A "missing information" complaint is often valid when Specifications lack detail only found in Show Solution.
-- OpenShift courses (`do` family) have ~40 min first-boot time; complaints about slow startup in early chapters are usually expected behavior.
+- do/ai-family Labs often need ~30–40 minutes on First Boot (Cluster Readiness Check / operators still coming up); complaints that match that startup pattern are usually expected behavior.
+- Git clone, TLS/SSL certificate, and application errors inside a running workbench are not First Boot — do not treat them as cluster warm-up.
