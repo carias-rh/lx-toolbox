@@ -115,6 +115,10 @@ _Avoid_: Lab start (ambiguous with Lab Script)
 A command run inside the Workstation VM: `lab start <exercise>`, `lab grade <exercise>`, or `lab finish <exercise>`. Initializes, evaluates, or cleans up a specific exercise.
 _Avoid_: Lab command
 
+**First Boot**:
+The first time a do/ai-family Lab brings up its OpenShift cluster after Start Lab / `lab start`. Lab Scripts run an OpenShift Cluster Readiness Check (waiting on operators such as authentication, kube-apiserver, network) and may take about 30–40 minutes before the Lab is usable. Expected platform warm-up, not a Defect by itself.
+_Avoid_: Slow lab (ambiguous), certificate error, git clone failure, SSL error
+
 **Workstation**:
 The primary VM in a Lab. The Learner's entry point; all Lab Scripts are run from here. Connects via SSH to other VMs (servera, serverb, utility, etc.).
 
