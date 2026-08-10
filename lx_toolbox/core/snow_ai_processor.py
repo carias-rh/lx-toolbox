@@ -1729,7 +1729,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             "Return null only if nothing from tiers 1–5 applies.\n"
             "NEVER return a bare Kubernetes/container infrastructure noun without a qualifying name: "
             "'pod', 'image', 'container', 'operator', 'deployment', 'service', 'namespace' alone are too generic. "
-            "NEVER return a course code or course ID (e.g. 'DO188', 'rh124') or a section identifier (e.g. 'ch01s02') — those are already in the search query.\n\n"
+            "NEVER return a course code or course ID (e.g. 'DO188', 'rh124') or a section identifier (e.g. 'ch01s02'), nor general course words such as lab, comprehensive review, guided exercise, etc. — those are already in the search query.\n\n"
             f"<feedback>\n{snow_info.get('Description', '')}\n</feedback>\n\n"
             'Output JSON: {"keyword": "<value>"} or {"keyword": null}\n'
             f"{self._json_output_rules()}"
