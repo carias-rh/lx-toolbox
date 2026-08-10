@@ -381,6 +381,115 @@ class SnowAIProcessor:
         return self._ask_ollama(prompt, plain_text=plain_text)
 
     @staticmethod
+    def _sanitize_jira_title(value) -> str:
+        """Return a clean lowercase Jira title with words separated by single spaces.
+
+        Replaces underscores and dashes with spaces, strips any remaining
+        non-alphanumeric characters, collapses whitespace runs, and lowercases.
+        Accepts None and returns an empty string in that case.
+        """
+        if not value:
+            return ""
+        text = str(value)
+        text = re.sub(r"[_\-]+", " ", text)
+        text = re.sub(r"[^\w\s]", "", text)
+        text = re.sub(r"\s{2,}", " ", text)
+        return text.lower().strip()
+
+    # ------------------------------------------------------------------
+    # Reply-mode normalizers (#24)
+    # ------------------------------------------------------------------
+
+    _CONTENT_MODE_ALIASES: dict = {
+        "confirm": "confirm_defect",
+        "defect": "confirm_defect",
+        "teaching": "teach",
+        "confusion": "teach",
+        "ask": "ask_more",
+        "need_more": "ask_more",
+        "needs_more": "ask_more",
+        "lab": "lab_pending",
+        "pending": "lab_pending",
+        "explain": "explain_expected",
+        "expected": "explain_expected",
+    }
+    _CONTENT_VALID_MODES: frozenset = frozenset(
+        {"confirm_defect", "teach", "ask_more", "lab_pending", "explain_expected"}
+    )
+
+    _ENV_MODE_ALIASES: dict = {
+        "confirm": "confirm_defect",
+        "defect": "confirm_defect",
+        "teach": "explain_expected",
+        "teaching": "explain_expected",
+        "first_boot": "explain_expected",
+        "firstboot": "explain_expected",
+        "explain": "explain_expected",
+        "expected": "explain_expected",
+        "ask": "ask_more",
+        "need_more": "ask_more",
+        "lab": "lab_pending",
+        "pending": "lab_pending",
+    }
+    _ENV_VALID_MODES: frozenset = frozenset(
+        {"confirm_defect", "explain_expected", "ask_more", "lab_pending"}
+    )
+
+    @classmethod
+    def _normalize_content_analysis(cls, parsed: dict) -> dict:
+        """Canonicalise reply_mode, clear jira_description on non-defect modes, sanitize jira_title."""
+        raw = str(parsed.get("reply_mode", "")).strip().lower().replace("-", "_").replace(" ", "_")
+        mode = cls._CONTENT_MODE_ALIASES.get(raw, raw)
+        if mode not in cls._CONTENT_VALID_MODES:
+            mode = "confirm_defect" if parsed.get("is_valid_issue") else "ask_more"
+        parsed["reply_mode"] = mode
+        if mode != "confirm_defect":
+            parsed["jira_description"] = ""
+        if "jira_title" in parsed:
+            parsed["jira_title"] = cls._sanitize_jira_title(parsed.get("jira_title") or "")
+        return parsed
+
+    # Tokens that indicate the feedback is NOT a First Boot / cluster warm-up issue.
+    _NON_FIRST_BOOT_TOKENS: tuple = (
+        "git clone", "sslverify", "ssl verify", "certificate", "cert issue",
+        "tls", "http.ssl", "github.com", "x509", "ssl certificate",
+    )
+    # Tokens that confirm the feedback IS about cluster startup.
+    _STARTUP_TOKENS: tuple = (
+        "verifying cluster", "cluster state", "cluster readiness",
+        "authentication timed out", "lab start", "operators",
+        "kube-apiserver",
+    )
+
+    @classmethod
+    def _normalize_environment_analysis(cls, parsed: dict, user_issue: str = "") -> dict:
+        """Canonicalise reply_mode and sanitize jira_title after environment analysis.
+
+        Applies First Boot hard negatives: if the feedback contains git/TLS/SSL
+        tokens but lacks genuine startup-shaped evidence, force reply_mode away
+        from explain_expected so git/cert errors are never treated as cluster warm-up.
+        """
+        raw = str(parsed.get("reply_mode", "")).strip().lower().replace("-", "_").replace(" ", "_")
+        mode = cls._ENV_MODE_ALIASES.get(raw, raw)
+        if mode not in cls._ENV_VALID_MODES:
+            mode = "confirm_defect" if parsed.get("is_valid_issue") else "ask_more"
+
+        # First Boot hard-negative guard (#25)
+        if mode == "explain_expected":
+            feedback_l = (user_issue or "").lower()
+            has_non_first_boot = any(t in feedback_l for t in cls._NON_FIRST_BOOT_TOKENS)
+            has_startup = any(t in feedback_l for t in cls._STARTUP_TOKENS)
+            if has_non_first_boot and not has_startup:
+                mode = "ask_more"
+
+        parsed["reply_mode"] = mode
+        if mode != "confirm_defect":
+            parsed["jira_description"] = ""
+        if "jira_title" in parsed:
+            parsed["jira_title"] = cls._sanitize_jira_title(parsed.get("jira_title") or "")
+        return parsed
+
+    @staticmethod
     def _normalize_suggested_correction(value) -> str:
         """Convert suggested_correction to string if LLM returns a dict instead of string."""
         if value is None:
@@ -1210,7 +1319,9 @@ For example:
             "\n        \"is_valid_issue\": true," +
             "\n        \"suggested_correction\": \"If the issue is valid, indicate what words, lines, or commands that should be changed in the guide_text to fix the issue. If the issue is valid but there is not enough information it could be possible that a deeper investigation within the lab environment is required. Do not include any explanations or markdown formatting outside the JSON object.\"," +
             "\n        \"summary\": \"a short/medium summary of the 'analysis' field\"," +
-            "\n        \"jira_title\": \"a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes\"\n        }"
+            "\n        \"reply_mode\": \"one of: confirm_defect (real defect found), teach (learner confusion — explain the concept), ask_more (not enough info), lab_pending (lab still initialising), explain_expected (expected behaviour)\"," +
+            "\n        \"jira_description\": \"cleaned technical problem statement for the Jira Defect — no raw learner wording, no PII, no suggested fix. Empty string when reply_mode is not confirm_defect.\"," +
+            "\n        \"jira_title\": \"a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase\"\n        }"
         )
 
         prompt_text = f"""
@@ -1240,11 +1351,13 @@ For example:
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Content analysis response: {response}")
         parsed = self._parse_llm_json(response, context="LLM content analysis")
-        return parsed or {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
+        if not parsed:
+            parsed = {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": "", "reply_mode": "ask_more"}
+        return self._normalize_content_analysis(parsed)
 
     def analyze_environment_issue(self, user_issue: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing environment issue using LLM")
-        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "jira_title": "a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes"}'
+        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "reply_mode": "one of: confirm_defect, explain_expected, ask_more, lab_pending", "jira_description": "cleaned technical problem statement for Jira — no raw learner wording, no PII. Empty string when reply_mode is not confirm_defect.", "jira_title": "a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase"}'
         prompt_text = f"""
         You are an expert in Red Hat Training lab environments.
         {self._build_operational_context("environment", snow_info)}
@@ -1263,7 +1376,9 @@ For example:
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Environment analysis response:\n {response}")
         parsed = self._parse_llm_json(response, context="LLM environment analysis")
-        return parsed or {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
+        if not parsed:
+            parsed = {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": "", "reply_mode": "ask_more"}
+        return self._normalize_environment_analysis(parsed, user_issue=user_issue)
 
     def analyze_video_issue(self, user_issue: str, video_available: bool, snow_info: dict | None = None) -> dict:
         """
@@ -1280,7 +1395,7 @@ For example:
         
         video_context = "The video player IS available on the page, so videos should be accessible." if video_available else "The video player button is NOT available on the page, which typically means videos for this course version are still being produced."
         
-        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "jira_title": "a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes"}'
+        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "reply_mode": "one of: confirm_defect (real video defect), ask_more (not enough info), explain_expected (videos not yet produced)", "jira_description": "cleaned technical problem statement for Jira — no raw learner wording, no PII. Empty string when reply_mode is not confirm_defect.", "jira_title": "a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase"}'
         
         prompt_text = f"""
         You are an expert in Red Hat Training video content issues.
@@ -1314,7 +1429,7 @@ For example:
         - video_issue_type: one of "videos_not_ready", "content_mismatch", "subtitle_issue", "technical_issue", "other"
         - suggested_correction: what needs to be fixed (empty if videos_not_ready)
         - summary: short summary of the analysis
-        - jira_title: a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes
+        - jira_title: a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase
         
         Do not include any explanations, xml or markdown formatting outside the JSON object.
         {self._json_output_rules()}
@@ -1322,14 +1437,20 @@ For example:
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Video analysis response: {response}")
         parsed = self._parse_llm_json(response, context="LLM video analysis")
-        return parsed or {
-            "is_valid_issue": False,
-            "needs_jira": False,
-            "video_issue_type": "other",
-            "summary": "analysis parse error",
-            "suggested_correction": "",
-            "jira_title": ""
-        }
+        if not parsed:
+            parsed = {
+                "is_valid_issue": False,
+                "needs_jira": False,
+                "video_issue_type": "other",
+                "summary": "analysis parse error",
+                "suggested_correction": "",
+                "jira_title": "",
+                "reply_mode": "ask_more",
+            }
+        # Sanitize jira_title from LLM slippage
+        if "jira_title" in parsed:
+            parsed["jira_title"] = self._sanitize_jira_title(parsed.get("jira_title") or "")
+        return parsed
 
     def is_long_boot_lab_first_start(self, snow_info: dict, analysis_response_json: dict) -> bool:
         course = snow_info.get("Course", "")
@@ -1362,65 +1483,90 @@ For example:
             return str(response).strip().lower().startswith("true")
         return False
 
+    # Per-mode reply instructions (#27)
+    _REPLY_MODE_INSTRUCTIONS: dict = {
+        "confirm_defect": (
+            "A defect has been confirmed in the course content or lab.\n"
+            "- Warmly acknowledge the Learner's report.\n"
+            "- Let them know the team has identified the issue and a Defect report has been filed.\n"
+            "- Do NOT describe the diagnosis, the analysis steps, or what exactly was wrong.\n"
+            "- Do NOT mention Jira, internal ticket numbers, or internal workflows.\n"
+            "- Do NOT suggest a workaround unless one is obvious and harmless."
+        ),
+        "teach": (
+            "The Learner's question stems from confusion about expected course behaviour, not a defect.\n"
+            "- Open with a validating phrase such as 'Good question' or 'That is a common point of confusion'.\n"
+            "- Explain the relevant concept directly and factually in second person.\n"
+            "- Do NOT imply that anything is broken or that a Defect has been filed.\n"
+            "- Do NOT diagnose out loud or describe what the LLM analysis found.\n"
+            "- Be specific: tell the Learner exactly what the expected behaviour is and why."
+        ),
+        "ask_more": (
+            "There is not enough information to confirm or rule out a defect.\n"
+            "- Politely thank the Learner and acknowledge the report.\n"
+            "- Ask for the one or two specific pieces of information that are missing (screenshot, exact error text, steps taken, course page URL).\n"
+            "- Do NOT speculate about the cause or imply a Defect has been found.\n"
+            "- Keep the reply brief and the request concrete."
+        ),
+        "lab_pending": (
+            "The Lab is still performing its First Boot (OpenShift Cluster Readiness Check).\n"
+            "- Explain that do/ai-family Labs need about 30–40 minutes on first boot for the OpenShift cluster to be ready.\n"
+            "- Suggest they wait and then run: ssh lab@utility followed by ./wait.sh to monitor progress.\n"
+            "- Do NOT imply a Defect has been filed.\n"
+            "- Be reassuring: this is expected behaviour, not a failure."
+        ),
+        "explain_expected": (
+            "The behaviour the Learner reported is expected by design.\n"
+            "- Acknowledge the Learner's concern warmly.\n"
+            "- Explain clearly why the observed behaviour is expected, without implying anything is broken.\n"
+            "- Do NOT imply a Defect has been filed.\n"
+            "- If relevant, suggest a concrete next step (e.g. wait, use previous version, consult course page)."
+        ),
+    }
+
     def craft_llm_response(self, snow_info: dict, analysis_response_json: dict, classification_data: dict | None = None) -> dict:
         self.logger("LLM Crafting reply to student")
         student_name = snow_info.get("full_name", "").split(" ")[0]
-        course = snow_info.get("Course", "")
-        chapter = snow_info.get("Chapter", "")
-        section = snow_info.get("Section", "")
         url = snow_info.get("URL", "")
+        reply_mode = analysis_response_json.get("reply_mode", "ask_more")
+        mode_instructions = self._REPLY_MODE_INSTRUCTIONS.get(
+            reply_mode, self._REPLY_MODE_INSTRUCTIONS["ask_more"]
+        )
+        learner_language = (classification_data or {}).get("language", "en")
+        if learner_language.startswith("en"):
+            language_rule = "Write the reply in English."
+        else:
+            language_rule = f"Write the reply in the Learner's language: {learner_language}. Do NOT write in English."
+
         json_example = '{"response": "the response to the student"}'
         prompt_text = f"""
-    You are a helpful Red Hat Training support representative responding to a student's feedback.
+    You are a helpful Red Hat Training support representative responding to a Learner's Feedback.
     {self._build_operational_context("reply", snow_info)}
     {self.communication_reply_notes}
 
-    Student Information:
-    - Name: {student_name}
-    - Course: {course}
-    - Chapter: {chapter}
-    - Section: {section}
+    Learner name: {student_name}
+    Course page: {url}
 
-    Student's Original Feedback:
-    {snow_info.get('Description', '')}
+    Analysis summary: {analysis_response_json.get('summary', '')}
+    Analysis conclusion: {analysis_response_json.get('analysis', '')}
 
-    Course guide URL:
-    {url}
+    Mode: {reply_mode}
+    Mode-specific instructions:
+    {mode_instructions}
 
-    Analysis Results:
-    - Issue Summary: {analysis_response_json.get('summary', '')}
-    - Is Valid Issue: {analysis_response_json.get('is_valid_issue', False)}
-    - Suggested Correction: {self._normalize_suggested_correction(analysis_response_json.get('suggested_correction', ''))}
-    - Analysis: {analysis_response_json.get('analysis', '')}
-    - Video Issue Type: {analysis_response_json.get('video_issue_type', '')}
-    - Classification Flags: {json.dumps(classification_data or {}, ensure_ascii=True)}
+    Universal rules (apply on top of the mode instructions):
+    - Address the Learner in second person by their first name. Never use third person.
+    - Do NOT include a greeting ("Dear …" / "Hi …") — it is added automatically.
+    - Do NOT add a closing salutation or signature.
+    - Do NOT mention Jira, Defect IDs, internal tracking, or internal workflows.
+    - Do NOT mention course codes, chapter numbers, section numbers, or "valid issue" status.
+    - NEVER use the words 'guide text', 'guide_text', or 'course guide text'. Use 'course material', 'exercise instructions', or 'course content'.
+    - Write in short paragraphs separated by blank lines. Each paragraph covers one idea.
+    - {language_rule}
 
-    Craft a professional, helpful response to the student based on the analysis results that:
-    1. Do NOT include a greeting line such as 'Dear Name,' or 'Hi Name,' — the greeting is added separately.
-    2. Start directly with thanking them and acknowledging the feedback shortly.
-    3. If the analysis is not valid or the evidence is insufficient, ask for more information, a screenshot, and confirmation of the exact course section.
-    4. Don't add a signature nor final salutation to the response.
-    5. Do not mention Jira or internal tracking.
-    6. NEVER use the words 'guide text', 'guide_text', or 'course guide text'. Use natural alternatives like 'course material', 'exercise instructions', 'course page', or 'course content'.
-    7. Write the reply in short paragraphs separated by blank lines (two newlines). Each paragraph should cover one distinct idea: acknowledgement, explanation of the issue, what we are doing about it, and next steps for the learner. Do NOT write the entire reply as a single block of text.
-
-    Keep the response concise but informative.
-
-    Special cases:
-    - If the issue looks like a doXXX first-boot delay, explain that the first boot can take about 30-40 minutes and mention ssh lab@utility plus ./wait.sh.
-    - If videos for this version are not ready, explain that clearly and suggest using the previous version if video is important.
-    - Only suggest deleting and recreating the lab when the analysis indicates that this is an appropriate recovery step.
-    - If the learner seems to have used theory content as if it were a guided exercise or lab, clarify that politely.
-    - IMPORTANT: If the analysis says lab verification is needed, or the issue involves files, directories, or scripts on the lab VM that we have not yet verified, do NOT tell the learner what the fix is. Instead, say something like: 'Thank you for your feedback. We are currently looking into this and verifying it in the lab environment. We will get back to you once we have confirmed the issue.' Keep it short and reassuring.
-    - Never confirm an unverified filesystem claim as fact in the reply.
-
-    Format the response as a JSON object with the following fields:
-    - response: the response to the student
-
+    Format: JSON with one field.
     {self._json_output_rules()}
-
-    Example:
-    {json_example}
+    Example: {json_example}
     """
         logging.getLogger(__name__).debug(f"LLM student reply prompt length: {len(prompt_text)} chars")
         response = self.ask_llm(prompt_text)
@@ -1451,87 +1597,53 @@ For example:
         COMMENTS_XPATH = '//*[@id="activity-stream-comments-textarea"]'
 
         try:
-            # Add work note with summary of analysis
-            summary = self._clean_llm_text(analysis_response_json.get('summary', 'No summary available'))
-            analysis = self._clean_llm_text(analysis_response_json.get('analysis', ''))
-            work_note = f"Summary:\n{summary}\n\nLLM Analysis:\n{analysis}\n"
+            # ------------------------------------------------------------------
+            # Work notes — always in English (#28)
+            # ------------------------------------------------------------------
+            reply_mode = analysis_response_json.get("reply_mode", "ask_more")
+            learner_language = classification_data.get("language", "en")
+            translated_feedback = classification_data.get("translated_student_feedback", snow_info.get("Description", ""))
+            summary = self._clean_llm_text(analysis_response_json.get("summary", "No summary available"))
+            analysis_text = self._clean_llm_text(analysis_response_json.get("analysis", ""))
+            work_note = (
+                f"Translated feedback:\n{translated_feedback}\n\n"
+                f"Summary:\n{summary}\n\n"
+                f"LLM Analysis:\n{analysis_text}\n"
+            )
             try:
                 WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(work_note)
             except Exception:
                 pass
 
-            # Prepare and add student reply
-            reply_text = ""
-            if classification_data.get("is_content_issue_ticket", False):
-                crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
-                reply_text = crafted.get("response", "")
-                default_jira_reply = (
-                    f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
-                    f"We created a Jira ticket to fix it in the next release.\n\n"
-                    f"Thanks again for your contributions to improving the course guide! \n\n"
-                )
+            # ------------------------------------------------------------------
+            # Learner-facing reply — driven by reply_mode (#27)
+            # ------------------------------------------------------------------
+            crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
+            reply_text = crafted.get("response", "")
+
+            try:
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
+            except Exception:
+                pass
+
+            # Annotate work notes with Jira gate decision
+            jira_note = (
+                f"\n\nreply_mode: {reply_mode}"
+                if reply_mode != "confirm_defect"
+                else f"\n\nreply_mode: {reply_mode} — Jira Defect to be filed."
+            )
+            try:
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(jira_note)
+            except Exception:
+                pass
+
+            # English copy of the reply — only when the Learner is not writing in English (#28)
+            if reply_text.strip() and not learner_language.startswith("en"):
+                english_reply = self.translate_text(reply_text, learner_language)
                 try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys("\n\nDEFAULT RESPONSE:")
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(default_jira_reply + signature)
-                except Exception:
-                    pass
-            elif classification_data.get("is_video_issue_ticket", False):
-                # Handle video issues
-                video_issue_type = analysis_response_json.get("video_issue_type", "other")
-                needs_jira = analysis_response_json.get("needs_jira", False)
-                
-                if video_issue_type == "videos_not_ready" or not needs_jira:
-                    # Videos not yet available for this course version - no Jira needed
-                    reply_text = (
-                        f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
-                        f"Thank you for reaching out regarding the video content for this course.\n\n"
-                        f"The videos for this course version are still being produced by our team. "
-                        f"Once they become available, the \"Enable video player\" button will appear "
-                        f"in the dock bar at the bottom of the learning platform.\n\n"
-                        f"If video is an important resource for you right now, I would recommend using "
-                        f"the previous version of the course in the meantime, because the written content "
-                        f"usually does not change much between versions.\n\n"
-                        f"We appreciate your patience and understanding. Please check back later "
-                        f"for video availability.\n\n"
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(
+                        f"\n\nLearner reply (English):\n{english_reply}\n"
                     )
-                    try:
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys("\n\nVIDEO NOT READY - No Jira needed. Videos for this course version are still being produced.")
-                    except Exception:
-                        pass
-                else:
-                    # Video content issue that needs a Jira ticket
-                    crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
-                    reply_text = crafted.get("response", "")
-                    default_jira_reply = (
-                        f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
-                        f"We have created a Jira ticket to address this video issue.\n\n"
-                        f"Thanks for helping us improve the video content!\n\n"
-                    )
-                    try:
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys("\n\nVIDEO ISSUE - Jira ticket created with 'Video Content' component.")
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(default_jira_reply + signature)
-                    except Exception:
-                        pass
-            elif classification_data.get("is_environment_issue_ticket", False) and self.is_long_boot_lab_first_start(snow_info, analysis_response_json):
-                reply_text = (
-                    f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
-                    f"Thank you for your feedback. Labs in this course can take about 30-40 minutes to finish the setup the first time they are booted up, so please give it some more time. Once everything is working, it should be much faster.\n\n"
-                    f"You can monitor the status of the cluster by ssh lab@utility and running the ./wait.sh script. Once the script has finished the scripts are ready to be run.\n\n"
-                    f"If by the time you read this message it is still not working fine, I would suggest deleting and creating a new lab environment, and then try to run the lab again.\n\n"
-                    f"Please, let me know if the issue persists.\n\n"
-                )
-                try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
-                except Exception:
-                    pass
-            else:
-                crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
-                reply_text = crafted.get("response", "")
-                try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
                 except Exception:
                     pass
 
@@ -1844,7 +1956,8 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
         # Fill in Summary — uses element_to_be_clickable to guard against a
         # still-rendering form when Bug type was just changed.
-        summary_value = f"{snow_info.get('Course','')}: ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} - {analysis.get('jira_title', '')} - {snow_info.get('snow_id','')}"
+        raw_title = self._sanitize_jira_title(analysis.get("jira_title") or "")
+        summary_value = f"{snow_info.get('Course','')}: ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} - {raw_title} - {snow_info.get('snow_id','')}"
         summary_field = WebDriverWait(self.driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, '//input[@id="summary-field"]'))
         )
@@ -1854,7 +1967,9 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # The "Create Bug" template pre-fills a table with URL / Reporter RHNID /
         # Section Title rows plus an "Issue description" heading.
         # We use JS insertText for instant paste (send_keys types char-by-char).
-        translated = classification.get("translated_student_feedback", snow_info.get("Description", ""))
+        # Prefer the LLM-cleaned description; fall back to translated feedback as a safety net.
+        jira_desc = (analysis.get("jira_description") or "").strip()
+        translated = jira_desc or classification.get("translated_student_feedback", snow_info.get("Description", ""))
 
         # Wait for the editor to be present, then wait for the Bug template's
         # <td> cells to render.  We intentionally avoid caching the element
@@ -2064,12 +2179,14 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 snow_info = self.get_snow_info(snow_id)
                 full_description = self._build_full_description(snow_info)
                 classification = self.classify_ticket_llm(full_description, snow_info)
-                if classification.get("language") == "en":
+                if classification.get("language", "en").startswith("en"):
                     translated = full_description
                 else:
                     translated = self.translate_text(full_description, classification.get("language", "en"))
                 classification["translated_student_feedback"] = translated
-                analysis = {"summary": "", "suggested_correction": "", "jira_title": "", "is_valid_issue": False}
+                # Store English translation so analysis methods use it as primary evidence (#28)
+                snow_info["Description_en"] = translated
+                analysis = {"summary": "", "suggested_correction": "", "jira_title": "", "is_valid_issue": False, "reply_mode": "ask_more"}
 
                 # Tab 2: ROL chapter/section
                 self.driver.switch_to.window(ticket_window)
@@ -2103,7 +2220,8 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                         self.logger("Video issue detected - navigating to course page without starting lab")
                         self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
                         video_player_available = self.lab_mgr.check_video_player_available()
-                        analysis = self.analyze_video_issue(full_description, video_player_available, snow_info)
+                        analysis_input = snow_info.get("Description_en") or translated or full_description
+                        analysis = self.analyze_video_issue(analysis_input, video_player_available, snow_info)
                     elif is_content_issue:
                         # Navigate to the course page
                         self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
@@ -2121,11 +2239,13 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                         except Exception as e:
                             logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
 
-                        # Perform analysis based on issue type
-                        analysis = self.analyze_content_issue(full_description, guide_text, snow_info)
+                        # Use English translation as primary analysis input (#28)
+                        analysis_input = snow_info.get("Description_en") or translated or full_description
+                        analysis = self.analyze_content_issue(analysis_input, guide_text, snow_info)
 
                     elif is_environment_issue:
-                        analysis = self.analyze_environment_issue(full_description, snow_info)
+                        analysis_input = snow_info.get("Description_en") or translated or full_description
+                        analysis = self.analyze_environment_issue(analysis_input, snow_info)
 
                     # If the issue requires lab verification, start the lab
                     if needs_lab:
@@ -2153,12 +2273,12 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"Failed updating SNOW notes/reply for {snow_id}: {e}")
 
-                # Determine if Jira ticket is needed
-                # Skip Jira for video issues where videos are just not ready yet
-                skip_jira = (
-                    classification.get("is_video_issue_ticket", False) and 
-                    (analysis.get("video_issue_type") == "videos_not_ready" or not analysis.get("needs_jira", True))
-                )
+                # Determine if Jira Defect is needed.
+                # A Defect is opened only when the analysis confirms a real defect
+                # (reply_mode == "confirm_defect"). For all other modes — learner
+                # confusion, insufficient info, expected behaviour — skip Jira.
+                reply_mode = analysis.get("reply_mode", "confirm_defect")
+                skip_jira = reply_mode != "confirm_defect"
 
                 if skip_jira:
                     self.logger("Skipping Jira creation - videos not ready, no ticket needed")
