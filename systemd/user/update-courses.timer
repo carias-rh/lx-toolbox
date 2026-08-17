@@ -1,0 +1,10 @@
+[Unit]
+Description=Run update-courses on the 1st of each month
+
+[Timer]
+OnCalendar=*-*-01 18:00:00
+Persistent=true
+Unit=update-courses.service
+
+[Install]
+WantedBy=timers.target

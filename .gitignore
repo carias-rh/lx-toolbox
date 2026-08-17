@@ -31,3 +31,9 @@ link_check*
 link_checker_screenshots/*
 api-curl-courses
 qa_reports/*
+env.bak
+test-scripts/*
+*.csv
+*.ics
+SNOW_AI_KNOWLEDGE_INTAKE.md
+SNOW_AI_OPERATIONAL_KNOWLEDGE.yaml

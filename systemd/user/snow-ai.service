@@ -1,0 +1,12 @@
+[Unit]
+Description=Process ServiceNow tickets with SNOW AI (user queue)
+After=graphical-session.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+KillMode=process
+EnvironmentFile=-%h/.config/systemd/user/lx-toolbox.env
+ExecStart=/bin/bash -c 'cd "$LX_TOOLBOX_DIR" && exec ./scripts/lx-tool snowai'
+StandardOutput=journal
+StandardError=journal
