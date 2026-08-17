@@ -1263,8 +1263,11 @@ class LabManager:
         if not keys_to_click:
             raise ValueError("At least one virtual keyboard key must be provided.")
 
+        key_aliases = {"Enter": "↵", "Return": "↵"}
+
         try:
             for current_key in keys_to_click:
+                current_key = key_aliases.get(current_key, current_key)
                 key_xpath = f'//button[normalize-space()="{current_key}"]'
                 key_element = WebDriverWait(self.driver, timeout).until(
                     EC.element_to_be_clickable((By.XPATH, key_xpath))
@@ -1343,7 +1346,7 @@ class LabManager:
 
     def introduce_command_to_console(self, command: str, auto_enter: bool = True):
         """
-        Introduces a command to the console using the Guacamole "Send Text to Client" dialog.
+        Introduces a command to the console using the "Enter large text" dialog.
 
         Args:
             command: The command to send
@@ -1352,84 +1355,96 @@ class LabManager:
         if not command:
             return
 
+        short_cmd = command[:60] + ("..." if len(command) > 60 else "")
+        textarea_xpath = (
+            '//textarea[contains(@placeholder, "Type or paste text here")]'
+            ' | //*[@id="root"]/div/div[3]/div/div[2]/textarea'
+        )
+
+        def _close_dialog_if_open():
+            """Best-effort dialog cleanup so the UI is never left in a broken state."""
+            try:
+                close_btn = self.driver.find_element(
+                    By.CSS_SELECTOR,
+                    'button[aria-label="Close"], button[title="Close"], button:has(svg.lucide-x)'
+                )
+                self.driver.execute_script("arguments[0].click();", close_btn)
+            except Exception:
+                try:
+                    self.driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+                except Exception:
+                    pass
+
+        # --- Step 1: Open the "Enter large text" dialog ---
         try:
             send_text_button = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Enter large text"]'))
             )
             send_text_button.click()
             time.sleep(0.5)
+        except TimeoutException:
+            logging.getLogger(__name__).error(f"[console] Step 1 FAILED: 'Enter large text' button not found within 10s (cmd: {short_cmd})")
+            return
+        except Exception as e:
+            logging.getLogger(__name__).error(f"[console] Step 1 FAILED: unexpected error clicking dialog button: {e} (cmd: {short_cmd})")
+            return
 
-            # Paste command into text box
-            text_input_area = self.wait.until(
-                EC.element_to_be_clickable((By.XPATH, '//textarea'))
+        # --- Step 2: Find the textarea ---
+        try:
+            text_input_area = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, textarea_xpath))
             )
         except TimeoutException:
-            _log.error(f"[console] Step 2 FAILED: textarea #sendTextInput not visible/clickable after dialog open (cmd: {short_cmd})")
+            logging.getLogger(__name__).error(f"[console] Step 2 FAILED: textarea not visible/clickable after dialog open (cmd: {short_cmd})")
             _close_dialog_if_open()
             return
         except Exception as e:
-            _log.error(f"[console] Step 2 FAILED: unexpected error finding textarea: {e} (cmd: {short_cmd})")
+            logging.getLogger(__name__).error(f"[console] Step 2 FAILED: unexpected error finding textarea: {e} (cmd: {short_cmd})")
             _close_dialog_if_open()
             return
 
-            # Click Send button to send the command
+        # --- Step 3: Paste the command ---
+        try:
+            text_input_area.click()
+            text_input_area.clear()
+            text_input_area.send_keys(command)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"[console] Step 3 FAILED: could not type into textarea: {e} (cmd: {short_cmd})")
+            _close_dialog_if_open()
+            return
+
+        # --- Step 4: Send via Ctrl+Enter (dialog placeholder tip) ---
+        try:
+            time.sleep(0.25)
+            text_input_area.send_keys(Keys.CONTROL + Keys.ENTER)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"[console] Step 4: Ctrl+Enter failed ({e}); trying Send button (cmd: {short_cmd})")
             try:
-                time.sleep(0.25)
-                text_input_area.send_keys(Keys.CONTROL + Keys.ENTER)
-            except Exception as e:
-                self.logger(f"Error sending command: {e}")
-                try:
-                    send_text_button = self.wait.until(
-                        EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "Send")]'))
-                    )
-                    send_text_button.click()
-                except Exception as e:
-                    self.logger(f"Error sending command: {e}")
+                send_button = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "Send")]'))
+                )
+                send_button.click()
+            except Exception as e_send:
+                logging.getLogger(__name__).error(f"[console] Step 4 FAILED: could not send text: {e_send} (cmd: {short_cmd})")
+                _close_dialog_if_open()
+                return
 
-            
-            # Wait proportional to command length
-            self._wait_for_command_to_paste(command)
-
-            # Click Enter on virtual keyboard
-            if auto_enter:
-                # Wait for modal backdrop to disappear before clicking Enter
-                try:
-                    WebDriverWait(self.driver, 1).until(
-                        EC.invisibility_of_element_located((By.CSS_SELECTOR, ".modal-backdrop"))
-                    )
-                except TimeoutException:
-                    # Modal may have already closed, continue
-                    pass
-
-                # Using the specific XPath from the original implementation
-                enter_key_xpath = '//button[text()="↵"]'
-                enter_key = WebDriverWait(self.driver, 1).until(
-                        EC.element_to_be_clickable((By.XPATH, enter_key_xpath))
-                    )
-                enter_key.click()
-
-        except Exception as e:
-            _log.error(f"[console] Step 4 FAILED: unexpected error clicking Send: {e} (cmd: {short_cmd})")
-            _close_dialog_if_open()
-            return
-
-        # Wait proportional to command length for VNC session to receive the text
         self._wait_for_command_to_paste(command)
 
-        # --- Step 5: Wait for modal backdrop to close ---
+        # --- Step 5: Wait for the text dialog to close ---
         try:
             WebDriverWait(self.driver, 5).until(
-                EC.invisibility_of_element_located((By.CSS_SELECTOR, ".modal-backdrop"))
+                EC.invisibility_of_element_located((By.XPATH, textarea_xpath))
             )
         except TimeoutException:
-            _log.debug("[console] Step 5: modal backdrop still present after Send — continuing anyway")
+            logging.getLogger(__name__).debug("[console] Step 5: text dialog still present after Send — continuing anyway")
 
         # --- Step 6: Press Enter on the virtual keyboard ---
         if auto_enter:
             try:
-                self._click_virtual_keyboard_key("Enter")
+                self._click_virtual_keyboard_key("↵")
             except Exception as e_enter:
-                _log.warning(f"[console] Step 6: could not press Enter key: {e_enter} (cmd: {short_cmd})")
+                logging.getLogger(__name__).warning(f"[console] Step 6: could not press Enter key: {e_enter} (cmd: {short_cmd})")
 
     def click_on_show_solution_buttons(self):
         """Click all 'Show Solution' buttons on the current page, starting from the bottom."""
