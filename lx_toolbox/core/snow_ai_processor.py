@@ -1602,14 +1602,21 @@ For example:
             # ------------------------------------------------------------------
             reply_mode = analysis_response_json.get("reply_mode", "ask_more")
             learner_language = classification_data.get("language", "en")
-            translated_feedback = classification_data.get("translated_student_feedback", snow_info.get("Description", ""))
             summary = self._clean_llm_text(analysis_response_json.get("summary", "No summary available"))
             analysis_text = self._clean_llm_text(analysis_response_json.get("analysis", ""))
-            work_note = (
-                f"Translated feedback:\n{translated_feedback}\n\n"
-                f"Summary:\n{summary}\n\n"
-                f"LLM Analysis:\n{analysis_text}\n"
-            )
+            # Only include translated feedback when the Learner wrote in a non-English language
+            if learner_language.startswith("en"):
+                work_note = (
+                    f"Summary:\n{summary}\n\n"
+                    f"LLM Analysis:\n{analysis_text}\n"
+                )
+            else:
+                translated_feedback = classification_data.get("translated_student_feedback", snow_info.get("Description", ""))
+                work_note = (
+                    f"Translated feedback:\n{translated_feedback}\n\n"
+                    f"Summary:\n{summary}\n\n"
+                    f"LLM Analysis:\n{analysis_text}\n"
+                )
             try:
                 WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(work_note)
             except Exception:
