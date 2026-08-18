@@ -1340,7 +1340,7 @@ class LabManager:
             command: The command being pasted
             min_wait: Minimum wait time in seconds (default 0.5s to allow modal to close)
         """
-        delay_per_char = self.config.get("QA", "paste_delay_per_char", 0.007)
+        delay_per_char = self.config.get("QA", "paste_delay_per_char", 0.0005)
         calculated_wait = len(command) * delay_per_char
         time.sleep(max(calculated_wait, min_wait))
 
@@ -1381,7 +1381,7 @@ class LabManager:
                 EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Enter large text"]'))
             )
             send_text_button.click()
-            time.sleep(0.5)
+            time.sleep(0.15)
         except TimeoutException:
             logging.getLogger(__name__).error(f"[console] Step 1 FAILED: 'Enter large text' button not found within 10s (cmd: {short_cmd})")
             return
@@ -1415,7 +1415,7 @@ class LabManager:
 
         # --- Step 4: Send via Ctrl+Enter (dialog placeholder tip) ---
         try:
-            time.sleep(0.25)
+            time.sleep(0.15)
             text_input_area.send_keys(Keys.CONTROL + Keys.ENTER)
         except Exception as e:
             logging.getLogger(__name__).warning(f"[console] Step 4: Ctrl+Enter failed ({e}); trying Send button (cmd: {short_cmd})")
