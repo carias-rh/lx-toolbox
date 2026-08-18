@@ -22,6 +22,32 @@ if not logging.getLogger().hasHandlers():
     logging.basicConfig(level=_numeric_level, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
 
+_SURNAME_PARTICLES = frozenset({
+    "da", "das", "de", "del", "della", "di", "do", "dos",
+    "van", "von", "ten", "ter", "le", "la", "du",
+})
+
+
+def _name_tokens(value: str) -> List[str]:
+    return [token for token in re.split(r"[^\w'-]+", value.strip().lower()) if token]
+
+
+def _first_surname(full_name: str) -> str:
+    """Given name plus optional particle: 'Jordi Sola Alaball' → 'Sola', 'Ricardo Da Costa' → 'Da Costa'."""
+    tokens = _name_tokens(full_name)
+    if len(tokens) < 2:
+        return tokens[0] if tokens else ""
+    if tokens[1] in _SURNAME_PARTICLES and len(tokens) >= 3:
+        return f"{tokens[1]} {tokens[2]}"
+    return tokens[1]
+
+
+def _contains_consecutive(haystack: List[str], needle: List[str]) -> bool:
+    if not needle or len(needle) > len(haystack):
+        return False
+    span = len(needle)
+    return any(haystack[i:i + span] == needle for i in range(len(haystack) - span + 1))
+
 @dataclass
 class TeamConfig:
     """Configuration for a specific team's auto-assignment behavior"""
@@ -50,6 +76,25 @@ class TeamConfig:
     def get_primary_assignment_group_id(self) -> Optional[str]:
         """Return the first assignment group id as the primary one for updates."""
         return self.assignment_group_id[0] if self.assignment_group_id else None
+
+    def matches_auto_resolve_reporter(self, reporter: str) -> bool:
+        """True if reporter is a configured auto-resolve name or shares its first surname."""
+        reporter_tokens = _name_tokens(reporter)
+        if not reporter_tokens:
+            return False
+        reporter_norm = " ".join(reporter_tokens)
+        for name in self.auto_resolve_reporters:
+            name_tokens = _name_tokens(name)
+            if not name_tokens:
+                continue
+            if reporter_norm == " ".join(name_tokens):
+                return True
+            surname_tokens = _name_tokens(_first_surname(name))
+            if len("".join(surname_tokens)) < 2:
+                continue
+            if _contains_consecutive(reporter_tokens, surname_tokens):
+                return True
+        return False
 
 class ServiceNowAutoAssign:
     def __init__(self, config: ConfigManager):
@@ -126,14 +171,15 @@ class ServiceNowAutoAssign:
                 or "Hi {customer_name},\n\nThanks for submitting your feedback to the Learner Experience Team.\n\nWe are reviewing your message and will get back to you as soon as possible.\n\nBest Regards,\n{assignee_name}\n{team_name}"
             ),
             auto_resolve_reporters=[
-                "gls-ftaylor", "lauber", "rht-jordisola", "rht-zgutterman", "abhkuma@redhat.com",
-                "lxncastill", "rh-ee-smaity", "nehsingh@redhat.com", "rht-bchardim", "yuvaraj-rhls",
-                "rht-pagomez", "vig@redhat.com", "rhn-gls-rtaniguchi", "abpatel@redhat.com",
-                "rh-ee-tshi", "rht-sbonnevi", "rht-psolarvi", "wraja@redhat.com", "chetan-rhls",
-                "rdacosta1@redhat.com", "ssanyal@redhat.com", "rh-ee-jingyuwa", "vsing@redhat.com",
-                "shasingh01", "rh-ee-jyague", "rhn-gps-jdandrea", "carias@redhat.com",
-                "rht-anhernan", "rht-eparenti", "amarirom@redhat.com", "rh-ee-mtahmeed",
-                "rhn-engineering-daobrien", "nehsingh@redhat.com", "yassingh@redhat.com"
+                "Forrest Taylor", "Susan Lauber", "Jordi Sola Alaball", "Zachary Gutterman",
+                "Abhishek Kumar", "Nicol Castillo", "Satdal Maity", "Neha Singh",
+                "Benjamin Chardi Marco", "Yuvaraj Balaraju", "Patrick Gomez", "Vidyashree G",
+                "Ricardo Taniguchi", "Abdul Patel", "Tianting Shi", "Steven Bonneville",
+                "Pablo Solar Vilarino", "Wasim Raja", "Chetan Tiwary", "Ricardo Da Costa",
+                "Samik Sanyal", "Jingyu Wang", "Vikas Singh", "Shashi Singh",
+                "Jaime Yague", "Ashley D'Andrea", "Carlos Arias", "Andres Hernandez",
+                "Ed Parenti", "Antonio Mari Romero", "Mohammed Tahmeed", "David O'Brien",
+                "Yashashvi Singh",
             ],
         )
 
@@ -1070,7 +1116,7 @@ class ServiceNowAutoAssign:
                 
                 if reporter_match:
                     reporter = reporter_match.group(1).strip()
-                    if reporter in team_config.auto_resolve_reporters:
+                    if team_config.matches_auto_resolve_reporter(reporter):
                         logger.info(f"Auto-resolving ticket {ticket['number']} for reporter {reporter}")
                         
                         updates = {
