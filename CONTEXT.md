@@ -136,7 +136,15 @@ The artifact produced by a QA Run: pass/fail data, screenshots, AsciiDoc/CSV rep
 A service (deployed on OpenShift) that dispatches incoming ServiceNow tickets to engineers across teams (LX, TTS, CX) based on team configuration and shift schedules.
 
 **Shift**:
-The time window during which a specific engineer handles incoming tickets. External concept — managed by team frontends, consumed by Auto-Assign.
+The time window during which a specific engineer handles incoming work. External concept — managed by team frontends, consumed by Auto-Assign.
+
+**On-Shift Pool**:
+The set of engineers whose Shifts overlap at the moment Auto-Assign dispatches a piece of work.
+_Avoid_: roster, round-robin list, on-call list
+
+**Round-Robin**:
+Rotation through the On-Shift Pool, one turn per successfully assigned item. Peeking who is next does not consume a turn.
+_Avoid_: random assign, always-on-call
 
 ## Domain rules
 
@@ -146,3 +154,7 @@ The time window during which a specific engineer handles incoming tickets. Exter
 - Many Feedbacks can map to one Defect (deduplication). One Feedback can produce multiple Defects.
 - A "missing information" complaint is often valid when Specifications lack detail only found in Show Solution.
 - OpenShift courses (`do` family) have ~40 min first-boot time; complaints about slow startup in early chapters are usually expected behavior.
+- The Shift frontend is the source of truth for who is next in Round-Robin; Auto-Assign does not keep that name across cycles.
+- Round-Robin follows engineers by name, not by position in the On-Shift Pool. If the pool changes, the next turn is the next name still in the pool after the last engineer who received work, wrapping to the start if needed.
+- Auto-Assign does not query the Shift frontend unless there is unassigned work. It records the engineer who actually received the work, not an inferred next person.
+- Each On-Shift Pool (one Shift-frontend group, or the whole T2 instance when there is no group) has its own last-assigned engineer. Pools do not share Round-Robin state.
