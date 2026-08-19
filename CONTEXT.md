@@ -216,3 +216,7 @@ _Avoid_: random assign, always-on-call
 - A Resolution Follow-up gets a brief Response: thank the Learner, confirm we are glad it is resolved, invite them to reach out if anything else comes up. Do not recap their diagnosis, re-explain the cause, or give unsolicited advice. This is not explain-expected behaviour.
 - Whether a Learner Follow-up is a Resolution Follow-up is judged from the latest Learner Follow-up, not from earlier ones. An older "it is fixed" does not override a newer report that the problem is back.
 - A latest Learner Follow-up that both resolves the original report and raises a new problem is not a Resolution Follow-up; investigate the remaining claim.
+- The Shift frontend is the source of truth for who is next in Round-Robin; Auto-Assign does not keep that name across cycles.
+- Round-Robin follows engineers by name, not by position in the On-Shift Pool. If the pool changes, the next turn is the next name still in the pool after the last engineer who received work, wrapping to the start if needed.
+- Auto-Assign does not query the Shift frontend unless there is unassigned work. It records the engineer who actually received the work, not an inferred next person.
+- Each On-Shift Pool (one Shift-frontend group, or the whole T2 instance when there is no group) has its own last-assigned engineer. Pools do not share Round-Robin state.
