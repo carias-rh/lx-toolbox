@@ -48,6 +48,19 @@ def _contains_consecutive(haystack: List[str], needle: List[str]) -> bool:
     span = len(needle)
     return any(haystack[i:i + span] == needle for i in range(len(haystack) - span + 1))
 
+
+def _extract_auto_resolve_reporter(description: str) -> Optional[str]:
+    """Reporter from a Jira-notification ticket: 'Reporter:' line or 'Hello {name},' greeting."""
+    if not description:
+        return None
+    reporter_match = re.search(r"Reporter:\s*(.+)", description)
+    if reporter_match:
+        return reporter_match.group(1).strip()
+    hello_match = re.search(r"Hello\s+(.+?)\s*,", description, flags=re.IGNORECASE)
+    if hello_match:
+        return hello_match.group(1).strip()
+    return None
+
 @dataclass
 class TeamConfig:
     """Configuration for a specific team's auto-assignment behavior"""
@@ -1083,55 +1096,59 @@ class ServiceNowAutoAssign:
             return False
 
 
+    def _auto_resolve_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, reporter: str) -> bool:
+        logger.info(f"Auto-resolving ticket {ticket['number']} for reporter {reporter}")
+        updates = {
+            'state': TicketState.RESOLVED.value,
+            'category': team_config.category,
+            'subcategory': team_config.subcategory,
+            'issue': team_config.issue_type,
+            'time_worked': '60'
+        }
+        return self.update_ticket(ticket['sys_id'], updates)
+
     def auto_resolve_tickets_by_reporter(self, team_key: str) -> int:
-        """Auto-resolve tickets for specific reporters (mainly for T2 team)"""
+        """Auto-resolve Jira-notification tickets whose reporter is on the team allow-list."""
         team_config = self.teams.get(team_key)
         if not team_config or not team_config.auto_resolve_reporters:
             return 0
-            
-        # Query for tickets with notifications from Jira
-        query_parts = [
-            f"stateIN{','.join(DEFAULT_TARGET_STATES)}",
-            "active=true",
-            "short_descriptionLIKEnew Jira"
-        ]
-        
+
+        # Parentheses around ^OR are rejected by this table ACL. ^NQ ORs two full AND queries.
+        state_active = f"stateIN{','.join(team_config.target_states)}^active=true"
+        assignment_group_id = team_config.get_primary_assignment_group_id()
+        group_filter = f"assignment_group={assignment_group_id}^" if assignment_group_id else ""
+        sysparm_query = (
+            f"{group_filter}{state_active}^short_descriptionLIKEnew Jira"
+            f"^NQ{group_filter}{state_active}^short_descriptionLIKEWeve received your request"
+            "^ORDERBYDESCsys_created_on"
+        )
+
         params = {
-            "sysparm_query": "^".join(query_parts),
-            "sysparm_fields": "sys_id,number,description",
+            "sysparm_query": sysparm_query,
+            "sysparm_fields": "sys_id,number,description,short_description",
             "sysparm_limit": "100"
         }
-        
+
         url = rht_task_table_url(self.instance_url)
-        
+
         try:
             response = self.session.get(url, params=params)
             response.raise_for_status()
             tickets = response.json().get("result", [])
-            
+
             resolved_count = 0
             for ticket in tickets:
-                description = ticket.get('description', '')
-                reporter_match = re.search(r"Reporter:\s*(.+)", description)
-                
-                if reporter_match:
-                    reporter = reporter_match.group(1).strip()
-                    if team_config.matches_auto_resolve_reporter(reporter):
-                        logger.info(f"Auto-resolving ticket {ticket['number']} for reporter {reporter}")
-                        
-                        updates = {
-                            'state': TicketState.RESOLVED.value,
-                            'category': team_config.category,
-                            'subcategory': team_config.subcategory,
-                            'issue': team_config.issue_type,
-                            'time_worked': '60'
-                        }
-                        
-                        if self.update_ticket(ticket['sys_id'], updates):
-                            resolved_count += 1
-                            
+                reporter = _extract_auto_resolve_reporter(ticket.get('description', ''))
+                if reporter and team_config.matches_auto_resolve_reporter(reporter):
+                    if self._auto_resolve_ticket(ticket, team_config, reporter):
+                        resolved_count += 1
+                elif reporter:
+                    logger.debug(
+                        f"Skipping auto-resolve for {ticket.get('number')} reporter={reporter!r}"
+                    )
+
             return resolved_count
-            
+
         except Exception as e:
             logger.error(f"Error auto-resolving tickets: {e}")
             return 0
@@ -1286,6 +1303,13 @@ class ServiceNowAutoAssign:
                     success = self.process_t1_ticket(ticket, team_config, assignee_name)
 
                 elif "t2" in team_key:
+                    reporter = _extract_auto_resolve_reporter(ticket.get('description', ''))
+                    if reporter and team_config.matches_auto_resolve_reporter(reporter):
+                        if self._auto_resolve_ticket(ticket, team_config, reporter):
+                            stats["resolved"] += 1
+                        else:
+                            stats["errors"] += 1
+                        continue
                     if assignee_name == "None":
                         logger.debug("No one is on shift, stopping ticket processing")
                         break
