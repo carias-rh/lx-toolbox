@@ -814,7 +814,7 @@ class LabManager:
                         f"Unknown button_xpath_part '{button_xpath_part}' for new interface"
                     )
                     return
-                adj_button = WebDriverWait(self.driver, 10).until(
+                adj_button = WebDriverWait(self.driver, 2).until(
                     EC.element_to_be_clickable((By.XPATH, button_xpath))
                 )
                 for _ in range(times):
@@ -1046,7 +1046,7 @@ class LabManager:
         self._course_tab_handle = self.driver.current_window_handle
                 
         # Scroll to top and zoom out to ensure button is visible
-        self.driver.execute_script("document.body.style.zoom = '0.70'")
+        self.driver.execute_script("document.body.style.zoom = '0.85'")
         self.driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(0.5)
         
@@ -1055,7 +1055,7 @@ class LabManager:
         self.logger("Waiting for workstation 'Open Console' button to be available...")
         workstation_open_console_xpath = "//*[text()='workstation']/../td[3]/button[text()='Open Console']"
         try:
-            workstation_button = WebDriverWait(self.driver, 300).until(
+            workstation_button = WebDriverWait(self.driver, 400).until(
                 EC.element_to_be_clickable((By.XPATH, workstation_open_console_xpath))
             )
         except TimeoutException:
@@ -1065,7 +1065,7 @@ class LabManager:
         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", workstation_button)
         time.sleep(0.5)
         self.driver.execute_script("arguments[0].click();", workstation_button)
-        self.driver.execute_script("document.body.style.zoom = '0.75'")
+        self.driver.execute_script("document.body.style.zoom = '0.85'")
         
         # Wait for new window/tab and switch to it
         WebDriverWait(self.driver, 30).until(EC.number_of_windows_to_be(2))
@@ -1333,16 +1333,6 @@ class LabManager:
         
         self.logger("Lab environment tuned!")
 
-    def _wait_for_command_to_paste(self, command: str, min_wait: float = 0.8):
-        """Wait a proportional time based on the command length for pasting to complete.
-        
-        Args:
-            command: The command being pasted
-            min_wait: Minimum wait time in seconds (default 0.5s to allow modal to close)
-        """
-        delay_per_char = self.config.get("QA", "paste_delay_per_char", 0.0005)
-        calculated_wait = len(command) * delay_per_char
-        time.sleep(max(calculated_wait, min_wait))
 
     def introduce_command_to_console(self, command: str, auto_enter: bool = True):
         """
@@ -1377,7 +1367,7 @@ class LabManager:
 
         # --- Step 1: Open the "Enter large text" dialog ---
         try:
-            send_text_button = WebDriverWait(self.driver, 10).until(
+            send_text_button = WebDriverWait(self.driver, 3).until(
                 EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Enter large text"]'))
             )
             send_text_button.click()
@@ -1391,7 +1381,7 @@ class LabManager:
 
         # --- Step 2: Find the textarea ---
         try:
-            text_input_area = WebDriverWait(self.driver, 5).until(
+            text_input_area = WebDriverWait(self.driver, 3).until(
                 EC.element_to_be_clickable((By.XPATH, textarea_xpath))
             )
         except TimeoutException:
@@ -1415,7 +1405,6 @@ class LabManager:
 
         # --- Step 4: Send via Ctrl+Enter (dialog placeholder tip) ---
         try:
-            time.sleep(0.15)
             text_input_area.send_keys(Keys.CONTROL + Keys.ENTER)
         except Exception as e:
             logging.getLogger(__name__).warning(f"[console] Step 4: Ctrl+Enter failed ({e}); trying Send button (cmd: {short_cmd})")
@@ -1428,8 +1417,6 @@ class LabManager:
                 logging.getLogger(__name__).error(f"[console] Step 4 FAILED: could not send text: {e_send} (cmd: {short_cmd})")
                 _close_dialog_if_open()
                 return
-
-        self._wait_for_command_to_paste(command)
 
         # --- Step 5: Wait for the text dialog to close ---
         try:
@@ -2460,7 +2447,7 @@ class LabManager:
                     mid_screenshot_taken = True
 
                 # Interactive delay with keyboard checking
-                command_delay = self.config.get("QA", "command_delay_seconds", 3)
+                command_delay = self.config.get("QA", "command_delay_seconds", 1.5)
                 if isinstance(command_delay, str):
                     command_delay = int(command_delay)
 
