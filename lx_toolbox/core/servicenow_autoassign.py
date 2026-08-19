@@ -941,7 +941,7 @@ class ServiceNowAutoAssign:
             return False
 
 
-    def process_gls_cx_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str, team_key: str = None) -> bool:
+    def process_gls_cx_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str, team_key: str = None):
         """Process a GLS Customer Experience ticket: ACK + assign.
 
         Special routing (checked in order, mutually exclusive):
@@ -955,20 +955,26 @@ class ServiceNowAutoAssign:
            group's own schedule.
 
         When a special-routing match is found but nobody is on shift for
-        that schedule the ticket is skipped (returns False) so it stays
+        that schedule the ticket is skipped (returns None) so it stays
         unassigned until someone comes on shift.
+        Returns the assignee name on success.
         """
         try:
             short_desc = ticket.get('short_description', '')
 
+            commit_config = team_config
             if 'Audit Request received' in short_desc and team_key:
                 audit_assignee = self._resolve_audit_assignee(team_key)
                 if audit_assignee and audit_assignee != "None":
                     logger.info(f"Audit ticket {ticket.get('number')} routed to audit assignee: {audit_assignee}")
                     assignee_name = audit_assignee
+                    zone_id = self._gls_cx_team_zone.get(team_key)
+                    audit_team_key = f"gls-cx-{zone_id}-audit-{zone_id}" if zone_id else None
+                    if audit_team_key and audit_team_key in self.teams:
+                        commit_config = self.teams[audit_team_key]
                 else:
                     logger.debug(f"Audit ticket {ticket.get('number')} – no audit person on shift, skipping")
-                    return False
+                    return None
 
             elif team_key and self._email_alias_to_team_key:
                 description = ticket.get('description', '')
@@ -977,17 +983,20 @@ class ServiceNowAutoAssign:
                     if alias_assignee and alias_assignee != "None":
                         logger.info(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' routed to {alias_assignee}")
                         assignee_name = alias_assignee
+                        alias_team_key = self._email_alias_to_team_key.get(matched_alias)
+                        if alias_team_key and alias_team_key in self.teams:
+                            commit_config = self.teams[alias_team_key]
                     else:
                         logger.debug(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' but no one on sub-region shift, skipping")
-                        return False
+                        return None
 
             if assignee_name == "None":
-                return False
+                return None
 
             assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_config.team_name)
             if not assignee_sys_id:
                 logger.error(f"Could not find sys_id for assignee: {assignee_name}")
-                return False
+                return None
 
             customer_name = ""
             lms_work_note = ""
@@ -1032,20 +1041,20 @@ class ServiceNowAutoAssign:
             updates['comments'] = ack_message
             if not self.update_ticket(ticket['sys_id'], updates):
                 logger.error(f"Failed to ACK ticket {ticket['number']}")
-                return False
+                return None
             time.sleep(1)
 
             # Phase 2: Assign
             if not self.update_ticket(ticket['sys_id'], {'assigned_to': assignee_sys_id}):
                 logger.error(f"Failed to assign ticket {ticket['number']} to {assignee_name}")
-                return False
+                return None
             # Log here so the name matches audit/alias resolution; run_auto_assignment's
             # assignee_name is only the default zone shift and is wrong for those paths.
             logger.info(f"[{team_config.team_name}] Assigned ticket {ticket['number']} to {assignee_name}")
-            return True
+            return assignee_name, commit_config
         except Exception as e:
             logger.error(f"Error processing GLS CX ticket {ticket.get('number', 'unknown')}: {e}")
-            return False
+            return None
 
     def process_exam_readiness_ticket(self, ticket: Dict[str, Any], team_config: TeamConfig, assignee_name: str) -> bool:
         """Process a Remote Exam - Readiness Support ticket with ACK only."""
@@ -1154,6 +1163,52 @@ class ServiceNowAutoAssign:
             return 0
 
 
+    def peek_shift(self, team_config: TeamConfig, team_key: str = None) -> Optional[str]:
+        """Who should receive the next item. Does not consume a Round-Robin turn."""
+        url = f"{team_config.frontend_shift_manager_url}/api/shift"
+        params = {}
+        if team_config.frontend_group_param:
+            params["group"] = team_config.frontend_group_param
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            name = data.get("name")
+            if team_key:
+                self._rr_enabled[team_key] = data.get("round_robin", False)
+            if name and name != "None":
+                logger.debug(
+                    f"[{team_config.team_name}] Peek assignee: {name} "
+                    f"| group={params.get('group', '-')}"
+                )
+                return name
+            logger.debug(f"[{team_config.team_name}] Peek: nobody on shift")
+            return "None"
+        except Exception as e:
+            logger.error(f"[{team_config.team_name}] Shift peek failed: {e}")
+            return None
+
+    def commit_shift(self, team_config: TeamConfig, assigned_name: str) -> Optional[str]:
+        """Record who actually received the work. Returns who is next."""
+        if not assigned_name or assigned_name == "None":
+            return None
+        url = f"{team_config.frontend_shift_manager_url}/api/shift/commit"
+        params = {}
+        if team_config.frontend_group_param:
+            params["group"] = team_config.frontend_group_param
+        try:
+            response = requests.post(url, params=params, json={"assigned_name": assigned_name})
+            response.raise_for_status()
+            next_name = response.json().get("name")
+            logger.info(
+                f"[{team_config.team_name}] Committed {assigned_name} "
+                f"| next={next_name or '-'} | group={params.get('group', '-')}"
+            )
+            return next_name
+        except Exception as e:
+            logger.error(f"[{team_config.team_name}] Shift commit failed: {e}")
+            return None
+
     def who_is_on_shift(self, team_config: TeamConfig, team_key: str = None, advance: bool = True) -> Optional[str]:
         is_round_robin_enabled = False
         group_params = {}
@@ -1241,7 +1296,7 @@ class ServiceNowAutoAssign:
             logger.warning(f"No audit team config found for zone '{zone_id}' (expected key: {audit_team_key})")
             return None
 
-        return self.who_is_on_shift(audit_config)
+        return self.peek_shift(audit_config)
 
     def _resolve_email_alias_assignee(self, description: str):
         """Match a ``training-*@redhat.com`` alias in the ticket description to a sub-region schedule.
@@ -1260,7 +1315,7 @@ class ServiceNowAutoAssign:
             if alias in desc_lower:
                 config = self.teams.get(team_key)
                 if config:
-                    assignee = self.who_is_on_shift(config)
+                    assignee = self.peek_shift(config)
                     return assignee, alias
                 return None, alias
         return None, None
@@ -1273,33 +1328,43 @@ class ServiceNowAutoAssign:
 
         tname = team_config.team_name
         stats = {"assigned": 0, "resolved": 0, "skipped": 0, "errors": 0}
-        
+        is_t1 = team_key == "t1"
+        use_peek_commit = bool(team_config.frontend_shift_manager_url) and not is_t1
+
         if team_config.auto_resolve_reporters:
             stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
-            
-        if team_config.frontend_shift_manager_url != None:
+
+        if is_t1 and team_config.frontend_shift_manager_url:
             assignee_name = self.who_is_on_shift(team_config, team_key, advance=False)
 
-        if not assignee_name and team_config.frontend_shift_manager_url:
+        if is_t1 and not assignee_name and team_config.frontend_shift_manager_url:
             logger.info(f"[{tname}] No assignee available — skipping assignment cycle")
             return stats
-        elif not assignee_name and not team_config.frontend_shift_manager_url:
-            assignee_name = "only-ack"            
-            logger.debug(f"[{tname}] No frontend configured — ACK-only mode")
 
         tickets = self.get_unassigned_tickets(team_key)
         if not tickets:
             logger.debug(f"[{tname}] No unassigned tickets | assignee={assignee_name}")
             return stats
-        
-        # Process each ticket
+
+        if use_peek_commit:
+            assignee_name = self.peek_shift(team_config, team_key)
+
+        if not assignee_name and team_config.frontend_shift_manager_url:
+            logger.info(f"[{tname}] No assignee available — skipping assignment cycle")
+            return stats
+        elif not assignee_name and not team_config.frontend_shift_manager_url:
+            assignee_name = "only-ack"
+            logger.debug(f"[{tname}] No frontend configured — ACK-only mode")
+
         for ticket in tickets:
             try:
                 success = False
+                committed_name = assignee_name
+                cx_commit_config = team_config
                 if "t1" in team_key:
                     if assignee_name == "None":
                         logger.debug("No one is on shift, stopping ticket processing")
-                        break                
+                        break
                     success = self.process_t1_ticket(ticket, team_config, assignee_name)
 
                 elif "t2" in team_key:
@@ -1314,11 +1379,7 @@ class ServiceNowAutoAssign:
                         logger.debug("No one is on shift, stopping ticket processing")
                         break
                     success = self.process_t2_ticket(ticket, team_config, assignee_name)
-                elif  "gls-rhls-engagement" in team_key:
-#                       commented out for now to allow for manual assignment
-#                        if assignee_name == "None":
-#                            logger.debug("No one is on shift, stopping ticket processing")
-#                            break
+                elif "gls-rhls-engagement" in team_key:
                     success = self.process_gls_rhls_engagement_ticket(ticket, team_config, assignee_name)
                 elif "gls-cx" in team_key:
                     if assignee_name == "None":
@@ -1329,17 +1390,18 @@ class ServiceNowAutoAssign:
                         if not is_audit and not is_alias:
                             stats["skipped"] += 1
                             continue
-                    success = self.process_gls_cx_ticket(ticket, team_config, assignee_name, team_key=team_key)
-                    if not success:
+                    cx_result = self.process_gls_cx_ticket(ticket, team_config, assignee_name, team_key=team_key)
+                    if not cx_result:
                         stats["skipped"] += 1
                         continue
+                    success = True
+                    committed_name, cx_commit_config = cx_result
                 elif "exam" in team_key:
                     if assignee_name == "None":
                         logger.debug("No one is on shift, stopping ticket processing")
                         break
                     success = self.process_exam_readiness_ticket(ticket, team_config, assignee_name)
                 else:
-                    # Generic processing for other teams
                     assignee_sys_id = self.lookup_user_sys_id(assignee_name, team_key)
                     if not assignee_sys_id:
                         logger.error(f"Could not find sys_id for assignee: {assignee_name}")
@@ -1355,19 +1417,24 @@ class ServiceNowAutoAssign:
                         if primary_group_id:
                             updates['assignment_group'] = primary_group_id
                         success = self.update_ticket(ticket['sys_id'], updates)
-                
+
                 if success:
                     stats["assigned"] += 1
                     if "gls-cx" not in team_key:
-                        logger.info(f"[{tname}] Assigned ticket {ticket['number']} to {assignee_name}")
-                    if self._rr_enabled.get(team_key):
+                        logger.info(f"[{tname}] Assigned ticket {ticket['number']} to {committed_name}")
+                    if use_peek_commit:
+                        commit_config = cx_commit_config if "gls-cx" in team_key else team_config
+                        next_name = self.commit_shift(commit_config, committed_name)
+                        if commit_config is team_config and next_name and next_name != "None":
+                            assignee_name = next_name
+                    elif self._rr_enabled.get(team_key):
                         prev_assignee = assignee_name
                         assignee_name = self.who_is_on_shift(team_config, team_key, advance=True)
                         if assignee_name and assignee_name != prev_assignee:
                             logger.info(f"[{tname}] Round-robin: {prev_assignee} → {assignee_name}")
                 else:
                     stats["errors"] += 1
-                    
+
             except Exception as e:
                 logger.error(f"Error processing ticket {ticket.get('number', 'unknown')}: {e}")
                 stats["errors"] += 1
