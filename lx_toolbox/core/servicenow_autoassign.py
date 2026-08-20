@@ -181,9 +181,15 @@ class ServiceNowAutoAssign:
                 or "Hi {customer_name},\n\nThanks for submitting your feedback to the Learner Experience Team.\n\nWe are reviewing your message and will get back to you as soon as possible.\n\nBest Regards,\n{assignee_name}\n{team_name}"
             ),
             auto_resolve_reporters=[
-                "Wasim Raja", "Chetan Tiwary", 
-                "Samik Sanyal", "Shashi Singh",
-                "Carlos Arias", 
+                "Forrest Taylor", "Susan Lauber", "Jordi Sola Alaball", "Zachary Gutterman",
+                "Abhishek Kumar", "Nicol Castillo", "Satdal Maity", "Neha Singh",
+                "Benjamin Chardi Marco", "Yuvaraj Balaraju", "Patrick Gomez", "Vidyashree G",
+                "Ricardo Taniguchi", "Abdul Patel", "Tianting Shi", "Steven Bonneville",
+                "Pablo Solar Vilarino", "Wasim Raja", "Chetan Tiwary", "Ricardo Da Costa",
+                "Samik Sanyal", "Jingyu Wang", "Vikas Singh", "Shashi Singh",
+                "Jaime Yague", "Ashley D'Andrea", "Carlos Arias", "Andres Hernandez",
+                "Ed Parenti", "Antonio Mari Romero", "Mohammed Tahmeed", "David O'Brien",
+                "Yashashvi Singh",
             ],
         )
 
@@ -1250,8 +1256,8 @@ class ServiceNowAutoAssign:
         stats = {"assigned": 0, "resolved": 0, "skipped": 0, "errors": 0}
         use_peek_commit = bool(team_config.frontend_shift_manager_url)
 
-        #if team_config.auto_resolve_reporters:
-        #    stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
+        if team_config.auto_resolve_reporters:
+            stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
 
         tickets = self.get_unassigned_tickets(team_key)
         if not tickets:
