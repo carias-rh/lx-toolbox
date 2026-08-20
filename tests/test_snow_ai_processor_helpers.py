@@ -258,3 +258,139 @@ class TestJiraDescriptionGating:
         }
         result = SnowAIProcessor._normalize_environment_analysis(parsed)
         assert result.get("jira_description", "") == ""
+
+
+# ---------------------------------------------------------------------------
+# SSH Lab Access Feedback — detection, classification, analysis
+# ---------------------------------------------------------------------------
+
+SSH_INSTRUCTIONS = """
+SSH Private Key & Instructions
+Do not do this if you have already set a private key up before for a lab.
+
+    Click CREATE to spin up the lab environment
+    Click DOWNLOAD SSH KEY button when they're enabled (lab is running)
+    mv ~/Downloads/rht_classroom.rsa ~/.ssh/
+    chmod 0600 ~/.ssh/rht_classroom.rsa
+    ssh-add ~/.ssh/rht_classroom.rsa
+    ssh -i ~/.ssh/rht_classroom.rsa -J cloud-user@146.177.78.169:22022 student@workstation
+"""
+
+GUIDE_TYPO_ON_ROLE = (
+    "There is a typo on page https://role.rhu.redhat.com/rol/app/courses/do316-4.18/pages/ch03s02 "
+    "The guide says 'oc get pods' but it should be 'oc get pod'."
+)
+
+
+class TestLooksLikeSshLabAccess:
+    def test_instruction_paste_is_ssh_lab_access(self):
+        assert SnowAIProcessor.looks_like_ssh_lab_access(SSH_INSTRUCTIONS) is True
+
+    def test_key_filename_alone_is_ssh_lab_access(self):
+        assert SnowAIProcessor.looks_like_ssh_lab_access(
+            "Permission denied (publickey) using rht_classroom.rsa"
+        ) is True
+
+    def test_guide_typo_on_role_is_not_ssh_lab_access(self):
+        assert SnowAIProcessor.looks_like_ssh_lab_access(GUIDE_TYPO_ON_ROLE) is False
+
+    def test_empty_is_not_ssh_lab_access(self):
+        assert SnowAIProcessor.looks_like_ssh_lab_access("") is False
+
+    def test_role_url_alone_is_not_ssh_lab_access(self):
+        assert SnowAIProcessor.looks_like_ssh_lab_access(
+            "https://role.rhu.redhat.com/rol/app/courses/do180-4.18/pages/ch01s01"
+        ) is False
+
+    def test_generic_workstation_ssh_is_not_ssh_lab_access(self):
+        assert SnowAIProcessor.looks_like_ssh_lab_access(
+            "I cannot ssh to student@workstation from inside the lab"
+        ) is False
+
+
+class TestIsRolePlatformUrl:
+    def test_role_host_detected(self):
+        assert SnowAIProcessor.is_role_platform_url(
+            "https://role.rhu.redhat.com/rol/app/courses/do316-4.18/pages/pr01s02"
+        ) is True
+
+    def test_rol_host_not_role(self):
+        assert SnowAIProcessor.is_role_platform_url(
+            "https://rol.redhat.com/rol/app/courses/do316-4.18/pages/pr01s02"
+        ) is False
+
+    def test_empty_not_role(self):
+        assert SnowAIProcessor.is_role_platform_url("") is False
+
+
+class TestApplySshLabAccessClassification:
+    def test_heuristic_overrides_environment_flag(self):
+        classification = {
+            "is_content_issue_ticket": False,
+            "is_environment_issue_ticket": True,
+            "is_video_issue_ticket": False,
+            "needs_lab_verification": True,
+        }
+        result = SnowAIProcessor.apply_ssh_lab_access_classification(
+            classification, SSH_INSTRUCTIONS
+        )
+        assert result["is_ssh_lab_access_ticket"] is True
+        assert result["is_environment_issue_ticket"] is False
+        assert result["is_content_issue_ticket"] is False
+        assert result["is_video_issue_ticket"] is False
+        assert result["needs_lab_verification"] is False
+
+    def test_guide_typo_keeps_content_flag(self):
+        classification = {
+            "is_content_issue_ticket": True,
+            "is_environment_issue_ticket": False,
+            "is_video_issue_ticket": False,
+            "is_ssh_lab_access_ticket": False,
+            "needs_lab_verification": False,
+        }
+        result = SnowAIProcessor.apply_ssh_lab_access_classification(
+            classification, GUIDE_TYPO_ON_ROLE
+        )
+        assert result["is_ssh_lab_access_ticket"] is False
+        assert result["is_content_issue_ticket"] is True
+
+    def test_llm_ssh_flag_without_heuristic_still_wins(self):
+        classification = {
+            "is_ssh_lab_access_ticket": True,
+            "is_content_issue_ticket": False,
+            "is_environment_issue_ticket": False,
+            "is_video_issue_ticket": False,
+            "needs_lab_verification": True,
+        }
+        result = SnowAIProcessor.apply_ssh_lab_access_classification(
+            classification, "I cannot connect to the workstation from my laptop"
+        )
+        assert result["is_ssh_lab_access_ticket"] is True
+        assert result["needs_lab_verification"] is False
+
+
+class TestNormalizeSshLabAccessAnalysis:
+    def test_never_confirm_defect(self):
+        result = SnowAIProcessor._normalize_ssh_lab_access_analysis(
+            {"reply_mode": "confirm_defect", "is_valid_issue": True, "jira_description": "bug"}
+        )
+        assert result["reply_mode"] != "confirm_defect"
+        assert result.get("jira_description", "") == ""
+        assert result.get("is_valid_issue") is False
+
+    def test_teach_passthrough(self):
+        result = SnowAIProcessor._normalize_ssh_lab_access_analysis(
+            {"reply_mode": "teach", "is_valid_issue": False}
+        )
+        assert result["reply_mode"] == "teach"
+
+    def test_ask_more_passthrough(self):
+        result = SnowAIProcessor._normalize_ssh_lab_access_analysis(
+            {"reply_mode": "ask_more"}
+        )
+        assert result["reply_mode"] == "ask_more"
+
+    def test_missing_mode_defaults_to_teach(self):
+        result = SnowAIProcessor._normalize_ssh_lab_access_analysis({})
+        assert result["reply_mode"] == "teach"
+

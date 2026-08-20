@@ -108,7 +108,7 @@ class SnowAIProcessor:
             "- lab script is not available\n"
             "- lab is stuck in starting/stopping state\n"
             "- cluster is taking too long to start\n"
-            "- ssh to the lab workstation VM is not working, ~/.ssh/rht_classroom.rsa, cloud-user@some-ip:22022, -J jump host, is not working\n"
+            "- ssh to the lab workstation VM from inside the lab is not working\n"
         )
 
         self.video_issues_examples = (
@@ -123,6 +123,15 @@ class SnowAIProcessor:
             "- Video player is not working\n"
             "- Where is the video for this course?\n"
             "- The exercise in the guide doesn't match with the video from the instructor\n"
+        )
+
+        self.ssh_lab_access_examples = (
+            "Examples of SSH Lab Access Feedback (Internal Learners on ROLE only):\n"
+            "- Cannot connect with rht_classroom.rsa\n"
+            "- DOWNLOAD SSH KEY is disabled or missing\n"
+            "- Permission denied (publickey) when using the classroom SSH key\n"
+            "- ssh -J cloud-user@<ip>:22022 student@workstation fails\n"
+            "- chmod / ssh-add / jump-host instructions from the Lab Environment page\n"
         )
 
         self.manually_managed_issues_examples = (
@@ -434,6 +443,61 @@ class SnowAIProcessor:
     _ENV_VALID_MODES: frozenset = frozenset(
         {"confirm_defect", "explain_expected", "ask_more", "lab_pending"}
     )
+
+    # SSH Lab Access Feedback — Internal Learner stuck on ROLE SSH instructions.
+    # A ROLE URL alone is not enough; Internal Learners also file ordinary Guide/Lab Feedback.
+    _SSH_LAB_ACCESS_TOKENS: tuple = (
+        "rht_classroom.rsa",
+        "download ssh key",
+        "ssh private key",
+        "ssh-add",
+        "cloud-user@",
+        ":22022",
+        "-j cloud-user",
+        "chmod 0600",
+    )
+
+    @staticmethod
+    def is_role_platform_url(url: str) -> bool:
+        """True when the Feedback URL is on ROLE (role.rhu.redhat.com)."""
+        return "role.rhu.redhat.com" in (url or "").lower()
+
+    @classmethod
+    def looks_like_ssh_lab_access(cls, text: str) -> bool:
+        """True when Feedback text matches SSH Lab Access instruction markers."""
+        if not text:
+            return False
+        lowered = text.lower()
+        return any(token in lowered for token in cls._SSH_LAB_ACCESS_TOKENS)
+
+    @classmethod
+    def apply_ssh_lab_access_classification(cls, classification: dict, feedback_text: str) -> dict:
+        """Force mutually exclusive SSH Lab Access flags when the LLM or heuristic says so."""
+        is_ssh = bool(classification.get("is_ssh_lab_access_ticket")) or cls.looks_like_ssh_lab_access(
+            feedback_text
+        )
+        classification["is_ssh_lab_access_ticket"] = is_ssh
+        if is_ssh:
+            classification["is_content_issue_ticket"] = False
+            classification["is_environment_issue_ticket"] = False
+            classification["is_video_issue_ticket"] = False
+            classification["needs_lab_verification"] = False
+        return classification
+
+    @classmethod
+    def _normalize_ssh_lab_access_analysis(cls, parsed: dict) -> dict:
+        """SSH Lab Access is never a Defect. Default reply_mode is teach."""
+        raw = str(parsed.get("reply_mode", "")).strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {"ask": "ask_more", "need_more": "ask_more", "teaching": "teach", "confusion": "teach"}
+        mode = aliases.get(raw, raw)
+        if mode not in {"teach", "ask_more"}:
+            mode = "teach"
+        parsed["reply_mode"] = mode
+        parsed["is_valid_issue"] = False
+        parsed["jira_description"] = ""
+        if "jira_title" in parsed:
+            parsed["jira_title"] = cls._sanitize_jira_title(parsed.get("jira_title") or "")
+        return parsed
 
     @classmethod
     def _normalize_content_analysis(cls, parsed: dict) -> dict:
@@ -1123,10 +1187,9 @@ Instructions:
         course = re.findall("Course:.*", description)[0].split(":  ")[1].upper().split(" ")[0].strip()
         version = re.findall("Version:.*", description)[0].split(":  ")[1].strip()
         url = re.findall("URL:.*", description)[0].split(":  ")[1].strip()
-        if "role.rhu.redhat.com/rol-rhu" in url:
-            url = url.replace("role.rhu.redhat.com/rol-rhu", "rol.redhat.com/rol")
-        elif "role.rhu.redhat.com/rol" in url:
-            url = url.replace("role.rhu.redhat.com/rol", "rol.redhat.com/rol")
+        # Keep the original host. ROLE URLs must stay on role.rhu.redhat.com for
+        # SSH Lab Access Feedback; ordinary ROLE Guide/Lab Feedback still navigates
+        # via the ROL base URL in _navigate_to_course_page, not this field.
         # ROL sometimes embeds course slugs like do180f-4.18; canonical path uses do180-4.18
         url = re.sub(r"([A-Za-z]{2}\d{3})f(?=-)", r"\1", url)
 
@@ -1209,15 +1272,16 @@ Instructions:
     # --------------------------
     def classify_ticket_llm(self, description: str, snow_info: dict | None = None) -> dict:
         self.logger("Classifying ticket using LLM")
-        json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue_ticket": false, "is_video_issue_ticket": false, "needs_lab_verification": true}'
+        json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue_ticket": false, "is_video_issue_ticket": false, "is_ssh_lab_access_ticket": false, "needs_lab_verification": true}'
         prompt = f"""
 You are an expert classifier of Red Hat Training tickets.
 {self._build_operational_context("classification", snow_info)}
 
-Classify the user's feedback regarding a Red Hat Training course, there are three types of tickets:
+Classify the user's feedback regarding a Red Hat Training course. Types are mutually exclusive:
 - content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, a quiz problem, missing lab specification details, or a grading-script logic mismatch.
-- environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', or the learner is reporting machine access, VM state, or lab-environment behavior, it's an environment issue.
+- environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', or the learner is reporting machine access, VM state, or lab-environment behavior *inside* the lab VMs. This is NOT ROLE SSH-from-laptop access.
 - video_issue_ticket: if the feedback is about videos not being available, video not matching the section, subtitle issues, translation problems, bad video cuts, or any other video-related problem.
+- ssh_lab_access_ticket: the Internal Learner is stuck on SSH Lab Access from their local machine to a ROLE Lab — private key setup, DOWNLOAD SSH KEY, rht_classroom.rsa, cloud-user jump host, ssh -J, permission denied (publickey). A ROLE URL alone is NOT this type; Internal Learners also report ordinary Guide and Lab issues.
 
 Examples of content issues:
 {self.content_issues_examples}
@@ -1227,6 +1291,9 @@ Examples of environment issues:
 
 Examples of video issues:
 {self.video_issues_examples}
+
+Examples of SSH Lab Access Feedback:
+{self.ssh_lab_access_examples}
 
 Examples of types of issues to be manually managed:
 {self.manually_managed_issues_examples}
@@ -1243,6 +1310,7 @@ IMPORTANT: Determine if lab verification is needed. Lab verification IS needed w
 Lab verification is NOT needed when:
 - There is a simple typo in the guide text (a spelling mistake visible in the guide itself, not involving lab files)
 - Video issues (missing, not matching, subtitle problems)
+- SSH Lab Access Feedback (connecting from a laptop via jump host)
 - Manually managed issues (refunds, exam scheduling, UI suggestions)
 - The issue can be determined just by reading the guide text WITHOUT needing to check anything on the lab VM
 - The learner is complaining about theory-section example commands rather than guided exercise or lab steps
@@ -1255,7 +1323,8 @@ Return JSON with the following fields:
 - is_content_issue_ticket: (true/false)
 - is_environment_issue_ticket: (true/false)
 - is_video_issue_ticket: (true/false)
-- needs_lab_verification: (true/false) - whether we need to start a lab to verify the student's claim
+- is_ssh_lab_access_ticket: (true/false)
+- needs_lab_verification: (true/false) - whether we need to start a lab to verify the student's claim. Always false for ssh_lab_access_ticket.
 
 This is the student's feedback:
 <student_feedback>
@@ -1271,32 +1340,35 @@ For example:
         logging.getLogger(__name__).info(f"LLM Triaging response:\n {response}")
         parsed = self._parse_llm_json(response, context="LLM triaging")
         if not parsed:
-            return {
+            parsed = {
                 "student_feedback": description,
                 "language": "en",
                 "summary": "Error parsing LLM response",
                 "is_content_issue_ticket": False,
                 "is_environment_issue_ticket": False,
                 "is_video_issue_ticket": False,
+                "is_ssh_lab_access_ticket": False,
                 "needs_lab_verification": False,
             }
+        else:
+            # Tolerate near-miss field names from some models (e.g. truncated keys).
+            if "is_environment_issue_ticket" not in parsed:
+                for key in list(parsed.keys()):
+                    if key.startswith("is_environment_issue"):
+                        parsed["is_environment_issue_ticket"] = bool(parsed[key])
+                        break
+            parsed = {
+                "student_feedback": str(parsed.get("student_feedback", description)),
+                "language": str(parsed.get("language", "en")).lower(),
+                "summary": str(parsed.get("summary", "No summary provided")),
+                "is_content_issue_ticket": bool(parsed.get("is_content_issue_ticket", False)),
+                "is_environment_issue_ticket": bool(parsed.get("is_environment_issue_ticket", False)),
+                "is_video_issue_ticket": bool(parsed.get("is_video_issue_ticket", False)),
+                "is_ssh_lab_access_ticket": bool(parsed.get("is_ssh_lab_access_ticket", False)),
+                "needs_lab_verification": bool(parsed.get("needs_lab_verification", False)),
+            }
 
-        # Tolerate near-miss field names from some models (e.g. truncated keys).
-        if "is_environment_issue_ticket" not in parsed:
-            for key in list(parsed.keys()):
-                if key.startswith("is_environment_issue"):
-                    parsed["is_environment_issue_ticket"] = bool(parsed[key])
-                    break
-
-        return {
-            "student_feedback": str(parsed.get("student_feedback", description)),
-            "language": str(parsed.get("language", "en")).lower(),
-            "summary": str(parsed.get("summary", "No summary provided")),
-            "is_content_issue_ticket": bool(parsed.get("is_content_issue_ticket", False)),
-            "is_environment_issue_ticket": bool(parsed.get("is_environment_issue_ticket", False)),
-            "is_video_issue_ticket": bool(parsed.get("is_video_issue_ticket", False)),
-            "needs_lab_verification": bool(parsed.get("needs_lab_verification", False)),
-        }
+        return self.apply_ssh_lab_access_classification(parsed, description)
 
     def analyze_content_issue(self, user_issue: str, guide_text: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing content issue using LLM")
@@ -1452,6 +1524,55 @@ For example:
             parsed["jira_title"] = self._sanitize_jira_title(parsed.get("jira_title") or "")
         return parsed
 
+    def analyze_ssh_lab_access(self, user_issue: str, snow_info: dict | None = None) -> dict:
+        """Analyze SSH Lab Access Feedback. Never a Defect."""
+        self.logger("Analyzing SSH Lab Access Feedback using LLM")
+        json_example = (
+            '{"analysis": "2-4 sentence diagnostic conclusion of which SSH Lab Access step the Internal Learner is stuck on",'
+            ' "is_valid_issue": false,'
+            ' "suggested_correction": "",'
+            ' "summary": "one-line headline",'
+            ' "reply_mode": "teach or ask_more",'
+            ' "jira_description": "",'
+            ' "jira_title": ""}'
+        )
+        prompt_text = f"""
+        You are an expert in ROLE SSH Lab Access for Internal Learners (Red Hat employees).
+        {self._build_operational_context("environment", snow_info)}
+
+        SSH Lab Access is how Internal Learners reach a ROLE Lab from their local machine:
+        download rht_classroom.rsa, chmod 0600, ssh-add, then jump via
+        ssh -i ~/.ssh/rht_classroom.rsa -J cloud-user@<ip>:22022 student@workstation.
+        The jump-host IP changes per Lab. This is never a Defect.
+
+        The Internal Learner's Feedback is:
+        <student_feedback>
+        {user_issue}
+        </student_feedback>
+
+        Identify which instruction step they are stuck on (CREATE, DOWNLOAD SSH KEY, key install, ssh-add, jump host).
+        All string fields must be in English.
+        reply_mode is teach when you can explain the step; ask_more when there is no error text and no SSH-step clue.
+        Never use confirm_defect, lab_pending, or explain_expected.
+        Never invent a jump-host IP.
+
+        Return JSON:
+        {json_example}
+        {self._json_output_rules()}
+        """
+        response = self.ask_llm(prompt_text)
+        logging.getLogger(__name__).info(f"LLM SSH Lab Access analysis response: {response}")
+        parsed = self._parse_llm_json(response, context="LLM SSH Lab Access analysis")
+        if not parsed:
+            parsed = {
+                "is_valid_issue": False,
+                "summary": "analysis parse error",
+                "suggested_correction": "",
+                "jira_title": "",
+                "reply_mode": "teach",
+            }
+        return self._normalize_ssh_lab_access_analysis(parsed)
+
     def is_long_boot_lab_first_start(self, snow_info: dict, analysis_response_json: dict) -> bool:
         course = snow_info.get("Course", "")
         family = self._infer_course_family(course)
@@ -1538,6 +1659,14 @@ For example:
         else:
             language_rule = f"Write the reply in the Learner's language: {learner_language}. Do NOT write in English."
 
+        ssh_rule = ""
+        if (classification_data or {}).get("is_ssh_lab_access_ticket"):
+            ssh_rule = (
+                "- This is SSH Lab Access Feedback. Teach the Internal Learner through the SSH key and jump-host steps.\n"
+                "- Never invent or paste a jump-host IP address. Theirs is already in the Feedback and changes per Lab.\n"
+                "- Do not mention ROLE, Factory, assignment groups, or internal handover."
+            )
+
         json_example = '{"response": "the response to the student"}'
         prompt_text = f"""
     You are a helpful Red Hat Training support representative responding to a Learner's Feedback.
@@ -1563,6 +1692,7 @@ For example:
     - NEVER use the words 'guide text', 'guide_text', or 'course guide text'. Use 'course material', 'exercise instructions', or 'course content'.
     - Write in short paragraphs separated by blank lines. Each paragraph covers one idea.
     - {language_rule}
+    {ssh_rule}
 
     Format: JSON with one field.
     {self._json_output_rules()}
@@ -1654,6 +1784,9 @@ For example:
                 except Exception:
                     pass
 
+            if classification_data.get("is_ssh_lab_access_ticket"):
+                self._prefill_ssh_lab_access_handover()
+
             # Do NOT click the Post button automatically.
             # The journal fields are pre-filled for human review;
             # the agent operator is responsible for clicking Post manually.
@@ -1684,6 +1817,57 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
     # --------------------------
     # High-level helpers
     # --------------------------
+    T1_ASSIGNMENT_GROUP = "RHT Learner Experience"
+    T1_SSH_ASSIGNEE = "Yashashvi Singh"
+
+    def _snow_typeahead_fill(self, field_id: str, value: str) -> None:
+        """Prefill a ServiceNow reference/typeahead field. Human still Saves."""
+        field = WebDriverWait(self.driver, 10).until(
+            EC.element_to_be_clickable((By.ID, field_id))
+        )
+        field.click()
+        field.send_keys(Keys.CONTROL, "a")
+        field.send_keys(Keys.BACKSPACE)
+        field.send_keys(value)
+        time.sleep(0.8)
+        field.send_keys(Keys.TAB)
+
+    def _prefill_ssh_lab_access_handover(self) -> None:
+        """Assignment group first (T1), then Assigned to Yashashvi Singh."""
+        try:
+            self._snow_typeahead_fill(
+                "sys_display.x_redha_rht_task.assignment_group",
+                self.T1_ASSIGNMENT_GROUP,
+            )
+            time.sleep(0.4)
+            self._snow_typeahead_fill(
+                "sys_display.x_redha_rht_task.assigned_to",
+                self.T1_SSH_ASSIGNEE,
+            )
+            self.logger(
+                f"Prefills: Assignment group={self.T1_ASSIGNMENT_GROUP}, "
+                f"Assigned to={self.T1_SSH_ASSIGNEE}"
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Could not prefill SSH Lab Access handover fields: {e}")
+
+    def _open_role_ssh_lab_workspace(self, snow_info: dict, course_id: str) -> None:
+        """Open the original ROLE URL, Lab Environment tab, expand SSH panel, CREATE without waiting."""
+        url = snow_info.get("URL") or ""
+        self.logger(f"Opening ROLE URL for SSH Lab Access: {url}")
+        self.driver.get(url)
+        WebDriverWait(self.driver, 30).until(
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, ".course__content-wrapper, #ssh-key-info--heading, [role='tab']")
+            )
+        )
+        self.lab_mgr.select_lab_environment_tab("lab-environment")
+        self.lab_mgr.expand_ssh_key_info()
+        try:
+            self.lab_mgr.create_lab(course_id=course_id, wait=False)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"CREATE Lab on ROLE did not complete: {e}")
+
     def _navigate_to_course_page(self, course_id: str, chapter_section: str, environment: str = "rol"):
         """
         Fast course navigation for the snowai per-ticket flow.
@@ -2221,16 +2405,20 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                     is_content_issue = classification.get("is_content_issue_ticket", False)
                     is_environment_issue = classification.get("is_environment_issue_ticket", False)
                     is_video_issue = classification.get("is_video_issue_ticket", False)
-                    
-                    # For video issues, just navigate and check video player availability
-                    if is_video_issue:
+                    is_ssh_lab_access = classification.get("is_ssh_lab_access_ticket", False)
+                    analysis_input = snow_info.get("Description_en") or translated or full_description
+
+                    if is_ssh_lab_access:
+                        self.logger("SSH Lab Access Feedback — ROLE Lab Environment, no Defect")
+                        analysis = self.analyze_ssh_lab_access(analysis_input, snow_info)
+                        self._open_role_ssh_lab_workspace(snow_info, course_id)
+                    elif is_video_issue:
                         self.logger("Video issue detected - navigating to course page without starting lab")
                         self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
                         video_player_available = self.lab_mgr.check_video_player_available()
-                        analysis_input = snow_info.get("Description_en") or translated or full_description
                         analysis = self.analyze_video_issue(analysis_input, video_player_available, snow_info)
                     elif is_content_issue:
-                        # Navigate to the course page
+                        # Navigate to the course page (ROL, even when the ticket URL was ROLE)
                         self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
 
                         # Fetch guide text for "content guide" issue analysis
@@ -2246,16 +2434,15 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                         except Exception as e:
                             logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
 
-                        # Use English translation as primary analysis input (#28)
-                        analysis_input = snow_info.get("Description_en") or translated or full_description
                         analysis = self.analyze_content_issue(analysis_input, guide_text, snow_info)
 
                     elif is_environment_issue:
-                        analysis_input = snow_info.get("Description_en") or translated or full_description
                         analysis = self.analyze_environment_issue(analysis_input, snow_info)
 
-                    # If the issue requires lab verification, start the lab
-                    if needs_lab:
+                    # If the issue requires lab verification, start the lab (never for SSH Lab Access)
+                    if is_ssh_lab_access:
+                        pass
+                    elif needs_lab:
                         self.logger("Lab verification needed - starting lab environment")
                         try:
                             self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
@@ -2280,12 +2467,12 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"Failed updating SNOW notes/reply for {snow_id}: {e}")
 
-                # Determine if Jira Defect is needed.
-                # A Defect is opened only when the analysis confirms a real defect
-                # (reply_mode == "confirm_defect"). For all other modes — learner
-                # confusion, insufficient info, expected behaviour — skip Jira.
+                # SSH Lab Access Feedback is never a Defect. Otherwise only confirm_defect opens Jira.
                 reply_mode = analysis.get("reply_mode", "confirm_defect")
-                skip_jira = reply_mode != "confirm_defect"
+                skip_jira = (
+                    classification.get("is_ssh_lab_access_ticket", False)
+                    or reply_mode != "confirm_defect"
+                )
 
                 if skip_jira:
                     self.logger("Skipping Jira creation - videos not ready, no ticket needed")

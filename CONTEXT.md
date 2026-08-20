@@ -10,6 +10,10 @@ Automation tools for the Learner Experience (LX) team to triage learner feedback
 A person taking a Red Hat training course on a Production Platform.
 _Avoid_: Student, customer, user
 
+**Internal Learner**:
+A Red Hat employee taking a course on ROLE. A kind of Learner; not partners or contractors.
+_Avoid_: Employee, student, user
+
 **LX Engineer**:
 A member of the Learner Experience team who triages Feedback, investigates issues, creates Defects, and responds to Learners.
 _Avoid_: Operator, support agent
@@ -30,6 +34,9 @@ _Avoid_: Bug, Jira ticket, issue (overloaded)
 
 **Response**:
 A reply sent to a Learner through ServiceNow. Can close the Feedback, request clarification (Pending Customer), or acknowledge that investigation is underway.
+
+**SSH Lab Access Feedback**:
+Feedback from an Internal Learner about connecting to a ROLE Lab via SSH (private key setup, jump host, permissions). Never a Defect. SSH Lab Access exists on ROLE and Factory; Feedback of this type only arrives from ROLE.
 
 ### Course structure
 
@@ -119,13 +126,20 @@ _Avoid_: Slow lab (ambiguous), certificate error, git clone failure, SSL error
 The primary VM in a Lab. The Learner's entry point; all Lab Scripts are run from here. Connects via SSH to other VMs (servera, serverb, utility, etc.).
 
 **Platform**:
-The deployment where courses are hosted and Labs are provisioned: ROL, Factory, or China.
+The deployment where courses are hosted and Labs are provisioned: ROL, ROLE, Factory, or China.
 
 **Production Platform**:
-A Platform used by Learners: ROL or China. Issues are always reproduced on the same Production Platform the Learner reported from.
+A Platform used by Learners: ROL, ROLE, or China. Issues are always reproduced on the same Production Platform the Learner reported from.
+
+**ROLE**:
+Production Platform for Internal Learners. Hosted at `role.rhu.redhat.com`. Internal Learners report ordinary Guide, Lab, and video Feedback as well as SSH Lab Access Feedback. Only SSH Lab Access Feedback is investigated on ROLE itself; other types are reproduced on ROL.
+
+**SSH Lab Access**:
+How Internal Learners reach a ROLE Lab: download an SSH private key from the Lab page, then SSH from their local machine through a jump host (`cloud-user@<ip>:22022`) as `student@workstation`. The jump host IP changes per Lab.
+_Avoid_: Employee SSH, remote SSH, ROLE SSH
 
 **Development Platform**:
-Factory. Used by curriculum developers (content authoring) and LX engineers (QA testing). Not accessible to Learners.
+Factory. Used by curriculum developers (content authoring) and LX engineers (QA testing). Not accessible to Learners. SSH Lab Access exists here but does not generate Feedback.
 _Avoid_: Staging
 
 ### Operations
@@ -151,3 +165,4 @@ The time window during which a specific engineer handles incoming tickets. Exter
 - A "missing information" complaint is often valid when Specifications lack detail only found in Show Solution.
 - do/ai-family Labs often need ~30–40 minutes on First Boot (Cluster Readiness Check / operators still coming up); complaints that match that startup pattern are usually expected behavior.
 - Git clone, TLS/SSL certificate, and application errors inside a running workbench are not First Boot — do not treat them as cluster warm-up.
+- SSH Lab Access Feedback is never a Defect. Classify it from the Feedback text: the Internal Learner is stuck on SSH Lab Access (private key, jump host, `rht_classroom.rsa`, `cloud-user`, `DOWNLOAD SSH KEY`, `ssh -J`). A ROLE URL alone is not enough — Internal Learners also report ordinary Guide and Lab issues. Those stay content, environment, or video Feedback and are investigated on ROL. SSH Lab Access Feedback is investigated on ROLE in the Lab Environment tab.
