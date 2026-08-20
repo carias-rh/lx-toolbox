@@ -436,6 +436,22 @@ class LabManager:
         except Exception as e:
             logging.getLogger(__name__).warning(f"Could not expand SSH key info panel: {e}")
 
+    def _element_is_unobscured(self, element) -> bool:
+        """True when the element's center is not covered by another node (e.g. a PF skeleton)."""
+        return bool(
+            self.driver.execute_script(
+                """
+                const el = arguments[0];
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) return false;
+                const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+                if (!top) return false;
+                return el === top || el.contains(top);
+                """,
+                element,
+            )
+        )
+
     def _select_tab_new_interface(self, tab_text: str, tab_name: str):
         """Select tab using new PF5 interface."""
         try:
@@ -443,7 +459,15 @@ class LabManager:
             tab_element = WebDriverWait(self.driver, 20).until(
                 EC.element_to_be_clickable((By.XPATH, tab_xpath))
             )
-            tab_element.click()
+            try:
+                WebDriverWait(self.driver, 10).until(lambda d: self._element_is_unobscured(tab_element))
+            except TimeoutException:
+                logging.getLogger(__name__).debug(
+                    "Tab '%s' still obscured after wait; clicking via JavaScript",
+                    tab_name,
+                )
+            # Native clicks fail when a pf-v5-c-skeleton briefly covers the tab bar.
+            self.driver.execute_script("arguments[0].click();", tab_element)
             
             WebDriverWait(self.driver, 20).until(
                 lambda d: d.find_element(By.XPATH, tab_xpath).get_attribute("aria-selected") == "true",
