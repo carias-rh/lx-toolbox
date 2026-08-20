@@ -410,6 +410,32 @@ class LabManager:
         else:
             self._select_tab_old_interface(tab_config["old"], tab_name)
 
+    def expand_ssh_key_info(self):
+        """Unroll the SSH Lab Access instruction panel on the Lab Environment tab.
+
+        The panel is available before CREATE. Do not scrape or return the live
+        jump-host IP — it belongs to the current session, not the Internal Learner.
+        """
+        heading_xpath = '//*[@id="ssh-key-info--heading"]'
+        toggle_xpath = '//*[@id="ssh-key-info--heading"]/div/div/svg'
+        body_xpath = '//*[@id="ssh-key-info--body"]/div'
+        try:
+            heading = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, heading_xpath))
+            )
+            expanded = (heading.get_attribute("aria-expanded") or "").lower() == "true"
+            if not expanded:
+                try:
+                    self.driver.find_element(By.XPATH, toggle_xpath).click()
+                except Exception:
+                    heading.click()
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, body_xpath))
+            )
+            self.logger("SSH Lab Access instruction panel expanded")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Could not expand SSH key info panel: {e}")
+
     def _select_tab_new_interface(self, tab_text: str, tab_name: str):
         """Select tab using new PF5 interface."""
         try:
@@ -564,10 +590,11 @@ class LabManager:
         return primary_status, secondary_status
 
 
-    def create_lab(self, course_id: str):
+    def create_lab(self, course_id: str, wait: bool = True):
         """
         Creates a lab environment for the specified course.
         Only works when no lab exists (first button is CREATE).
+        When wait is False, click CREATE and return immediately.
         """
         self.logger(f"Creating lab for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
@@ -576,11 +603,12 @@ class LabManager:
             create_button, btn_text = self._get_lab_action_button(["Create"], position="first")
             if create_button and btn_text == "CREATE":
                 create_button.click()
-                # Wait until status changes from CREATE to CREATING/DELETE/etc
-                WebDriverWait(self.driver, 60).until(
-                    lambda d: self._get_lab_buttons_by_position()[1] in ("CREATING", "DELETE", "DELETING"),
-                    message="Lab did not appear to start creating or finish creating."
-                )
+                if wait:
+                    # Wait until status changes from CREATE to CREATING/DELETE/etc
+                    WebDriverWait(self.driver, 60).until(
+                        lambda d: self._get_lab_buttons_by_position()[1] in ("CREATING", "DELETE", "DELETING"),
+                        message="Lab did not appear to start creating or finish creating."
+                    )
                 self.logger("Lab creation initiated")
             else:
                 self.logger(f"Create button not available (current first button: {btn_text})")
