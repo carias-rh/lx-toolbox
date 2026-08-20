@@ -454,7 +454,6 @@ class SnowAIProcessor:
         "cloud-user@",
         ":22022",
         "-j cloud-user",
-        "chmod 0600",
     )
 
     @staticmethod
@@ -894,7 +893,8 @@ Instructions:
             issue_specific_notes = [
                 "Classification rules:",
                 "- Treat quiz problems, missing instructions, missing details hidden only in Show Solution, and grading-script logic mismatches as content issues first.",
-                "- Treat lab startup, lab finish, lab grade, building, starting, stopping, VM access, and lab-environment behavior as environment issues.",
+                "- SSH Lab Access Feedback is a separate type: Internal Learner stuck on ROLE SSH-from-laptop (rht_classroom.rsa, DOWNLOAD SSH KEY, cloud-user jump host). Never classify that as environment or content. A ROLE URL alone is not SSH Lab Access — Internal Learners also report ordinary Guide, Lab, and video Feedback.",
+                "- Treat lab startup, lab finish, lab grade, building, starting, stopping, VM access *inside the lab*, and lab-environment behavior as environment issues. SSH from a laptop via jump host is not this type.",
                 "- Treat account, exam, subscription, refund, and unrelated platform requests as manually managed issues.",
                 "- If the learner ran commands from a theory section and expected lab-validated output, learner confusion is often more likely than an environment defect.",
                 "- A doXXX or aiXXX course taking a long time to start on first use may be expected first-boot behavior and may not need lab verification if the report matches that pattern.",
@@ -1273,10 +1273,17 @@ Instructions:
     def classify_ticket_llm(self, description: str, snow_info: dict | None = None) -> dict:
         self.logger("Classifying ticket using LLM")
         json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue_ticket": false, "is_video_issue_ticket": false, "is_ssh_lab_access_ticket": false, "needs_lab_verification": true}'
+        role_note = ""
+        if snow_info and self.is_role_platform_url(str(snow_info.get("URL") or "")):
+            role_note = (
+                "Supporting context: the Feedback URL is on ROLE (Internal Learner). "
+                "That does not by itself mean SSH Lab Access Feedback — classify from the text. "
+                "Ordinary Guide, Lab, and video Feedback from ROLE still use those types.\n"
+            )
         prompt = f"""
 You are an expert classifier of Red Hat Training tickets.
 {self._build_operational_context("classification", snow_info)}
-
+{role_note}
 Classify the user's feedback regarding a Red Hat Training course. Types are mutually exclusive:
 - content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, a quiz problem, missing lab specification details, or a grading-script logic mismatch.
 - environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', or the learner is reporting machine access, VM state, or lab-environment behavior *inside* the lab VMs. This is NOT ROLE SSH-from-laptop access.
@@ -1538,7 +1545,6 @@ For example:
         )
         prompt_text = f"""
         You are an expert in ROLE SSH Lab Access for Internal Learners (Red Hat employees).
-        {self._build_operational_context("environment", snow_info)}
 
         SSH Lab Access is how Internal Learners reach a ROLE Lab from their local machine:
         download rht_classroom.rsa, chmod 0600, ssh-add, then jump via
@@ -1817,8 +1823,8 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
     # --------------------------
     # High-level helpers
     # --------------------------
-    T1_ASSIGNMENT_GROUP = "RHT Learner Experience"
-    T1_SSH_ASSIGNEE = "Yashashvi Singh"
+    SSH_HANDOVER_ASSIGNMENT_GROUP = "RHT Learner Experience"
+    SSH_HANDOVER_ASSIGNEE = "Yashashvi Singh"
 
     def _snow_typeahead_fill(self, field_id: str, value: str) -> None:
         """Prefill a ServiceNow reference/typeahead field. Human still Saves."""
@@ -1837,16 +1843,16 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         try:
             self._snow_typeahead_fill(
                 "sys_display.x_redha_rht_task.assignment_group",
-                self.T1_ASSIGNMENT_GROUP,
+                self.SSH_HANDOVER_ASSIGNMENT_GROUP,
             )
             time.sleep(0.4)
             self._snow_typeahead_fill(
                 "sys_display.x_redha_rht_task.assigned_to",
-                self.T1_SSH_ASSIGNEE,
+                self.SSH_HANDOVER_ASSIGNEE,
             )
             self.logger(
-                f"Prefills: Assignment group={self.T1_ASSIGNMENT_GROUP}, "
-                f"Assigned to={self.T1_SSH_ASSIGNEE}"
+                f"Prefills: Assignment group={self.SSH_HANDOVER_ASSIGNMENT_GROUP}, "
+                f"Assigned to={self.SSH_HANDOVER_ASSIGNEE}"
             )
         except Exception as e:
             logging.getLogger(__name__).warning(f"Could not prefill SSH Lab Access handover fields: {e}")
@@ -2439,23 +2445,22 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                     elif is_environment_issue:
                         analysis = self.analyze_environment_issue(analysis_input, snow_info)
 
-                    # If the issue requires lab verification, start the lab (never for SSH Lab Access)
-                    if is_ssh_lab_access:
-                        pass
-                    elif needs_lab:
-                        self.logger("Lab verification needed - starting lab environment")
-                        try:
-                            self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
-                        except Exception as e:
-                            logging.getLogger(__name__).warning(f"Failed to start lab: {e}")
-                    else:
-                        self.logger("No lab verification needed - navigating to course page only")
-                        self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
-                        self.lab_mgr.select_lab_environment_tab("course")
-                        if is_video_issue:
-                            self.lab_mgr.toggle_video_player(state=True)
+                    # Lab verification on ROL — never for SSH Lab Access (ROLE path already ran)
+                    if not is_ssh_lab_access:
+                        if needs_lab:
+                            self.logger("Lab verification needed - starting lab environment")
+                            try:
+                                self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"Failed to start lab: {e}")
                         else:
-                            self.lab_mgr.toggle_video_player(state=False)
+                            self.logger("No lab verification needed - navigating to course page only")
+                            self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                            self.lab_mgr.select_lab_environment_tab("course")
+                            if is_video_issue:
+                                self.lab_mgr.toggle_video_player(state=True)
+                            else:
+                                self.lab_mgr.toggle_video_player(state=False)
 
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"ROL tab setup failed for {snow_id}: {e}\n{traceback.format_exc()}")
