@@ -11,5 +11,4 @@ Auto-Assign skipped the next engineer when the unassigned queue was empty: a mut
 
 ## Consequences
 
-- Auto-Assign for T2 and CX now peeks with GET and commits with POST; `advance=true` on the cron frontend remains only for leftover clients until that hatch is removed.
-- T1 Auto-Assign still calls `GET /api/round_robin` until the T1 client ticket lands; that GET still rotates.
+- Auto-Assign peeks with GET and commits with POST for T1, T2, and CX. GET never writes the last-assigned name.

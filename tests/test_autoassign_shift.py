@@ -1,4 +1,4 @@
-"""Auto-Assign peek/commit HTTP contract (issue #32)."""
+"""Auto-Assign peek/commit HTTP contract (issues #32, #33)."""
 
 from unittest.mock import MagicMock, patch
 
@@ -31,7 +31,7 @@ def assigner():
     return ServiceNowAutoAssign(_config())
 
 
-def _feedback(number="RHT0001"):
+def _ticket(number="RHT0001"):
     return {"sys_id": "sys1", "number": number, "description": "", "short_description": ""}
 
 
@@ -56,7 +56,7 @@ def test_t2_peek_assign_commit_name(assigner):
     peek = _shift_response("Samik Sanyal")
     commit = _shift_response("Shashi Singh")
     with patch.object(assigner, "auto_resolve_tickets_by_reporter", return_value=0), \
-         patch.object(assigner, "get_unassigned_tickets", return_value=[_feedback()]), \
+         patch.object(assigner, "get_unassigned_tickets", return_value=[_ticket()]), \
          patch.object(assigner, "process_t2_ticket", return_value=True) as process, \
          patch("lx_toolbox.core.servicenow_autoassign.requests.get", return_value=peek) as mock_get, \
          patch("lx_toolbox.core.servicenow_autoassign.requests.post", return_value=commit) as mock_post:
@@ -74,7 +74,7 @@ def test_t2_peek_assign_commit_name(assigner):
 def test_t2_failed_assign_does_not_commit(assigner):
     peek = _shift_response("Samik Sanyal")
     with patch.object(assigner, "auto_resolve_tickets_by_reporter", return_value=0), \
-         patch.object(assigner, "get_unassigned_tickets", return_value=[_feedback()]), \
+         patch.object(assigner, "get_unassigned_tickets", return_value=[_ticket()]), \
          patch.object(assigner, "process_t2_ticket", return_value=False), \
          patch("lx_toolbox.core.servicenow_autoassign.requests.get", return_value=peek), \
          patch("lx_toolbox.core.servicenow_autoassign.requests.post") as mock_post:
@@ -88,7 +88,7 @@ def test_t2_in_batch_uses_commit_next_name(assigner):
     first_commit = _shift_response("Shashi Singh")
     second_commit = _shift_response("Wasim Raja")
     with patch.object(assigner, "auto_resolve_tickets_by_reporter", return_value=0), \
-         patch.object(assigner, "get_unassigned_tickets", return_value=[_feedback("RHT1"), _feedback("RHT2")]), \
+         patch.object(assigner, "get_unassigned_tickets", return_value=[_ticket("RHT1"), _ticket("RHT2")]), \
          patch.object(assigner, "process_t2_ticket", return_value=True) as process, \
          patch("lx_toolbox.core.servicenow_autoassign.requests.get", return_value=peek), \
          patch("lx_toolbox.core.servicenow_autoassign.requests.post", side_effect=[first_commit, second_commit]):
@@ -97,14 +97,32 @@ def test_t2_in_batch_uses_commit_next_name(assigner):
     assert names == ["Samik Sanyal", "Shashi Singh"]
 
 
-def test_t1_empty_queue_still_calls_shift_frontend(assigner):
-    peek = _shift_response("Abdul Patel", round_robin=False)
+def test_t1_empty_queue_does_not_call_shift_frontend(assigner):
     with patch.object(assigner, "get_unassigned_tickets", return_value=[]), \
-         patch("lx_toolbox.core.servicenow_autoassign.requests.get", return_value=peek) as mock_get, \
+         patch("lx_toolbox.core.servicenow_autoassign.requests.get") as mock_get, \
          patch("lx_toolbox.core.servicenow_autoassign.requests.post") as mock_post:
         assigner.run_auto_assignment("t1")
-    mock_get.assert_called()
+    mock_get.assert_not_called()
     mock_post.assert_not_called()
+
+
+def test_t1_peek_assign_commit_name(assigner):
+    peek = _shift_response("Abdul Patel")
+    commit = _shift_response("Bhawyya Mittal")
+    with patch.object(assigner, "get_unassigned_tickets", return_value=[_ticket()]), \
+         patch.object(assigner, "process_t1_ticket", return_value=True) as process, \
+         patch("lx_toolbox.core.servicenow_autoassign.requests.get", return_value=peek) as mock_get, \
+         patch("lx_toolbox.core.servicenow_autoassign.requests.post", return_value=commit) as mock_post:
+        stats = assigner.run_auto_assignment("t1")
+    assert stats["assigned"] == 1
+    process.assert_called_once()
+    assert process.call_args[0][2] == "Abdul Patel"
+    assert mock_get.call_args[0][0] == "http://t1-frontend/api/shift"
+    get_urls = [call[0][0] for call in mock_get.call_args_list]
+    assert all("/api/round_robin" not in url for url in get_urls)
+    mock_post.assert_called_once()
+    assert mock_post.call_args[0][0] == "http://t1-frontend/api/shift/commit"
+    assert mock_post.call_args[1]["json"] == {"assigned_name": "Abdul Patel"}
 
 
 def test_cx_commit_uses_audit_pool_group(assigner):
@@ -124,7 +142,7 @@ def test_cx_commit_uses_audit_pool_group(assigner):
     assigner.teams["gls-cx-apac-anz"] = anz
     peek = _shift_response("Zone Person")
     commit = _shift_response("Next Person")
-    with patch.object(assigner, "get_unassigned_tickets", return_value=[_feedback()]), \
+    with patch.object(assigner, "get_unassigned_tickets", return_value=[_ticket()]), \
          patch.object(assigner, "process_gls_cx_ticket", return_value=("Audit Person", audit)), \
          patch("lx_toolbox.core.servicenow_autoassign.requests.get", return_value=peek), \
          patch("lx_toolbox.core.servicenow_autoassign.requests.post", return_value=commit) as mock_post:

@@ -16,13 +16,17 @@ _Avoid_: Operator, support agent
 
 ### Tickets
 
+**Ticket**:
+A ServiceNow work item. Auto-Assign dispatches Tickets across teams. Feedback and Support Request are kinds of Ticket. CX Tickets have no separate kind name.
+_Avoid_: case, incident (as the generic)
+
 **Feedback**:
-A ServiceNow ticket submitted by a Learner reporting a problem or observation about a course. Processed by the LX team (T2).
-_Avoid_: Ticket (ambiguous), case, incident
+A Ticket submitted by a Learner reporting a problem or observation about a course. Processed by the LX team (T2) only.
+_Avoid_: using Feedback for T1 or CX Tickets
 
 **Support Request**:
-A ServiceNow ticket for account, subscription, or exam issues. Processed by the TTS team (T1).
-_Avoid_: Ticket (ambiguous)
+A Ticket for account, subscription, or exam issues. Processed by the TTS team (T1).
+_Avoid_: Feedback
 
 **Defect**:
 A Jira ticket in the PTL project representing a confirmed issue in course content, lab scripts, or video. Component = Course Code.

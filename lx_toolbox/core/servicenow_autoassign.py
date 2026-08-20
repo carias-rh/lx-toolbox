@@ -141,9 +141,6 @@ class ServiceNowAutoAssign:
         # Cache for team members to avoid repeated API calls
         self._team_members_cache = {}
 
-        # Tracks which teams have round-robin enabled (learned from /api/shift response).
-        self._rr_enabled: Dict[str, bool] = {}
-        
     def _load_team_configurations(self) -> Dict[str, TeamConfig]:
         """Load team configurations.
 
@@ -1163,7 +1160,7 @@ class ServiceNowAutoAssign:
             return 0
 
 
-    def peek_shift(self, team_config: TeamConfig, team_key: str = None) -> Optional[str]:
+    def peek_shift(self, team_config: TeamConfig) -> Optional[str]:
         """Who should receive the next item. Does not consume a Round-Robin turn."""
         url = f"{team_config.frontend_shift_manager_url}/api/shift"
         params = {}
@@ -1174,8 +1171,6 @@ class ServiceNowAutoAssign:
             response.raise_for_status()
             data = response.json()
             name = data.get("name")
-            if team_key:
-                self._rr_enabled[team_key] = data.get("round_robin", False)
             if name and name != "None":
                 logger.debug(
                     f"[{team_config.team_name}] Peek assignee: {name} "
@@ -1208,75 +1203,6 @@ class ServiceNowAutoAssign:
         except Exception as e:
             logger.error(f"[{team_config.team_name}] Shift commit failed: {e}")
             return None
-
-    def who_is_on_shift(self, team_config: TeamConfig, team_key: str = None, advance: bool = True) -> Optional[str]:
-        is_round_robin_enabled = False
-        group_params = {}
-        if team_config.frontend_group_param:
-            group_params["group"] = team_config.frontend_group_param
-        try:
-            if team_config.frontend_shift_manager_url != None and team_config.team_name == "RHT Learner Experience":
-                try:
-                    round_robin_status_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin_status")
-                    round_robin_status_response.raise_for_status()
-                    round_robin_status = round_robin_status_response.json()
-                    is_round_robin_enabled = round_robin_status.get("round_robin_enabled", False)
-                    if is_round_robin_enabled:
-                        round_robin_response = requests.get(f"{team_config.frontend_shift_manager_url}/api/round_robin", params=group_params)
-                        round_robin_response.raise_for_status()
-                        round_robin_data = round_robin_response.json()
-                        assignee_name = round_robin_data.get("name")
-                        logger.debug(f"[{team_config.team_name}] Round-robin assignee: {assignee_name}")
-                        return assignee_name
-                    else:
-                        shift_url = f"{team_config.frontend_shift_manager_url}/api/shift"   
-                        shift_response = requests.get(shift_url, params=group_params)
-                        shift_response.raise_for_status()
-                        shift_data = shift_response.json()
-                        assignee_name = shift_data.get("name")
-                        if assignee_name and assignee_name != "None":
-                            logger.debug(
-                                f"[{team_config.team_name}] Shift assignee: {assignee_name} "
-                                f"| round_robin={is_round_robin_enabled} | group={group_params.get('group', '-')}"
-                            )
-                            return assignee_name
-                        else:
-                            logger.debug(
-                                f"[{team_config.team_name}] No one on shift "
-                                f"| group={group_params.get('group', '-')}"
-                            )
-                            return "None"
-                except Exception as e:
-                    logger.warning(f"[{team_config.team_name}] Round-robin endpoint failed: {e}")
-            else:
-                shift_url = f"{team_config.frontend_shift_manager_url}/api/shift"
-                if team_key:
-                    group_params["team_key"] = team_key
-                    group_params["advance"] = "true" if advance else "false"
-                shift_response = requests.get(shift_url, params=group_params)
-                shift_response.raise_for_status()
-                shift_data = shift_response.json()
-                shift_name = shift_data.get("name")
-                is_rr = shift_data.get("round_robin", False)
-
-                if team_key:
-                    self._rr_enabled[team_key] = is_rr
-
-                if shift_name and shift_name != "None":
-                    logger.debug(
-                        f"[{team_config.team_name}] Shift assignee: {shift_name} "
-                        f"| round_robin={is_rr} | group={group_params.get('group', '-')}"
-                    )
-                    return shift_name
-                else:
-                    logger.debug(
-                        f"[{team_config.team_name}] No one on shift "
-                        f"| group={group_params.get('group', '-')}"
-                    )
-                    return "None"
-        except Exception as e:
-            logger.error(f"[{team_config.team_name}] Shift lookup failed: {e}")
-
 
     def _resolve_audit_assignee(self, team_key: str) -> Optional[str]:
         """Find the audit-eligible person currently on shift for the zone of the given team.
@@ -1328,18 +1254,10 @@ class ServiceNowAutoAssign:
 
         tname = team_config.team_name
         stats = {"assigned": 0, "resolved": 0, "skipped": 0, "errors": 0}
-        is_t1 = team_key == "t1"
-        use_peek_commit = bool(team_config.frontend_shift_manager_url) and not is_t1
+        use_peek_commit = bool(team_config.frontend_shift_manager_url)
 
         if team_config.auto_resolve_reporters:
             stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
-
-        if is_t1 and team_config.frontend_shift_manager_url:
-            assignee_name = self.who_is_on_shift(team_config, team_key, advance=False)
-
-        if is_t1 and not assignee_name and team_config.frontend_shift_manager_url:
-            logger.info(f"[{tname}] No assignee available — skipping assignment cycle")
-            return stats
 
         tickets = self.get_unassigned_tickets(team_key)
         if not tickets:
@@ -1347,7 +1265,7 @@ class ServiceNowAutoAssign:
             return stats
 
         if use_peek_commit:
-            assignee_name = self.peek_shift(team_config, team_key)
+            assignee_name = self.peek_shift(team_config)
 
         if not assignee_name and team_config.frontend_shift_manager_url:
             logger.info(f"[{tname}] No assignee available — skipping assignment cycle")
@@ -1427,11 +1345,6 @@ class ServiceNowAutoAssign:
                         next_name = self.commit_shift(commit_config, committed_name)
                         if commit_config is team_config and next_name and next_name != "None":
                             assignee_name = next_name
-                    elif self._rr_enabled.get(team_key):
-                        prev_assignee = assignee_name
-                        assignee_name = self.who_is_on_shift(team_config, team_key, advance=True)
-                        if assignee_name and assignee_name != prev_assignee:
-                            logger.info(f"[{tname}] Round-robin: {prev_assignee} → {assignee_name}")
                 else:
                     stats["errors"] += 1
 
