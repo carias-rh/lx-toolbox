@@ -1150,6 +1150,163 @@ Instructions:
         """Switch to SNOW content iframe through macroponent shadow DOM."""
         self.snow_handler.switch_to_iframe()
 
+    # ------------------------------------------------------------------
+    # Issue Section (ADR-0002)
+    # ------------------------------------------------------------------
+
+    _SECTION_SLUG_RE = re.compile(r"ch(\d{1,2})s(\d{1,2})", re.IGNORECASE)
+    _CHAPTER_SECTION_WORDS_RE = re.compile(
+        r"chapter\s+(\d{1,2})\s*,?\s*section\s+(\d{1,2})", re.IGNORECASE
+    )
+    _EXERCISE_NM_RE = re.compile(
+        r"(?:演習|exercise|guided exercise|\bge\b|\blab\b)\s*(\d{1,2})\s*[.\s]\s*(\d{1,2})",
+        re.IGNORECASE,
+    )
+    _BARE_NM_RE = re.compile(r"\b(\d{1,2})\.(\d{1,2})\b")
+
+    @classmethod
+    def text_names_a_section(cls, text: str, course_version: str = "") -> bool:
+        """Heuristic: does this Learner text look like it names a Section?"""
+        raw = text or ""
+        if cls._SECTION_SLUG_RE.search(raw):
+            return True
+        if cls._CHAPTER_SECTION_WORDS_RE.search(raw):
+            return True
+        if cls._EXERCISE_NM_RE.search(raw):
+            return True
+        version = (course_version or "").strip()
+        for match in cls._BARE_NM_RE.finditer(raw):
+            token = f"{match.group(1)}.{match.group(2)}"
+            if version and token == version:
+                continue
+            return True
+        return False
+
+    @classmethod
+    def parse_issue_section(cls, parsed: dict | None) -> tuple[str, str] | None:
+        """Return zero-padded (chapter, section) or None if unchanged/invalid."""
+        if not parsed:
+            return None
+        if parsed.get("unchanged") in (True, "true", "True"):
+            return None
+        slug = str(parsed.get("section_slug") or parsed.get("slug") or "").strip()
+        slug_match = cls._SECTION_SLUG_RE.search(slug)
+        if slug_match:
+            return cls._pad_chapter_section(slug_match.group(1), slug_match.group(2))
+        chapter = str(parsed.get("chapter") or "").strip()
+        section = str(parsed.get("section") or "").strip()
+        digits = re.compile(r"^\d{1,2}$")
+        if digits.match(chapter) and digits.match(section):
+            return cls._pad_chapter_section(chapter, section)
+        return None
+
+    @staticmethod
+    def _pad_chapter_section(chapter: str, section: str) -> tuple[str, str]:
+        return (chapter.zfill(2), section.zfill(2))
+
+    @staticmethod
+    def rewrite_page_url(url: str, chapter: str, section: str) -> str:
+        """Replace /pages/<slug> keeping host, Course ID, and Platform."""
+        slug = f"ch{chapter}s{section}"
+        if re.search(r"/pages/[^/?#]+", url or ""):
+            return re.sub(r"/pages/[^/?#]+", f"/pages/{slug}", url, count=1)
+        return url
+
+    @staticmethod
+    def page_slug_from_url(url: str) -> str:
+        match = re.search(r"/pages/([^/?#]+)", url or "")
+        return match.group(1) if match else ""
+
+    @classmethod
+    def chapter_section_from_url(cls, url: str) -> tuple[str, str]:
+        slug = cls.page_slug_from_url(url)
+        match = re.match(r"ch(\d{2})s(\d{2})$", slug or "", re.IGNORECASE)
+        if match:
+            return match.group(1), match.group(2)
+        return "", ""
+
+    @staticmethod
+    def issue_section_inference_text(snow_info: dict) -> str:
+        """Description plus Learner Follow-ups; never the Feedback Title."""
+        parts = [str(snow_info.get("Description") or "").strip()]
+        for update in snow_info.get("customer_updates") or []:
+            role = (update.get("role") or "customer").lower()
+            if role in ("agent", "response"):
+                continue
+            text = (update.get("text") or "").strip()
+            if text:
+                parts.append(text)
+        return "\n\n".join(p for p in parts if p)
+
+    @classmethod
+    def apply_issue_section(cls, snow_info: dict, chapter: str, section: str) -> dict:
+        """Point Chapter, Section, and investigation URL at the Issue Section."""
+        current_url = snow_info.get("URL") or ""
+        if "CaptureURL" not in snow_info:
+            snow_info["CaptureURL"] = current_url
+        snow_info["Chapter"] = chapter
+        snow_info["Section"] = section
+        snow_info["URL"] = cls.rewrite_page_url(current_url, chapter, section)
+        return snow_info
+
+    @classmethod
+    def restore_capture_location(cls, snow_info: dict) -> dict:
+        """Revert investigation URL/Chapter/Section to the Capture URL page."""
+        capture = snow_info.get("CaptureURL") or ""
+        if not capture:
+            return snow_info
+        snow_info["URL"] = capture
+        chapter, section = cls.chapter_section_from_url(capture)
+        snow_info["Chapter"] = chapter
+        snow_info["Section"] = section
+        return snow_info
+
+    def _resolve_issue_section(self, snow_info: dict) -> dict:
+        """If Learner text names a Section, ask the LLM and update snow_info."""
+        text = self.issue_section_inference_text(snow_info)
+        version = str(snow_info.get("Version") or "")
+        if not self.text_names_a_section(text, course_version=version):
+            return snow_info
+        course_id = (
+            f"{str(snow_info.get('Course') or '').lower()}-{version}".strip("-")
+        )
+        capture_url = snow_info.get("URL") or ""
+        self.logger("Inferring Issue Section from Feedback text")
+        prompt = f"""You infer which course Section a Learner is complaining about.
+
+Course ID (frozen — do not change it): {course_id}
+Capture URL (page where they opened the Feedback form): {capture_url}
+
+Learner text (original description, then any Learner Follow-ups).
+A Follow-up that names a Section is the Issue Section:
+{text}
+
+Rules:
+- Return the Issue Section as chapter and section numbers (chapter 8 section 8 is 8 and 8).
+- "N.M", "chapter N section M", "chNNsMM", "Exercise N.M", "演習N.M" all mean chapter N section M.
+- If a Follow-up names a Section, use that, not the original description.
+- If the text does not clearly name one Section, or names two with no primary, return unchanged.
+- Do not invent a different course.
+
+JSON only.
+Example when you can tell: {{"chapter": "8", "section": "8"}}
+Example when you cannot: {{"unchanged": true}}
+{self._json_output_rules()}
+"""
+        response = self.ask_llm(prompt)
+        logging.getLogger(__name__).info("Issue Section inference: %s", response)
+        parsed = self._parse_llm_json(response, context="Issue Section inference")
+        pair = self.parse_issue_section(parsed)
+        if not pair:
+            return snow_info
+        chapter, section = pair
+        current_slug = self.page_slug_from_url(capture_url)
+        new_slug = f"ch{chapter}s{section}"
+        if current_slug == new_slug:
+            return snow_info
+        self.logger(f"Issue Section {new_slug} (Capture URL page was {current_slug or 'unknown'})")
+        return self.apply_issue_section(snow_info, chapter, section)
+
     def get_snow_info(self, snow_id: str) -> dict:
         """
         Return key Feedback ticket fields.
@@ -1173,6 +1330,8 @@ Instructions:
             logging.getLogger(__name__).info(
                 f"Customer updates summary: {info['customer_updates_summary']}"
             )
+
+        info = self._resolve_issue_section(info)
 
         logging.getLogger(__name__).info(f"ServiceNow ticket info: {json.dumps({k: v for k, v in info.items() if k != 'customer_updates'}, indent=2)}")
         return info
@@ -1896,6 +2055,39 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             )
         )
 
+    def _goto_investigation_page(
+        self,
+        snow_info: dict,
+        course_id: str,
+        chapter_section: str,
+        environment: str,
+    ) -> str:
+        """Open the Issue Section page; fall back to the Capture URL page on load failure."""
+        try:
+            self._navigate_to_course_page(
+                course_id=course_id,
+                chapter_section=chapter_section,
+                environment=environment,
+            )
+            return chapter_section
+        except Exception as exc:
+            capture_slug = self.page_slug_from_url(
+                snow_info.get("CaptureURL") or snow_info.get("URL") or ""
+            )
+            if not capture_slug or capture_slug == chapter_section:
+                raise
+            logging.getLogger(__name__).warning(
+                f"Issue Section page {chapter_section} did not load ({exc}); "
+                f"falling back to Capture URL page {capture_slug}"
+            )
+            self.restore_capture_location(snow_info)
+            self._navigate_to_course_page(
+                course_id=course_id,
+                chapter_section=capture_slug,
+                environment=environment,
+            )
+            return capture_slug
+
     def start_lab_for_course(self, course_id: str, chapter_section: str = "pr01", environment: str = "rol"):
         self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
         primary_status, secondary_status = self.lab_mgr.check_lab_status()
@@ -1986,10 +2178,10 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 )).send_keys(f"{username}@redhat.com")
                 WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(
                     (By.XPATH, '//*[@id="login-show-step2"]'))).click()
-            WebDriverWait(self.driver, 5).until(
-                EC.presence_of_element_located((By.XPATH,
-                    '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))
-            )
+            #WebDriverWait(self.driver, 5).until(
+            #    EC.presence_of_element_located((By.XPATH,
+            #        '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))
+            #)
             self.logger("ROL session already active")
             self._rol_logged_in = True
         except Exception:
@@ -2420,14 +2612,15 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                         self._open_role_ssh_lab_workspace(snow_info, course_id)
                     elif is_video_issue:
                         self.logger("Video issue detected - navigating to course page without starting lab")
-                        self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                        chapter_section = self._goto_investigation_page(
+                            snow_info, course_id, chapter_section, environment
+                        )
                         video_player_available = self.lab_mgr.check_video_player_available()
                         analysis = self.analyze_video_issue(analysis_input, video_player_available, snow_info)
                     elif is_content_issue:
-                        # Navigate to the course page (ROL, even when the ticket URL was ROLE)
-                        self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
-
-                        # Fetch guide text for "content guide" issue analysis
+                        chapter_section = self._goto_investigation_page(
+                            snow_info, course_id, chapter_section, environment
+                        )
                         try:
                             self.lab_mgr.select_lab_environment_tab("course")
                         except Exception:
@@ -2450,12 +2643,17 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                         if needs_lab:
                             self.logger("Lab verification needed - starting lab environment")
                             try:
+                                chapter_section = self._goto_investigation_page(
+                                    snow_info, course_id, chapter_section, environment
+                                )
                                 self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
                             except Exception as e:
                                 logging.getLogger(__name__).warning(f"Failed to start lab: {e}")
                         else:
                             self.logger("No lab verification needed - navigating to course page only")
-                            self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                            chapter_section = self._goto_investigation_page(
+                                snow_info, course_id, chapter_section, environment
+                            )
                             self.lab_mgr.select_lab_environment_tab("course")
                             if is_video_issue:
                                 self.lab_mgr.toggle_video_player(state=True)

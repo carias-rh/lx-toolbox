@@ -394,3 +394,132 @@ class TestNormalizeSshLabAccessAnalysis:
         result = SnowAIProcessor._normalize_ssh_lab_access_analysis({})
         assert result["reply_mode"] == "teach"
 
+
+# ---------------------------------------------------------------------------
+# Issue Section inference (ADR-0002)
+# ---------------------------------------------------------------------------
+
+class TestTextNamesASection:
+    def test_japanese_exercise_number(self):
+        assert SnowAIProcessor.text_names_a_section(
+            "演習8.8の「仮想マシンの復元」において velero が失敗する。"
+        ) is True
+
+    def test_exercise_n_m(self):
+        assert SnowAIProcessor.text_names_a_section(
+            "In Exercise 8.8, velero restore create fails."
+        ) is True
+
+    def test_chapter_section_words(self):
+        assert SnowAIProcessor.text_names_a_section(
+            "See chapter 8 section 8 for the DPA backup location."
+        ) is True
+
+    def test_chapter_section_with_comma(self):
+        assert SnowAIProcessor.text_names_a_section(
+            "See chapter 8, section 8 for the DPA backup location."
+        ) is True
+
+    def test_chxxsyy_slug(self):
+        assert SnowAIProcessor.text_names_a_section("The bug is on ch08s08") is True
+
+    def test_plain_complaint_has_no_section(self):
+        assert SnowAIProcessor.text_names_a_section(
+            "lab start is taking too long and never finishes."
+        ) is False
+
+    def test_course_version_alone_is_not_a_section(self):
+        assert SnowAIProcessor.text_names_a_section(
+            "I am using version 4.18 of the course.",
+            course_version="4.18",
+        ) is False
+
+
+class TestParseIssueSection:
+    def test_zero_pads_chapter_and_section(self):
+        assert SnowAIProcessor.parse_issue_section(
+            {"chapter": "8", "section": "8"}
+        ) == ("08", "08")
+
+    def test_chxxsyy_field(self):
+        assert SnowAIProcessor.parse_issue_section(
+            {"section_slug": "ch08s08"}
+        ) == ("08", "08")
+
+    def test_unchanged_returns_none(self):
+        assert SnowAIProcessor.parse_issue_section({"unchanged": True}) is None
+
+    def test_missing_returns_none(self):
+        assert SnowAIProcessor.parse_issue_section(None) is None
+
+    def test_partial_returns_none(self):
+        assert SnowAIProcessor.parse_issue_section({"chapter": "8"}) is None
+
+
+class TestRewritePageUrl:
+    def test_replaces_preface_with_issue_section(self):
+        url = "https://rol.redhat.com/rol/app/courses/do316-4.18/pages/pr01"
+        assert SnowAIProcessor.rewrite_page_url(url, "08", "08") == (
+            "https://rol.redhat.com/rol/app/courses/do316-4.18/pages/ch08s08"
+        )
+
+    def test_keeps_host_and_course_id(self):
+        url = "https://role.rhu.redhat.com/rol/app/courses/do316-4.18/pages/ch02s03"
+        result = SnowAIProcessor.rewrite_page_url(url, "08", "08")
+        assert "role.rhu.redhat.com" in result
+        assert "do316-4.18" in result
+        assert result.endswith("/pages/ch08s08")
+
+    def test_does_not_change_course_id(self):
+        url = "https://rol.redhat.com/rol/app/courses/do180-4.18/pages/pr01"
+        result = SnowAIProcessor.rewrite_page_url(url, "08", "08")
+        assert "do180-4.18" in result
+        assert "do316" not in result
+
+
+class TestIssueSectionInferenceText:
+    def test_uses_description_and_follow_ups_not_title(self):
+        info = {
+            "Description": "velero fails on restore",
+            "Title": "Red Hat OpenShift Virtualization Administration Rapid Track",
+            "customer_updates": [
+                {"role": "customer", "text": "It is exercise 8.8"},
+                {"role": "agent", "text": "Which section are you on?"},
+            ],
+        }
+        text = SnowAIProcessor.issue_section_inference_text(info)
+        assert "velero fails on restore" in text
+        assert "exercise 8.8" in text
+        assert "Rapid Track" not in text
+        assert "Which section are you on?" not in text
+
+
+class TestApplyIssueSection:
+    def test_updates_chapter_section_and_url(self):
+        info = {
+            "URL": "https://rol.redhat.com/rol/app/courses/do316-4.18/pages/pr01",
+            "Chapter": "",
+            "Section": "",
+            "Course": "DO316",
+            "Version": "4.18",
+        }
+        result = SnowAIProcessor.apply_issue_section(info, "08", "08")
+        assert result["Chapter"] == "08"
+        assert result["Section"] == "08"
+        assert result["URL"].endswith("/pages/ch08s08")
+        assert result["CaptureURL"].endswith("/pages/pr01")
+        assert result["Course"] == "DO316"
+
+    def test_restore_capture_location(self):
+        info = {
+            "URL": "https://rol.redhat.com/rol/app/courses/do316-4.18/pages/ch08s08",
+            "Chapter": "08",
+            "Section": "08",
+            "CaptureURL": "https://rol.redhat.com/rol/app/courses/do316-4.18/pages/pr01",
+        }
+        result = SnowAIProcessor.restore_capture_location(info)
+        assert result["URL"].endswith("/pages/pr01")
+        assert result["Chapter"] == ""
+        assert result["Section"] == ""
+
+

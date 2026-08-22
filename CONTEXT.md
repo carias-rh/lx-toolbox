@@ -28,6 +28,13 @@ _Avoid_: case, incident (as the generic)
 A Ticket submitted by a Learner reporting a problem or observation about a course. Processed by the LX team (T2) only.
 _Avoid_: using Feedback for T1 or CX Tickets
 
+**Capture URL**:
+The Guide page URL stamped into the Feedback when the Learner opened the form. Not necessarily the Issue Section.
+_Avoid_: Ticket URL (ambiguous with ServiceNow)
+
+**Issue Section**:
+The Section the Learner is complaining about. Named in the Feedback text in many forms (8.8, chapter 8 section 8, ch08s08, 演習8.8).
+
 **Support Request**:
 A Ticket for account, subscription, or exam issues. Processed by the TTS team (T1).
 _Avoid_: Feedback
@@ -38,6 +45,10 @@ _Avoid_: Bug, Jira ticket, issue (overloaded)
 
 **Response**:
 A reply sent to a Learner through ServiceNow. Can close the Feedback, request clarification (Pending Customer), or acknowledge that investigation is underway.
+
+**Learner Follow-up**:
+A portal comment or inbound email from the Learner on a Feedback after the original description. Not a Response.
+_Avoid_: Customer update, journal entry, additional comments
 
 **SSH Lab Access Feedback**:
 Feedback from an Internal Learner about connecting to a ROLE Lab via SSH (private key setup, jump host, permissions). Never a Defect. SSH Lab Access exists on ROLE and Factory; Feedback of this type only arrives from ROLE.
@@ -175,8 +186,12 @@ _Avoid_: random assign, always-on-call
 - Only GE and Lab Exercise sections have predictable, runnable outcomes in the Lab.
 - Many Feedbacks can map to one Defect (deduplication). One Feedback can produce multiple Defects.
 - A "missing information" complaint is often valid when Specifications lack detail only found in Show Solution.
-- OpenShift courses (`do` family) have ~40 min first-boot time; complaints about slow startup in early chapters are usually expected behavior.
-- The Shift frontend is the source of truth for who is next in Round-Robin; Auto-Assign does not keep that name across cycles.
-- Round-Robin follows engineers by name, not by position in the On-Shift Pool. If the pool changes, the next turn is the next name still in the pool after the last engineer who received work, wrapping to the start if needed.
-- Auto-Assign does not query the Shift frontend unless there is unassigned work. It records the engineer who actually received the work, not an inferred next person.
-- Each On-Shift Pool (one Shift-frontend group, or the whole T2 instance when there is no group) has its own last-assigned engineer. Pools do not share Round-Robin state.
+- do/ai-family Labs often need ~30–40 minutes on First Boot (Cluster Readiness Check / operators still coming up); complaints that match that startup pattern are usually expected behavior.
+- Git clone, TLS/SSL certificate, and application errors inside a running workbench are not First Boot — do not treat them as cluster warm-up.
+- SSH Lab Access Feedback is never a Defect. Classify it from the Feedback text: the Internal Learner is stuck on SSH Lab Access (private key, jump host, `rht_classroom.rsa`, `cloud-user`, `DOWNLOAD SSH KEY`, `ssh -J`). A ROLE URL alone is not enough — Internal Learners also report ordinary Guide and Lab issues. Those stay content, environment, or video Feedback and are investigated on ROL. SSH Lab Access Feedback is investigated on ROLE in the Lab Environment tab.
+- Course ID, Version, and Platform come from the Capture URL and do not change.
+- Guide and Lab investigation use the Issue Section. A Learner "N.M" (or equivalent wording) means chapter N section M (`chNNsMM`, zero-padded). If the text does not name a Section, or names more than one with no clear primary, use the Capture URL page.
+- Issue Section is inferred from the original description plus Learner Follow-up text, not from the Feedback Title. A Follow-up that names a Section is the Issue Section (it answers "which Section?").
+- Inference runs only when that text looks like it names a Section; an LLM then returns the Issue Section or no change. Course ID stays frozen.
+- When the Issue Section differs from the Capture URL page, Chapter, Section, and the investigation URL path are updated to that Section on the same Course ID.
+- If the inferred Issue Section page does not load, investigation falls back to the Capture URL page.
