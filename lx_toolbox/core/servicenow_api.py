@@ -6,13 +6,62 @@ the Selenium DOM-scraping path when API credentials are configured.
 """
 
 import logging
+import re
+
 import requests
 
 from ..utils.config_manager import ConfigManager
 
 FEEDBACK_TABLE = "x_redha_rht_task"
 
+# ServiceNow journal display_value headers: "YYYY-MM-DD HH:MM:SS - Author (Type)"
+_JOURNAL_HEADER = re.compile(
+    r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - (.+?) \(([^)]+)\)\s*$"
+)
+
+# Matches the display labels used by get_customer_updates() on the DOM path.
+# The comments field only stores Additional comments; Email received/sent are
+# copied into that journal as Additional comments on this instance.
+_RELEVANT_JOURNAL_TYPES = {"Additional comments", "Email received", "Email sent"}
+_SKIP_JOURNAL_AUTHORS = {"api_snow_autoassign", "System"}
+
 _log = logging.getLogger(__name__)
+
+
+def parse_journal_display_value(comments: str) -> list[dict]:
+    """Split a ServiceNow journal ``display_value`` string into entry dicts.
+
+    Each entry has ``timestamp``, ``author``, ``type``, and ``text``.
+    """
+    if not comments or not str(comments).strip():
+        return []
+
+    entries: list[dict] = []
+    current: dict | None = None
+    body_lines: list[str] = []
+
+    def _flush():
+        if current is None:
+            return
+        current["text"] = "\n".join(body_lines).strip()
+        entries.append(current)
+
+    for line in str(comments).splitlines():
+        match = _JOURNAL_HEADER.match(line)
+        if match:
+            _flush()
+            current = {
+                "timestamp": match.group(1),
+                "author": match.group(2).strip(),
+                "type": match.group(3).strip(),
+                "text": "",
+            }
+            body_lines = []
+        elif current is not None:
+            body_lines.append(line)
+
+    _flush()
+    return entries
 
 
 class ServiceNowAPIError(Exception):
@@ -92,7 +141,11 @@ class ServiceNowAPIClient:
 
     def get_journal_entries(self, sys_id: str) -> list[dict]:
         """
-        Fetch journal entries for a ticket by its ``sys_id``.
+        Fetch Learner Follow-up journal entries for a ticket by its ``sys_id``.
+
+        Reads the ticket ``comments`` field with ``sysparm_display_value=true``.
+        ``sys_journal_field`` is not used: this API account receives an empty
+        result for that table even when Additional comments exist.
 
         Returns a list of dicts, each with keys ``timestamp``, ``author``,
         ``type``, and ``text`` — the same shape as
@@ -101,19 +154,12 @@ class ServiceNowAPIClient:
         Raises:
             ServiceNowAPIError: on auth failure or non-200 HTTP response.
         """
-        url = f"{self._base_url}/api/now/table/sys_journal_field"
-        # Matches the display labels used by get_customer_updates() on the DOM path.
-        RELEVANT_TYPES = {"Additional comments", "Email received", "Email sent"}
-        SKIP_AUTHORS = {"api_snow_autoassign", "System"}
-
-        # Filter server-side only by element_id; type/author filtering is done in
-        # Python below so it mirrors get_customer_updates() exactly without
-        # depending on internal element field names that may vary by instance.
+        url = f"{self._base_url}/api/now/table/{FEEDBACK_TABLE}/{sys_id}"
+        # Raw journal values are empty; only the display_value contains the
+        # concatenated Additional comments history.
         params = {
-            "sysparm_query": f"element_id={sys_id}",
-            "sysparm_fields": "sys_created_on,sys_created_by,element,value",
-            "sysparm_limit": "100",
-            "sysparm_orderby": "sys_created_on",
+            "sysparm_fields": "comments",
+            "sysparm_display_value": "true",
         }
 
         try:
@@ -132,25 +178,19 @@ class ServiceNowAPIClient:
                 f"for journal entries (sys_id={sys_id}): {response.text[:200]}"
             )
 
+        record = response.json().get("result") or {}
+        comments = record.get("comments", "") if isinstance(record, dict) else ""
         entries = []
-        for raw in response.json().get("result", []):
-            author = raw.get("sys_created_by", "")
-            if author in SKIP_AUTHORS:
+        for raw in parse_journal_display_value(comments):
+            author = raw.get("author", "")
+            if author in _SKIP_JOURNAL_AUTHORS:
                 continue
-            entry_type = raw.get("element", "")
-            if entry_type not in RELEVANT_TYPES:
+            if raw.get("type") not in _RELEVANT_JOURNAL_TYPES:
                 continue
-            text = (raw.get("value") or "").strip()
+            text = (raw.get("text") or "").strip()
             if not text:
                 continue
-            entries.append(
-                {
-                    "timestamp": raw.get("sys_created_on", ""),
-                    "author": author,
-                    "type": entry_type,
-                    "text": text,
-                }
-            )
+            entries.append(raw)
 
         _log.debug(
             "Fetched %d journal entries via REST API (sys_id=%s)",
