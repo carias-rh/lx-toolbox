@@ -6,8 +6,8 @@ Seam: SnowAIProcessor static/class methods called directly without instantiation
 import pytest
 from lx_toolbox.core.snow_ai_processor import SnowAIProcessor
 
-VALID_CONTENT_MODES = {"confirm_defect", "teach", "ask_more", "lab_pending", "explain_expected"}
-VALID_ENV_MODES = {"confirm_defect", "explain_expected", "ask_more", "lab_pending"}
+VALID_CONTENT_MODES = {"confirm_defect", "teach", "ask_more", "lab_pending", "explain_expected", "acknowledge_resolved"}
+VALID_ENV_MODES = {"confirm_defect", "explain_expected", "ask_more", "lab_pending", "acknowledge_resolved"}
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +65,10 @@ class TestNormalizeContentAnalysis:
         result = self._norm({"reply_mode": "teach", "is_valid_issue": False})
         assert result["reply_mode"] == "teach"
 
+    def test_acknowledge_resolved_passthrough(self):
+        result = self._norm({"reply_mode": "acknowledge_resolved", "is_valid_issue": False})
+        assert result["reply_mode"] == "acknowledge_resolved"
+
     def test_alias_confirm_resolves(self):
         result = self._norm({"reply_mode": "confirm", "is_valid_issue": True})
         assert result["reply_mode"] == "confirm_defect"
@@ -115,6 +119,10 @@ class TestNormalizeEnvironmentAnalysis:
     def test_confirm_defect_passthrough(self):
         result = self._norm({"reply_mode": "confirm_defect", "is_valid_issue": True})
         assert result["reply_mode"] == "confirm_defect"
+
+    def test_acknowledge_resolved_passthrough(self):
+        result = self._norm({"reply_mode": "acknowledge_resolved", "is_valid_issue": False})
+        assert result["reply_mode"] == "acknowledge_resolved"
 
     def test_alias_confirm_resolves(self):
         result = self._norm({"reply_mode": "confirm", "is_valid_issue": True})
@@ -259,6 +267,16 @@ class TestJiraDescriptionGating:
         result = SnowAIProcessor._normalize_environment_analysis(parsed)
         assert result.get("jira_description", "") == ""
 
+    def test_content_acknowledge_resolved_clears_jira_description(self):
+        parsed = {
+            "reply_mode": "acknowledge_resolved",
+            "is_valid_issue": False,
+            "jira_description": "should be cleared",
+        }
+        result = SnowAIProcessor._normalize_content_analysis(parsed)
+        assert result.get("jira_description", "") == ""
+        assert result["reply_mode"] == "acknowledge_resolved"
+
 
 # ---------------------------------------------------------------------------
 # SSH Lab Access Feedback — detection, classification, analysis
@@ -383,6 +401,14 @@ class TestNormalizeSshLabAccessAnalysis:
             {"reply_mode": "teach", "is_valid_issue": False}
         )
         assert result["reply_mode"] == "teach"
+
+    def test_acknowledge_resolved_passthrough(self):
+        result = SnowAIProcessor._normalize_ssh_lab_access_analysis(
+            {"reply_mode": "acknowledge_resolved", "is_valid_issue": False}
+        )
+        assert result["reply_mode"] == "acknowledge_resolved"
+        assert result.get("is_valid_issue") is False
+        assert result.get("jira_description", "") == ""
 
     def test_ask_more_passthrough(self):
         result = SnowAIProcessor._normalize_ssh_lab_access_analysis(
@@ -521,5 +547,83 @@ class TestApplyIssueSection:
         assert result["URL"].endswith("/pages/pr01")
         assert result["Chapter"] == ""
         assert result["Section"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Resolution Follow-up Response prompt (#acknowledge_resolved)
+# ---------------------------------------------------------------------------
+
+_ANALYSIS_MARKER = "MISSING group_vars caused by Edge translation"
+_THANK_ORIGINAL_MARKER = "Always thank the learner and acknowledge that their feedback was received and considered."
+_SSH_TEACH_MARKER = "Teach the Internal Learner through the SSH key and jump-host steps."
+
+
+class TestBuildStudentReplyPrompt:
+    """Seam: SnowAIProcessor._build_student_reply_prompt — what we ask the LLM to write."""
+
+    def _prompt(self, reply_mode, ssh_rule=""):
+        return SnowAIProcessor._build_student_reply_prompt(
+            reply_mode=reply_mode,
+            student_name="Nils",
+            url="https://rol.redhat.com/rol/app/courses/do417-2.4/pages/ch04",
+            analysis_response_json={
+                "summary": _ANALYSIS_MARKER,
+                "analysis": _ANALYSIS_MARKER,
+            },
+            language_rule="Write the reply in English.",
+            ssh_rule=ssh_rule,
+            operational_context="",
+            communication_reply_notes=_THANK_ORIGINAL_MARKER,
+            json_output_rules="Return JSON only.",
+        )
+
+    def test_acknowledge_resolved_omits_analysis(self):
+        prompt = self._prompt("acknowledge_resolved")
+        assert _ANALYSIS_MARKER not in prompt
+
+    def test_acknowledge_resolved_omits_generic_thank_notes(self):
+        prompt = self._prompt("acknowledge_resolved")
+        assert _THANK_ORIGINAL_MARKER not in prompt
+
+    def test_acknowledge_resolved_omits_ssh_teach_rule(self):
+        prompt = self._prompt("acknowledge_resolved", ssh_rule=_SSH_TEACH_MARKER)
+        assert _SSH_TEACH_MARKER not in prompt
+
+    def test_acknowledge_resolved_asks_for_brief_thanks(self):
+        prompt = self._prompt("acknowledge_resolved")
+        assert "2-4 sentences" in prompt
+        assert "glad" in prompt.lower()
+
+    def test_explain_expected_still_includes_analysis_and_notes(self):
+        prompt = self._prompt("explain_expected")
+        assert _ANALYSIS_MARKER in prompt
+        assert _THANK_ORIGINAL_MARKER in prompt
+
+    def test_acknowledge_resolved_omits_operational_context(self):
+        screenshot_rule = "If the report is vague, ask for a screenshot, more details, and the exact course section."
+        prompt = SnowAIProcessor._build_student_reply_prompt(
+            reply_mode="acknowledge_resolved",
+            student_name="Nils",
+            url="https://rol.redhat.com/rol/app/courses/do417-2.4/pages/ch04",
+            analysis_response_json={
+                "summary": _ANALYSIS_MARKER,
+                "analysis": _ANALYSIS_MARKER,
+            },
+            language_rule="Write the reply in English.",
+            ssh_rule="",
+            operational_context=screenshot_rule,
+            communication_reply_notes=_THANK_ORIGINAL_MARKER,
+            json_output_rules="Return JSON only.",
+        )
+        assert screenshot_rule not in prompt
+
+
+class TestResolutionFollowUpAnalysisInstructions:
+    def test_judges_latest_learner_follow_up(self):
+        text = SnowAIProcessor._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS
+        assert "latest Learner Follow-up" in text
+        assert "acknowledge_resolved" in text
+        assert "not a Resolution Follow-up" in text
+
 
 
