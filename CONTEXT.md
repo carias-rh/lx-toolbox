@@ -40,11 +40,15 @@ A Jira ticket in the PTL project representing a confirmed issue in course conten
 _Avoid_: Bug, Jira ticket, issue (overloaded)
 
 **Response**:
-A reply sent to a Learner through ServiceNow. Can close the Feedback, request clarification (Pending Customer), or acknowledge that investigation is underway.
+A reply sent to a Learner through ServiceNow. Can close the Feedback, request clarification (Pending Customer), acknowledge that investigation is underway, or briefly acknowledge a Resolution Follow-up.
 
 **Learner Follow-up**:
 A portal comment or inbound email from the Learner on a Feedback after the original description. Not a Response.
 _Avoid_: Customer update, journal entry, additional comments
+
+**Resolution Follow-up**:
+A Learner Follow-up that states the reported problem is gone or was not a course issue. Not a retraction of a remaining Defect claim, and not a workaround while the Learner still wants a fix.
+_Avoid_: Customer acknowledgement, resolved ticket (ambiguous with ServiceNow state)
 
 **SSH Lab Access Feedback**:
 Feedback from an Internal Learner about connecting to a ROLE Lab via SSH (private key setup, jump host, permissions). Never a Defect. SSH Lab Access exists on ROLE and Factory; Feedback of this type only arrives from ROLE.
@@ -183,3 +187,6 @@ The time window during which a specific engineer handles incoming tickets. Exter
 - Inference runs only when that text looks like it names a Section; an LLM then returns the Issue Section or no change. Course ID stays frozen.
 - When the Issue Section differs from the Capture URL page, Chapter, Section, and the investigation URL path are updated to that Section on the same Course ID.
 - If the inferred Issue Section page does not load, investigation falls back to the Capture URL page.
+- A Resolution Follow-up gets a brief Response: thank the Learner, confirm we are glad it is resolved, invite them to reach out if anything else comes up. Do not recap their diagnosis, re-explain the cause, or give unsolicited advice. This is not explain-expected behaviour.
+- Whether a Learner Follow-up is a Resolution Follow-up is judged from the latest Learner Follow-up, not from earlier ones. An older "it is fixed" does not override a newer report that the problem is back.
+- A latest Learner Follow-up that both resolves the original report and raises a new problem is not a Resolution Follow-up; investigate the remaining claim.

@@ -423,7 +423,7 @@ class SnowAIProcessor:
         "expected": "explain_expected",
     }
     _CONTENT_VALID_MODES: frozenset = frozenset(
-        {"confirm_defect", "teach", "ask_more", "lab_pending", "explain_expected"}
+        {"confirm_defect", "teach", "ask_more", "lab_pending", "explain_expected", "acknowledge_resolved"}
     )
 
     _ENV_MODE_ALIASES: dict = {
@@ -441,7 +441,7 @@ class SnowAIProcessor:
         "pending": "lab_pending",
     }
     _ENV_VALID_MODES: frozenset = frozenset(
-        {"confirm_defect", "explain_expected", "ask_more", "lab_pending"}
+        {"confirm_defect", "explain_expected", "ask_more", "lab_pending", "acknowledge_resolved"}
     )
 
     # SSH Lab Access Feedback — Internal Learner stuck on ROLE SSH instructions.
@@ -489,7 +489,7 @@ class SnowAIProcessor:
         raw = str(parsed.get("reply_mode", "")).strip().lower().replace("-", "_").replace(" ", "_")
         aliases = {"ask": "ask_more", "need_more": "ask_more", "teaching": "teach", "confusion": "teach"}
         mode = aliases.get(raw, raw)
-        if mode not in {"teach", "ask_more"}:
+        if mode not in {"teach", "ask_more", "acknowledge_resolved"}:
             mode = "teach"
         parsed["reply_mode"] = mode
         parsed["is_valid_issue"] = False
@@ -759,6 +759,8 @@ Follow-up journal entries (newest first), each labeled as either CUSTOMER or OUR
 Instructions:
 - First, if there are any OUR TEAM entries, summarize in 1-3 sentences the concrete findings or conclusions from our own prior investigation/reply (e.g. what was checked, what was found, what explanation or fix was already given). Preserve specific technical details (names, commands, paths, image/version names) rather than vague statements like "already addressed".
 - Then, extract any NEW technical facts, clarifications, or additional issues the CUSTOMER raised beyond the original description AND beyond what our own prior reply already covered.
+- Keep CUSTOMER statements that the problem is gone, resolved, was on their side (browser, cache, local setup), or was not a course issue — even if they also thank us. Those are Resolution Follow-up facts, not empty thank-yous.
+- If the latest CUSTOMER entry both says the original issue is fixed AND raises a new problem, include both.
 - Never present our own prior reply as if it were new information from the customer — clearly attribute investigation findings to "our team" / "we".
 - Omit greetings, thank-yous, signatures, email addresses, phone numbers, and any personal information.
 - Omit anything that simply repeats the original ticket description.
@@ -1557,7 +1559,7 @@ For example:
             "\n        \"is_valid_issue\": true," +
             "\n        \"suggested_correction\": \"If the issue is valid, indicate what words, lines, or commands that should be changed in the guide_text to fix the issue. If the issue is valid but there is not enough information it could be possible that a deeper investigation within the lab environment is required. Do not include any explanations or markdown formatting outside the JSON object.\"," +
             "\n        \"summary\": \"a short/medium summary of the 'analysis' field\"," +
-            "\n        \"reply_mode\": \"one of: confirm_defect (real defect found), teach (learner confusion — explain the concept), ask_more (not enough info), lab_pending (lab still initialising), explain_expected (expected behaviour)\"," +
+            "\n        \"reply_mode\": \"one of: confirm_defect (real defect found), teach (learner confusion — explain the concept), ask_more (not enough info), lab_pending (lab still initialising), explain_expected (expected behaviour), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up)\"," +
             "\n        \"jira_description\": \"cleaned technical problem statement for the Jira Defect — no raw learner wording, no PII, no suggested fix. Empty string when reply_mode is not confirm_defect.\"," +
             "\n        \"jira_title\": \"a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase\"\n        }"
         )
@@ -1572,6 +1574,7 @@ For example:
 
         {guide_text_prompt}
 
+        {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
         Compare the student's feedback with the excerpt (if any), and provide a detailed analysis of the issue.
         Determine whether this is a real content defect, a platform/UI issue visible in the course page, or learner confusion caused by using theory content as if it were a guided exercise or lab.
         IMPORTANT: If the student's complaint involves files, directories, paths, or scripts that exist on the lab VM filesystem (not just in the guide text), you cannot confirm the issue from the guide alone. The lab start command may create or prepare files dynamically. In this case, explicitly state in your analysis that lab verification is required to confirm the claim, and do NOT present the student's suggested alternative as a confirmed fix.
@@ -1595,10 +1598,11 @@ For example:
 
     def analyze_environment_issue(self, user_issue: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing environment issue using LLM")
-        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "reply_mode": "one of: confirm_defect, explain_expected, ask_more, lab_pending", "jira_description": "cleaned technical problem statement for Jira — no raw learner wording, no PII. Empty string when reply_mode is not confirm_defect.", "jira_title": "a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase"}'
+        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "reply_mode": "one of: confirm_defect, explain_expected, ask_more, lab_pending, acknowledge_resolved", "jira_description": "cleaned technical problem statement for Jira — no raw learner wording, no PII. Empty string when reply_mode is not confirm_defect.", "jira_title": "a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase"}'
         prompt_text = f"""
         You are an expert in Red Hat Training lab environments.
         {self._build_operational_context("environment", snow_info)}
+        {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
         We have a student who reported an issue within the lab environment. The student's feedback is:
         <student_feedback>
         {user_issue}
@@ -1633,12 +1637,13 @@ For example:
         
         video_context = "The video player IS available on the page, so videos should be accessible." if video_available else "The video player button is NOT available on the page, which typically means videos for this course version are still being produced."
         
-        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "reply_mode": "one of: confirm_defect (real video defect), ask_more (not enough info), explain_expected (videos not yet produced)", "jira_description": "cleaned technical problem statement for Jira — no raw learner wording, no PII. Empty string when reply_mode is not confirm_defect.", "jira_title": "a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase"}'
+        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "reply_mode": "one of: confirm_defect (real video defect), ask_more (not enough info), explain_expected (videos not yet produced), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up)", "jira_description": "cleaned technical problem statement for Jira — no raw learner wording, no PII. Empty string when reply_mode is not confirm_defect.", "jira_title": "a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase"}'
         
         prompt_text = f"""
         You are an expert in Red Hat Training video content issues.
         {self._build_operational_context("video", snow_info, video_available=video_available)}
         
+        {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
         A student has reported a video-related issue. The student's feedback is:
         <student_feedback>
         {user_issue}
@@ -1698,7 +1703,7 @@ For example:
             ' "is_valid_issue": false,'
             ' "suggested_correction": "",'
             ' "summary": "one-line headline",'
-            ' "reply_mode": "teach or ask_more",'
+            ' "reply_mode": "teach, ask_more, or acknowledge_resolved",'
             ' "jira_description": "",'
             ' "jira_title": ""}'
         )
@@ -1715,9 +1720,10 @@ For example:
         {user_issue}
         </student_feedback>
 
+        {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
         Identify which instruction step they are stuck on (CREATE, DOWNLOAD SSH KEY, key install, ssh-add, jump host).
         All string fields must be in English.
-        reply_mode is teach when you can explain the step; ask_more when there is no error text and no SSH-step clue.
+        reply_mode is teach when you can explain the step; ask_more when there is no error text and no SSH-step clue; acknowledge_resolved when the latest Learner Follow-up is a Resolution Follow-up.
         Never use confirm_defect, lab_pending, or explain_expected.
         Never invent a jump-host IP.
 
@@ -1769,6 +1775,19 @@ For example:
             return str(response).strip().lower().startswith("true")
         return False
 
+    _RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS = (
+        "Resolution Follow-up (conversation state, not issue type):\n"
+        "- Judge only from the latest Learner Follow-up, not from earlier Follow-ups "
+        "and not from our team's prior notes.\n"
+        "- If that latest Follow-up states the reported problem is gone or was not a course issue, "
+        "and it does not raise another problem that still needs help, set reply_mode to "
+        "acknowledge_resolved. is_valid_issue must be false. jira_description must be empty.\n"
+        "- An older 'it is fixed' does not override a newer report that the problem is back.\n"
+        "- If the latest Follow-up both says the original issue is resolved AND raises a new problem, "
+        "this is not a Resolution Follow-up — analyse the remaining claim with the usual modes.\n"
+        "- Do not use explain_expected, teach, or confirm_defect when acknowledge_resolved applies."
+    )
+
     # Per-mode reply instructions (#27)
     _REPLY_MODE_INSTRUCTIONS: dict = {
         "confirm_defect": (
@@ -1808,41 +1827,56 @@ For example:
             "- Do NOT imply a Defect has been filed.\n"
             "- If relevant, suggest a concrete next step (e.g. wait, use previous version, consult course page)."
         ),
+        "acknowledge_resolved": (
+            "The latest Learner Follow-up is a Resolution Follow-up: the Learner says the reported "
+            "problem is gone or was not a course issue, and nothing else still needs help.\n"
+            "- Thank them briefly and say we are glad it is resolved.\n"
+            "- Invite them to reach out if anything else comes up.\n"
+            "- Write 2-4 sentences in one short reply.\n"
+            "- Do NOT recap their diagnosis, re-explain the cause, or give unsolicited advice.\n"
+            "- Do NOT imply a Defect has been filed."
+        ),
     }
 
-    def craft_llm_response(self, snow_info: dict, analysis_response_json: dict, classification_data: dict | None = None) -> dict:
-        self.logger("LLM Crafting reply to student")
-        student_name = snow_info.get("full_name", "").split(" ")[0]
-        url = snow_info.get("URL", "")
-        reply_mode = analysis_response_json.get("reply_mode", "ask_more")
-        mode_instructions = self._REPLY_MODE_INSTRUCTIONS.get(
-            reply_mode, self._REPLY_MODE_INSTRUCTIONS["ask_more"]
+
+    @classmethod
+    def _build_student_reply_prompt(
+        cls,
+        *,
+        reply_mode: str,
+        student_name: str,
+        url: str,
+        analysis_response_json: dict,
+        language_rule: str,
+        ssh_rule: str,
+        operational_context: str,
+        communication_reply_notes: str,
+        json_output_rules: str,
+    ) -> str:
+        """Build the Learner-facing Response prompt. No LLM call."""
+        mode_instructions = cls._REPLY_MODE_INSTRUCTIONS.get(
+            reply_mode, cls._REPLY_MODE_INSTRUCTIONS["ask_more"]
         )
-        learner_language = (classification_data or {}).get("language", "en")
-        if learner_language.startswith("en"):
-            language_rule = "Write the reply in English."
-        else:
-            language_rule = f"Write the reply in the Learner's language: {learner_language}. Do NOT write in English."
-
-        ssh_rule = ""
-        if (classification_data or {}).get("is_ssh_lab_access_ticket"):
-            ssh_rule = (
-                "- This is SSH Lab Access Feedback. Teach the Internal Learner through the SSH key and jump-host steps.\n"
-                "- Never invent or paste a jump-host IP address. Theirs is already in the Feedback and changes per Lab.\n"
-                "- Do not mention ROLE, Factory, assignment groups, or internal handover."
+        resolved = reply_mode == "acknowledge_resolved"
+        notes_block = "" if resolved else communication_reply_notes
+        ops_block = "" if resolved else operational_context
+        analysis_block = ""
+        if not resolved:
+            analysis_block = (
+                f"Analysis summary: {analysis_response_json.get('summary', '')}\n"
+                f"Analysis conclusion: {analysis_response_json.get('analysis', '')}"
             )
-
+        ssh_block = "" if resolved else ssh_rule
         json_example = '{"response": "the response to the student"}'
-        prompt_text = f"""
+        return f"""
     You are a helpful Red Hat Training support representative responding to a Learner's Feedback.
-    {self._build_operational_context("reply", snow_info)}
-    {self.communication_reply_notes}
+    {ops_block}
+    {notes_block}
 
     Learner name: {student_name}
     Course page: {url}
 
-    Analysis summary: {analysis_response_json.get('summary', '')}
-    Analysis conclusion: {analysis_response_json.get('analysis', '')}
+    {analysis_block}
 
     Mode: {reply_mode}
     Mode-specific instructions:
@@ -1857,12 +1891,43 @@ For example:
     - NEVER use the words 'guide text', 'guide_text', or 'course guide text'. Use 'course material', 'exercise instructions', or 'course content'.
     - Write in short paragraphs separated by blank lines. Each paragraph covers one idea.
     - {language_rule}
-    {ssh_rule}
+    {ssh_block}
 
     Format: JSON with one field.
-    {self._json_output_rules()}
+    {json_output_rules}
     Example: {json_example}
     """
+
+    def craft_llm_response(self, snow_info: dict, analysis_response_json: dict, classification_data: dict | None = None) -> dict:
+        self.logger("LLM Crafting reply to student")
+        student_name = snow_info.get("full_name", "").split(" ")[0]
+        url = snow_info.get("URL", "")
+        reply_mode = analysis_response_json.get("reply_mode", "ask_more")
+        learner_language = (classification_data or {}).get("language", "en")
+        if learner_language.startswith("en"):
+            language_rule = "Write the reply in English."
+        else:
+            language_rule = f"Write the reply in the Learner's language: {learner_language}. Do NOT write in English."
+
+        ssh_rule = ""
+        if (classification_data or {}).get("is_ssh_lab_access_ticket"):
+            ssh_rule = (
+                "- This is SSH Lab Access Feedback. Teach the Internal Learner through the SSH key and jump-host steps.\n"
+                "- Never invent or paste a jump-host IP address. Theirs is already in the Feedback and changes per Lab.\n"
+                "- Do not mention ROLE, Factory, assignment groups, or internal handover."
+            )
+
+        prompt_text = self._build_student_reply_prompt(
+            reply_mode=reply_mode,
+            student_name=student_name,
+            url=url,
+            analysis_response_json=analysis_response_json,
+            language_rule=language_rule,
+            ssh_rule=ssh_rule,
+            operational_context=self._build_operational_context("reply", snow_info),
+            communication_reply_notes=self.communication_reply_notes,
+            json_output_rules=self._json_output_rules(),
+        )
         logging.getLogger(__name__).debug(f"LLM student reply prompt length: {len(prompt_text)} chars")
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Student reply output ({len(response)} chars):\n {response}")
