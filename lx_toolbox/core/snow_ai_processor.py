@@ -2234,27 +2234,32 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # is already active (header nav button visible) to avoid the costly
         # go_to_url + accept_trustarc + username-field-timeout sequence.
         self.driver.switch_to.window(self.login_tab_handles['rol'])
-        try:
 
-            username = self.lab_mgr._get_credentials(environment)
-            if username:
-                WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(
-                    (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
-                )).send_keys(f"{username}@redhat.com")
-                WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(
-                    (By.XPATH, '//*[@id="login-show-step2"]'))).click()
-            #WebDriverWait(self.driver, 5).until(
-            #    EC.presence_of_element_located((By.XPATH,
-            #        '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))
-            #)
+        try:
+            avatar = WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH,
+                '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
             self.logger("ROL session already active")
-            self._rol_logged_in = True
-        except Exception:
+        except:
             try:
-                self.lab_mgr.login(environment=environment)
+                username = self.lab_mgr._get_credentials(environment)
+                if username:
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(
+                        (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
+                    )).send_keys(f"{username}@redhat.com")
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(
+                        (By.XPATH, '//*[@id="login-show-step2"]'))).click()
+                #WebDriverWait(self.driver, 5).until(
+                #    EC.presence_of_element_located((By.XPATH,
+                #        '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))
+                #)
+                self.logger("ROL session already active")
                 self._rol_logged_in = True
-            except Exception as e:
-                logging.getLogger(__name__).warning(f"ROL login issue: {e}")
+            except Exception:
+                try:
+                    self.lab_mgr.login(environment=environment)
+                    self._rol_logged_in = True
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"ROL login issue: {e}")
 
         # Jira — page has been loading since Phase 1. Check logged-in state
         # directly instead of re-navigating (which reloads the page).
