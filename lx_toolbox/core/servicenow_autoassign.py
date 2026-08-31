@@ -189,7 +189,7 @@ class ServiceNowAutoAssign:
                 "Samik Sanyal", "Jingyu Wang", "Vikas Singh", "Shashi Singh",
                 "Jaime Yague", "Ashley D'Andrea", "Carlos Arias", "Andres Hernandez",
                 "Ed Parenti", "Antonio Mari Romero", "Mohammed Tahmeed", "David O'Brien",
-                "Yashashvi Singh",
+                "Yashashvi Singh", "Gaurav",
             ],
         )
 
