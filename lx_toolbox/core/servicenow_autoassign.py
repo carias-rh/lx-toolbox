@@ -181,15 +181,9 @@ class ServiceNowAutoAssign:
                 or "Hi {customer_name},\n\nThanks for submitting your feedback to the Learner Experience Team.\n\nWe are reviewing your message and will get back to you as soon as possible.\n\nBest Regards,\n{assignee_name}\n{team_name}"
             ),
             auto_resolve_reporters=[
-                "Forrest Taylor", "Susan Lauber", "Jordi Sola Alaball", "Zachary Gutterman",
-                "Satdal Maity",
-                "Benjamin Chardi Marco", "Yuvaraj Balaraju", "Patrick Gomez", 
-                "Ricardo Taniguchi", "Steven Bonneville",
-                "Pablo Solar Vilarino", "Wasim Raja", "Chetan Tiwary", "Ricardo Da Costa",
+                "Wasim Raja", "Chetan Tiwary", 
                 "Samik Sanyal", "Shashi Singh",
-                "Jaime Yague", "Ashley D'Andrea", "Carlos Arias", "Andres Hernandez",
-                "Ed Parenti", "Antonio Mari Romero","David O'Brien",
-                "Gaurav",
+                "Carlos Arias", 
             ],
         )
 
