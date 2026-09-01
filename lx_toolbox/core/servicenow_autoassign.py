@@ -182,14 +182,14 @@ class ServiceNowAutoAssign:
             ),
             auto_resolve_reporters=[
                 "Forrest Taylor", "Susan Lauber", "Jordi Sola Alaball", "Zachary Gutterman",
-                "Abhishek Kumar", "Nicol Castillo", "Satdal Maity", "Neha Singh",
-                "Benjamin Chardi Marco", "Yuvaraj Balaraju", "Patrick Gomez", "Vidyashree G",
-                "Ricardo Taniguchi", "Abdul Patel", "Tianting Shi", "Steven Bonneville",
+                "Satdal Maity",
+                "Benjamin Chardi Marco", "Yuvaraj Balaraju", "Patrick Gomez", 
+                "Ricardo Taniguchi", "Steven Bonneville",
                 "Pablo Solar Vilarino", "Wasim Raja", "Chetan Tiwary", "Ricardo Da Costa",
-                "Samik Sanyal", "Jingyu Wang", "Vikas Singh", "Shashi Singh",
+                "Samik Sanyal", "Shashi Singh",
                 "Jaime Yague", "Ashley D'Andrea", "Carlos Arias", "Andres Hernandez",
-                "Ed Parenti", "Antonio Mari Romero", "Mohammed Tahmeed", "David O'Brien",
-                "Yashashvi Singh", "Gaurav",
+                "Ed Parenti", "Antonio Mari Romero","David O'Brien",
+                "Gaurav",
             ],
         )
 
