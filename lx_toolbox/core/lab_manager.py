@@ -1428,39 +1428,55 @@ class LabManager:
                 _log.warning(f"[console] Step 6: could not press Enter key: {e_enter} (cmd: {short_cmd})")
 
     def click_on_show_solution_buttons(self):
-        """Click all 'Show Solution' buttons on the current page, starting from the bottom."""
+        """Click all 'Show Solution' buttons on the current page, starting from the bottom.
+
+        Guided-exercise buttons typically become 'Hide Solution' after click.
+        Quiz (resequencing) Show Solution buttons keep the same label — and may
+        be no-ops when answer data is missing — so each button is attempted
+        at most once.
+        """
         try:
-            # First scroll to the bottom of the page
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(0.5)
-            
-            while True:
+
+            attempted = set()
+            max_clicks = 30
+            clicks = 0
+            while clicks < max_clicks:
                 try:
-                    # Find all Show Solution buttons
                     buttons = self.driver.find_elements(By.XPATH, "//button[text()='Show Solution']")
-                    if not buttons:
+                    last_button = None
+                    last_key = None
+                    for button in reversed(buttons):
+                        try:
+                            key = button.get_attribute("data-analytics-id") or button.id
+                        except StaleElementReferenceException:
+                            continue
+                        if key and key not in attempted:
+                            last_button = button
+                            last_key = key
+                            break
+                    if last_button is None:
                         break
-                    
-                    # Get the last button (bottommost)
-                    last_button = buttons[-1]
-                    
-                    # Scroll the button into view
+
                     self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", last_button)
                     time.sleep(0.3)
-                    
-                    # Wait for it to be clickable and click
-                    WebDriverWait(self.driver, 1.5).until(
-                        EC.element_to_be_clickable(last_button)
-                    )
-                    last_button.click()
+
+                    try:
+                        WebDriverWait(self.driver, 1.5).until(
+                            EC.element_to_be_clickable(last_button)
+                        )
+                        last_button.click()
+                    except (TimeoutException, StaleElementReferenceException):
+                        try:
+                            self.driver.execute_script("arguments[0].click();", last_button)
+                        except Exception:
+                            pass
+                    attempted.add(last_key)
+                    clicks += 1
                     time.sleep(0.3)
-                    
-                    # Scroll up a bit
-                    #self.driver.execute_script("window.scrollBy(0, -100);")
-                    #time.sleep(0.3)
-                    
-                except (TimeoutException, StaleElementReferenceException):
-                    # Button became stale or not clickable, continue to find remaining buttons
+
+                except StaleElementReferenceException:
                     continue
                 except Exception:
                     break
