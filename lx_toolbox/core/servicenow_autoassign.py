@@ -1250,8 +1250,8 @@ class ServiceNowAutoAssign:
         stats = {"assigned": 0, "resolved": 0, "skipped": 0, "errors": 0}
         use_peek_commit = bool(team_config.frontend_shift_manager_url)
 
-        if team_config.auto_resolve_reporters:
-            stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
+        #if team_config.auto_resolve_reporters:
+        #    stats["resolved"] = self.auto_resolve_tickets_by_reporter(team_key)
 
         tickets = self.get_unassigned_tickets(team_key)
         if not tickets:
