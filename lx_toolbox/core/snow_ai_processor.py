@@ -1351,8 +1351,10 @@ Example when you cannot: {{"unchanged": true}}
         # Keep the original host. ROLE URLs must stay on role.rhu.redhat.com for
         # SSH Lab Access Feedback; ordinary ROLE Guide/Lab Feedback still navigates
         # via the ROL base URL in _navigate_to_course_page, not this field.
-        # ROL sometimes embeds course slugs like do180f-4.18; canonical path uses do180-4.18
-        url = re.sub(r"([A-Za-z]{2}\d{3})f(?=-)", r"\1", url)
+        # ROL foundation slugs (rh124f-10.0, RH124F) navigate via the canonical course id.
+        _strip_f = lambda s: re.sub(r"([A-Za-z]{2}\d{3})f\b", r"\1", s, flags=re.IGNORECASE)
+        url = _strip_f(url)
+        course = _strip_f(course)
 
         try:
             chapter = re.findall("ch[0-9][0-9]", url)[0].split("ch")[1]
