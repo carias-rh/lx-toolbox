@@ -7,6 +7,6 @@ Wants=network-online.target
 Type=oneshot
 KillMode=process
 EnvironmentFile=-%h/.config/systemd/user/lx-toolbox.env
-ExecStart=/bin/bash -c 'cd "$LX_TOOLBOX_DIR" && exec ./scripts/lx-tool snowai'
+ExecStart=/bin/bash -c 'cd "$LX_TOOLBOX_DIR" && exec ./scripts/run-snowai-on-main.sh'
 StandardOutput=journal
 StandardError=journal
