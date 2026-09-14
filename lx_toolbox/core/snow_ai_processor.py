@@ -405,9 +405,73 @@ class SnowAIProcessor:
         text = re.sub(r"\s{2,}", " ", text)
         return text.lower().strip()
 
+    @staticmethod
+    def _extract_page_slug(url: str) -> str:
+        """Return the /pages/<slug> token from a ROL course URL, or '' if absent."""
+        m = re.search(r"/pages/([^/?#]+)", url or "")
+        return m.group(1) if m else ""
+
+    @staticmethod
+    def _strip_location_from_title(title: str, course_code: str = "") -> str:
+        """Remove course code, course ID, and section identifiers from a Jira title.
+
+        Strips (case-insensitive):
+        - The supplied course_code (e.g. 'DO380', 'rh124')
+        - Any 'courseCode-N.NN' pattern (e.g. 'do380-4.18')
+        - Any 'chNNsMM' section slug (e.g. 'ch02s06')
+        - Bare N.M section references at the start/surrounded by spaces (e.g. '4.1')
+        - 'section N' phrases
+        Returns the cleaned text, or '' if nothing is left.
+        """
+        text = str(title or "")
+        # Strip course-code-version (e.g. do380-4.18)
+        text = re.sub(r"\b[a-zA-Z]{2,4}\d{2,4}-\d+\.\d+\b", "", text, flags=re.IGNORECASE)
+        # Strip explicit course code if provided (e.g. DO380, rh124)
+        if course_code:
+            text = re.sub(r"\b" + re.escape(course_code) + r"\b", "", text, flags=re.IGNORECASE)
+        # Strip chNNsMM slugs
+        text = re.sub(r"\bch\d+s\d+\b", "", text, flags=re.IGNORECASE)
+        # Strip 'section N' or 'section N.M'
+        text = re.sub(r"\bsection\s+\d+(?:\.\d+)?\b", "", text, flags=re.IGNORECASE)
+        # Strip bare N.M that looks like a section reference (digits dot digits, no surrounding alphanum)
+        text = re.sub(r"(?<![.\w])\d{1,2}\.\d{1,2}(?![.\w])", "", text)
+        # Collapse and strip
+        text = re.sub(r"\s{2,}", " ", text).strip()
+        return text
+
+    @classmethod
+    def _build_defect_summary(cls, snow_info: dict, jira_title: str, jira_description: str = "") -> str:
+        """Assemble the Defect Summary: '{Course Code}: {page slug} - {title} - {Feedback id}'.
+
+        - page slug: extracted from the investigation URL (e.g. 'ch02s06', 'pr01').
+          When absent the slug segment is omitted entirely (no orphan dash).
+        - title: jira_title after sanitizing and stripping location tokens; if empty,
+          falls back to the first ~8 words of jira_description.
+        """
+        course = snow_info.get("Course") or ""
+        snow_id = snow_info.get("snow_id") or ""
+        url = snow_info.get("URL") or ""
+        slug = cls._extract_page_slug(url)
+
+        # Clean the problem phrase
+        raw = cls._sanitize_jira_title(jira_title)
+        clean = cls._strip_location_from_title(raw, course_code=course)
+
+        # Fallback: first ~8 words of description
+        if not clean and jira_description:
+            words = jira_description.split()
+            clean = " ".join(words[:8])
+
+        location = f"{slug} - " if slug else ""
+        return f"{course}: {location}{clean or '(no title)'} - {snow_id}"
+
     # ------------------------------------------------------------------
     # Reply-mode normalizers (#24)
     # ------------------------------------------------------------------
+
+    # Canonical reply-mode value for a confirmed Defect.  Used wherever the
+    # codebase needs to compare or assign this mode to avoid magic strings.
+    _MODE_CONFIRM_DEFECT: str = "confirm_defect"
 
     _CONTENT_MODE_ALIASES: dict = {
         "confirm": "confirm_defect",
@@ -500,14 +564,16 @@ class SnowAIProcessor:
 
     @classmethod
     def _normalize_content_analysis(cls, parsed: dict) -> dict:
-        """Canonicalise reply_mode, clear jira_description on non-defect modes, sanitize jira_title."""
+        """Canonicalise reply_mode and sanitize jira_title.
+
+        jira_description is kept regardless of reply_mode (ADR-0003): the create
+        dialog is always prepared so the engineer can override the model's verdict.
+        """
         raw = str(parsed.get("reply_mode", "")).strip().lower().replace("-", "_").replace(" ", "_")
         mode = cls._CONTENT_MODE_ALIASES.get(raw, raw)
         if mode not in cls._CONTENT_VALID_MODES:
-            mode = "confirm_defect" if parsed.get("is_valid_issue") else "ask_more"
+            mode = cls._MODE_CONFIRM_DEFECT if parsed.get("is_valid_issue") else "ask_more"
         parsed["reply_mode"] = mode
-        if mode != "confirm_defect":
-            parsed["jira_description"] = ""
         if "jira_title" in parsed:
             parsed["jira_title"] = cls._sanitize_jira_title(parsed.get("jira_title") or "")
         return parsed
@@ -546,8 +612,7 @@ class SnowAIProcessor:
                 mode = "ask_more"
 
         parsed["reply_mode"] = mode
-        if mode != "confirm_defect":
-            parsed["jira_description"] = ""
+        # jira_description is kept regardless of reply_mode (ADR-0003).
         if "jira_title" in parsed:
             parsed["jira_title"] = cls._sanitize_jira_title(parsed.get("jira_title") or "")
         return parsed
@@ -1562,8 +1627,8 @@ For example:
             "\n        \"suggested_correction\": \"If the issue is valid, indicate what words, lines, or commands that should be changed in the guide_text to fix the issue. If the issue is valid but there is not enough information it could be possible that a deeper investigation within the lab environment is required. Do not include any explanations or markdown formatting outside the JSON object.\"," +
             "\n        \"summary\": \"a short/medium summary of the 'analysis' field\"," +
             "\n        \"reply_mode\": \"one of: confirm_defect (real defect found), teach (learner confusion — explain the concept), ask_more (not enough info), lab_pending (lab still initialising), explain_expected (expected behaviour), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up)\"," +
-            "\n        \"jira_description\": \"cleaned technical problem statement for the Jira Defect — no raw learner wording, no PII, no suggested fix. Empty string when reply_mode is not confirm_defect.\"," +
-            "\n        \"jira_title\": \"a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase\"\n        }"
+            "\n        \"jira_description\": \"impersonal technical problem statement — no raw learner wording, no PII, no suggested fix, no course code, no section, no chapter references. Always generate, even when reply_mode is not confirm_defect.\"," +
+            "\n        \"jira_title\": \"short failure name — words separated by spaces only, no underscores, dashes, or special chars, all lowercase. Must NOT contain a course code (e.g. do380, rh124), course ID (e.g. do380-4.18), or section identifier (e.g. ch02s06, 4.1, section 4).\"\n        }"
         )
 
         prompt_text = f"""
@@ -1600,7 +1665,7 @@ For example:
 
     def analyze_environment_issue(self, user_issue: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing environment issue using LLM")
-        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "reply_mode": "one of: confirm_defect, explain_expected, ask_more, lab_pending, acknowledge_resolved", "jira_description": "cleaned technical problem statement for Jira — no raw learner wording, no PII. Empty string when reply_mode is not confirm_defect.", "jira_title": "a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase"}'
+        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "reply_mode": "one of: confirm_defect, explain_expected, ask_more, lab_pending, acknowledge_resolved", "jira_description": "impersonal technical problem statement — no raw learner wording, no PII, no course code, no section, no chapter references. Always generate.", "jira_title": "short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers."}'
         prompt_text = f"""
         You are an expert in Red Hat Training lab environments.
         {self._build_operational_context("environment", snow_info)}
@@ -1639,7 +1704,7 @@ For example:
         
         video_context = "The video player IS available on the page, so videos should be accessible." if video_available else "The video player button is NOT available on the page, which typically means videos for this course version are still being produced."
         
-        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "reply_mode": "one of: confirm_defect (real video defect), ask_more (not enough info), explain_expected (videos not yet produced), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up)", "jira_description": "cleaned technical problem statement for Jira — no raw learner wording, no PII. Empty string when reply_mode is not confirm_defect.", "jira_title": "a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase"}'
+        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "reply_mode": "one of: confirm_defect (real video defect), ask_more (not enough info), explain_expected (videos not yet produced), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up)", "jira_description": "impersonal technical problem statement — no raw learner wording, no PII, no course code, no section, no chapter references. Always generate.", "jira_title": "short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers."}'
         
         prompt_text = f"""
         You are an expert in Red Hat Training video content issues.
@@ -1674,7 +1739,7 @@ For example:
         - video_issue_type: one of "videos_not_ready", "content_mismatch", "subtitle_issue", "technical_issue", "other"
         - suggested_correction: what needs to be fixed (empty if videos_not_ready)
         - summary: short summary of the analysis
-        - jira_title: a short and precise title of the issue, words separated by spaces only — no underscores, dashes, or special characters, all lowercase
+        - jira_title: short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers (e.g. do380, rh124-9.3, ch02s06, 4.1).
         
         Do not include any explanations, xml or markdown formatting outside the JSON object.
         {self._json_output_rules()}
@@ -2315,16 +2380,27 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
     def build_jira_search_url(self, snow_info: dict, keyword: str) -> str:
         course = snow_info.get("Course", "")
-        if snow_info.get("Section"):
-            chapter_and_section = f"ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')}"
-        else:
-            chapter_and_section = f"ch{snow_info.get('Chapter','')}"
         if course == "RH199":
             component_clause = 'component in (RH134, RH199, RH124)'
         else:
             component_clause = f'component = "{course}"'
         term = (keyword or course).replace('"', '').replace("'", "")
-        jql = f'project = PTL AND resolution = Unresolved AND description ~ {chapter_and_section} AND {component_clause} AND text ~ "{term}" ORDER BY priority DESC, updated DESC'
+
+        # Only narrow by page when the investigation page is a real Section (chNNsMM).
+        # Preface (pr01) and appendix (ap01) pages are Capture URL noise — searching
+        # by them hides duplicates filed under the actual exercise page (ADR-0003).
+        slug = self._extract_page_slug(snow_info.get("URL", ""))
+        if re.fullmatch(r"ch\d+s\d+", slug, flags=re.IGNORECASE):
+            location_clause = f"AND description ~ {slug} "
+        else:
+            location_clause = ""
+
+        jql = (
+            f"project = PTL AND resolution = Unresolved "
+            f"{location_clause}"
+            f"AND {component_clause} AND text ~ \"{term}\" "
+            f"ORDER BY priority DESC, updated DESC"
+        )
         return f"https://redhat.atlassian.net/issues/?jql={quote(jql)}"
 
 
@@ -2417,8 +2493,16 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
         # Fill in Summary — uses element_to_be_clickable to guard against a
         # still-rendering form when Bug type was just changed.
-        raw_title = self._sanitize_jira_title(analysis.get("jira_title") or "")
-        summary_value = f"{snow_info.get('Course','')}: ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} - {raw_title} - {snow_info.get('snow_id','')}"
+        # Format: '{Course Code}: {page slug} - {short failure name} - {Feedback id}'
+        # Page slug comes from the investigation URL. Problem phrase strips any
+        # location tokens the LLM may have slipped in; falls back to the first
+        # ~8 words of jira_description when the phrase is empty (ADR-0003).
+        jira_desc = (analysis.get("jira_description") or "").strip()
+        summary_value = self._build_defect_summary(
+            snow_info,
+            analysis.get("jira_title") or "",
+            jira_desc,
+        )
         summary_field = WebDriverWait(self.driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, '//input[@id="summary-field"]'))
         )
@@ -2428,8 +2512,8 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # The "Create Bug" template pre-fills a table with URL / Reporter RHNID /
         # Section Title rows plus an "Issue description" heading.
         # We use JS insertText for instant paste (send_keys types char-by-char).
-        # Prefer the LLM-cleaned description; fall back to translated feedback as a safety net.
-        jira_desc = (analysis.get("jira_description") or "").strip()
+        # Use the LLM-cleaned impersonal description (ADR-0003: always drafted).
+        # Fall back to translated feedback only when the description is missing.
         translated = jira_desc or classification.get("translated_student_feedback", snow_info.get("Description", ""))
 
         # Wait for the editor to be present, then wait for the Bug template's
@@ -2518,8 +2602,12 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             time.sleep(0.2)
 
         _fill_section("Issue description", translated)
-        _fill_section("Workaround", self._normalize_suggested_correction(
-            analysis.get('suggested_correction', '')))
+
+        # Workaround only when a Defect is confirmed — a suggested fix is not
+        # honest until the engineer decides to actually file (ADR-0003).
+        if analysis.get("reply_mode") == self._MODE_CONFIRM_DEFECT:
+            _fill_section("Workaround", self._normalize_suggested_correction(
+                analysis.get('suggested_correction', '')))
 
         # Priority tab -> set priority to Minor
         try:
@@ -2742,15 +2830,18 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"Failed updating SNOW notes/reply for {snow_id}: {e}")
 
-                # SSH Lab Access Feedback is never a Defect. Otherwise only confirm_defect opens Jira.
-                reply_mode = analysis.get("reply_mode", "confirm_defect")
+                # Open Jira search + create for every Feedback except the two that
+                # structurally cannot produce a Defect (ADR-0003):
+                #   - SSH Lab Access Feedback: never a Defect by domain rule
+                #   - Resolution Follow-up (acknowledge_resolved): nothing left to file
+                reply_mode = analysis.get("reply_mode", "ask_more")
                 skip_jira = (
                     classification.get("is_ssh_lab_access_ticket", False)
-                    or reply_mode != "confirm_defect"
+                    or reply_mode == "acknowledge_resolved"
                 )
 
                 if skip_jira:
-                    self.logger("Skipping Jira creation - videos not ready, no ticket needed")
+                    self.logger("Skipping Jira — SSH Lab Access or Resolution Follow-up, no Defect possible")
                 else:
                     # Tab 3: Jira search of similar tickets
                     self.driver.switch_to.window(ticket_window)
