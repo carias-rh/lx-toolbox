@@ -36,8 +36,16 @@ A ServiceNow ticket for account, subscription, or exam issues. Processed by the 
 _Avoid_: Ticket (ambiguous)
 
 **Defect**:
-A Jira ticket in the PTL project representing a confirmed issue in course content, lab scripts, or video. Component = Course Code.
+A Jira ticket in the PTL project representing a confirmed issue in course content, lab scripts, or video. Component = Course Code. A prefilled create dialog is not a Defect until the LX Engineer submits it.
 _Avoid_: Bug, Jira ticket, issue (overloaded)
+
+**Defect Summary**:
+The title of a Defect. A scannable prefix (Course Code, Guide page slug, Feedback id) plus a short failure name.
+_Avoid_: Jira title, bug title
+
+**Defect Description**:
+The technical problem statement on a Defect, written impersonally. Drafted whenever a create dialog is prepared, including before a Defect is confirmed. It does not locate the issue and does not narrate the Learner.
+_Avoid_: Jira description, issue description (the Jira template heading)
 
 **Response**:
 A reply sent to a Learner through ServiceNow. Can close the Feedback, request clarification (Pending Customer), acknowledge that investigation is underway, or briefly acknowledge a Resolution Follow-up.
@@ -181,6 +189,12 @@ The time window during which a specific engineer handles incoming tickets. Exter
 - do/ai-family Labs often need ~30–40 minutes on First Boot (Cluster Readiness Check / operators still coming up); complaints that match that startup pattern are usually expected behavior.
 - Git clone, TLS/SSL certificate, and application errors inside a running workbench are not First Boot — do not treat them as cluster warm-up.
 - SSH Lab Access Feedback is never a Defect. Classify it from the Feedback text: the Internal Learner is stuck on SSH Lab Access (private key, jump host, `rht_classroom.rsa`, `cloud-user`, `DOWNLOAD SSH KEY`, `ssh -J`). A ROLE URL alone is not enough — Internal Learners also report ordinary Guide and Lab issues. Those stay content, environment, or video Feedback and are investigated on ROL. SSH Lab Access Feedback is investigated on ROLE in the Lab Environment tab.
+- For every Feedback except SSH Lab Access Feedback and Resolution Follow-up, the LX Engineer is given a Jira search and a prefilled create dialog. That is not confirmation a Defect exists. The Response still follows whether a Defect is confirmed: only then tell the Learner the issue was identified.
+- The Defect Summary problem phrase is a short failure name (`copy paste from guide mangles case in edge`). It must not contain a Course Code, Course ID, or Section (not `do380`, not `do380-4.18`, not `section 4` / `ch04s01` / `4.1`), and it is not a diagnosis or a compression of the analysis reasoning.
+- The Defect Summary location token is the Guide page slug from the investigation URL (`ch02s06`, `pr01`, `ap01`), not a reconstructed `ch`+chapter+`s`+section string.
+- The Defect Description is impersonal technical prose. It is drafted whenever a create dialog is prepared, not only when a Defect is confirmed. Location belongs in the URL on the Defect, not restated as chapter/section/course. Do not write “the Learner reports…”. If stripping location tokens from the Defect Summary problem phrase leaves it empty, the phrase is the opening of the Defect Description.
+- Deduplication search is scoped to the Course Code and a keyword from the Feedback. When the investigation page is a Section (`chNNsMM`), the search is also scoped to that Section. Preface and appendix pages (`pr01`, `ap01`) do not narrow the search — the Capture URL is often not the Issue Section.
+- A suggested correction is written onto the Defect as a workaround only when a Defect is confirmed. An unconfirmed draft has a Description, not a fix.
 - Course ID, Version, and Platform come from the Capture URL and do not change.
 - Guide and Lab investigation use the Issue Section. A Learner "N.M" (or equivalent wording) means chapter N section M (`chNNsMM`, zero-padded). If the text does not name a Section, or names more than one with no clear primary, use the Capture URL page.
 - Issue Section is inferred from the original description plus Learner Follow-up text, not from the Feedback Title. A Follow-up that names a Section is the Issue Section (it answers "which Section?").

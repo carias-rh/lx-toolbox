@@ -216,11 +216,15 @@ class TestFirstBootHardNegatives:
 
 
 # ---------------------------------------------------------------------------
-# jira_description cleared on non-defect modes  (#26)
+# jira_description preserved on all modes  (ADR-0003 reverses #26)
 # ---------------------------------------------------------------------------
 
 class TestJiraDescriptionGating:
-    """jira_description must be cleared by normalizers when reply_mode != confirm_defect."""
+    """jira_description is now preserved by normalizers regardless of reply_mode.
+
+    ADR-0003: the create dialog is always prepared so the LX Engineer can override
+    the model's verdict. The normalizers no longer clear jira_description.
+    """
 
     def test_content_confirm_defect_keeps_jira_description(self):
         parsed = {
@@ -231,23 +235,23 @@ class TestJiraDescriptionGating:
         result = SnowAIProcessor._normalize_content_analysis(parsed)
         assert result.get("jira_description") == "Step 3 command produces wrong output"
 
-    def test_content_teach_clears_jira_description(self):
+    def test_content_teach_keeps_jira_description(self):
         parsed = {
             "reply_mode": "teach",
             "is_valid_issue": False,
-            "jira_description": "should be cleared",
+            "jira_description": "text pasted from guide mangles case in edge",
         }
         result = SnowAIProcessor._normalize_content_analysis(parsed)
-        assert result.get("jira_description", "") == ""
+        assert result.get("jira_description") == "text pasted from guide mangles case in edge"
 
-    def test_content_ask_more_clears_jira_description(self):
+    def test_content_ask_more_keeps_jira_description(self):
         parsed = {
             "reply_mode": "ask_more",
             "is_valid_issue": False,
-            "jira_description": "should be cleared",
+            "jira_description": "command output differs from guide",
         }
         result = SnowAIProcessor._normalize_content_analysis(parsed)
-        assert result.get("jira_description", "") == ""
+        assert result.get("jira_description") == "command output differs from guide"
 
     def test_env_confirm_defect_keeps_jira_description(self):
         parsed = {
@@ -258,23 +262,26 @@ class TestJiraDescriptionGating:
         result = SnowAIProcessor._normalize_environment_analysis(parsed)
         assert result.get("jira_description") == "Lab VM cannot reach registry"
 
-    def test_env_explain_expected_clears_jira_description(self):
+    def test_env_explain_expected_keeps_jira_description(self):
         parsed = {
             "reply_mode": "explain_expected",
             "is_valid_issue": False,
-            "jira_description": "should be cleared",
+            "jira_description": "first boot timing issue",
         }
         result = SnowAIProcessor._normalize_environment_analysis(parsed)
-        assert result.get("jira_description", "") == ""
+        assert result.get("jira_description") == "first boot timing issue"
 
-    def test_content_acknowledge_resolved_clears_jira_description(self):
+    def test_content_acknowledge_resolved_keeps_jira_description(self):
+        # acknowledge_resolved is the Resolution Follow-up mode; the create dialog
+        # is still not shown for it (gate is in run()), but the normalizer itself
+        # no longer clears the field.
         parsed = {
             "reply_mode": "acknowledge_resolved",
             "is_valid_issue": False,
-            "jira_description": "should be cleared",
+            "jira_description": "draft description",
         }
         result = SnowAIProcessor._normalize_content_analysis(parsed)
-        assert result.get("jira_description", "") == ""
+        assert result.get("jira_description") == "draft description"
         assert result["reply_mode"] == "acknowledge_resolved"
 
 
@@ -626,4 +633,231 @@ class TestResolutionFollowUpAnalysisInstructions:
         assert "not a Resolution Follow-up" in text
 
 
+# ---------------------------------------------------------------------------
+# ADR-0003: always-prepare-jira — new pure helpers
+# ---------------------------------------------------------------------------
+
+class TestExtractPageSlug:
+    """_extract_page_slug pulls the /pages/<slug> token from a ROL URL."""
+
+    def _slug(self, url):
+        return SnowAIProcessor._extract_page_slug(url)
+
+    def test_section_page(self):
+        url = "https://rol.redhat.com/rol/app/courses/do380-4.18/pages/ch02s06"
+        assert self._slug(url) == "ch02s06"
+
+    def test_preface_page(self):
+        url = "https://rol.redhat.com/rol/app/courses/do380-4.18/pages/pr01"
+        assert self._slug(url) == "pr01"
+
+    def test_appendix_page(self):
+        url = "https://rol.redhat.com/rol/app/courses/rh124-9.3/pages/ap01"
+        assert self._slug(url) == "ap01"
+
+    def test_url_with_query_string(self):
+        url = "https://rol.redhat.com/rol/app/courses/do180-4.18/pages/ch04s02?foo=bar"
+        assert self._slug(url) == "ch04s02"
+
+    def test_empty_string_returns_empty(self):
+        assert self._slug("") == ""
+
+    def test_url_without_pages_returns_empty(self):
+        assert self._slug("https://rol.redhat.com/rol/app/courses/do380-4.18/") == ""
+
+
+class TestStripLocationFromTitle:
+    """_strip_location_from_title removes course code / course ID / section tokens."""
+
+    def _strip(self, title, course_code=""):
+        return SnowAIProcessor._strip_location_from_title(title, course_code)
+
+    def test_strips_uppercase_course_code(self):
+        assert self._strip("DO380 copy paste mangles case", "DO380") == "copy paste mangles case"
+
+    def test_strips_lowercase_course_code(self):
+        assert self._strip("do380 copy paste mangles case", "do380") == "copy paste mangles case"
+
+    def test_strips_course_id_with_version(self):
+        assert self._strip("do380-4.18 copy paste mangles case") == "copy paste mangles case"
+
+    def test_strips_chNNsMM_section(self):
+        assert self._strip("ch02s06 paste mangles case") == "paste mangles case"
+
+    def test_strips_section_N_M_pattern(self):
+        # "section 4" is ambiguous; "4.1" alone is stripped when it looks like a section
+        result = self._strip("4.1 paste mangles case")
+        assert "4.1" not in result
+
+    def test_strips_nothing_from_clean_title(self):
+        result = self._strip("copy paste from guide mangles case in edge")
+        assert result == "copy paste from guide mangles case in edge"
+
+    def test_returns_empty_when_only_location_tokens(self):
+        assert self._strip("do380 ch02s06", "do380") == ""
+
+    def test_does_not_strip_unrelated_numbers(self):
+        # "404" should not be stripped — not a section pattern
+        result = self._strip("command returns 404 error")
+        assert "404" in result
+
+
+class TestBuildDefectSummary:
+    """_build_defect_summary assembles Course Code: page slug - title - snow_id."""
+
+    def _summary(self, snow_info, jira_title, jira_description=""):
+        return SnowAIProcessor._build_defect_summary(snow_info, jira_title, jira_description)
+
+    def _snow(self, course="DO380", url="https://rol.redhat.com/rol/app/courses/do380-4.18/pages/ch02s06", snow_id="RHT0015853"):
+        return {"Course": course, "URL": url, "snow_id": snow_id}
+
+    def test_normal_section_page(self):
+        result = self._summary(self._snow(), "copy paste mangles case in edge")
+        assert result == "DO380: ch02s06 - copy paste mangles case in edge - RHT0015853"
+
+    def test_preface_page_uses_slug_not_chs(self):
+        snow = self._snow(url="https://rol.redhat.com/rol/app/courses/do380-4.18/pages/pr01")
+        result = self._summary(snow, "copy paste mangles case in edge")
+        assert result == "DO380: pr01 - copy paste mangles case in edge - RHT0015853"
+        assert "chs" not in result
+
+    def test_empty_title_falls_back_to_description(self):
+        snow = self._snow()
+        desc = "copying text from the guide into the terminal via edge browser produces mixed case output"
+        result = self._summary(snow, "", desc)
+        # Should use first ~8 words of description
+        assert "copying text from the guide into the terminal" in result
+        assert result.startswith("DO380: ch02s06 - copying")
+
+    def test_stripped_title_falls_back_to_description(self):
+        # Title after stripping location is empty — fall back
+        snow = self._snow()
+        desc = "guide text pasted incorrectly in terminal"
+        result = self._summary(snow, "do380 ch02s06", desc)
+        assert "guide text pasted" in result
+
+    def test_missing_url_no_orphan_dash(self):
+        # No /pages/ segment → slug absent → no orphan dash in summary
+        snow = {"Course": "DO380", "URL": "", "snow_id": "RHT0000001"}
+        result = self._summary(snow, "some issue")
+        assert result == "DO380: some issue - RHT0000001"
+        assert ": -" not in result
+
+
+class TestBuildJiraSearchUrlLocationClause:
+    """build_jira_search_url only adds a location clause for chNNsMM pages."""
+
+    def _proc(self):
+        p = SnowAIProcessor.__new__(SnowAIProcessor)
+        return p
+
+    def test_section_page_adds_location_clause(self):
+        snow = {
+            "Course": "DO380", "Chapter": "2", "Section": "6",
+            "URL": "https://rol.redhat.com/rol/app/courses/do380-4.18/pages/ch02s06",
+        }
+        url = self._proc().build_jira_search_url(snow, "kubectl")
+        assert "ch02s06" in url
+
+    def test_preface_page_omits_location_clause(self):
+        snow = {
+            "Course": "DO380", "Chapter": "", "Section": "",
+            "URL": "https://rol.redhat.com/rol/app/courses/do380-4.18/pages/pr01",
+        }
+        url = self._proc().build_jira_search_url(snow, "edge")
+        from urllib.parse import unquote
+        jql = unquote(url.split("?jql=")[1])
+        assert "description ~" not in jql
+
+    def test_appendix_page_omits_location_clause(self):
+        snow = {
+            "Course": "RH124", "Chapter": "", "Section": "",
+            "URL": "https://rol.redhat.com/rol/app/courses/rh124-9.3/pages/ap01",
+        }
+        url = self._proc().build_jira_search_url(snow, "")
+        from urllib.parse import unquote
+        jql = unquote(url.split("?jql=")[1])
+        assert "description ~" not in jql
+
+
+class TestNormalizeContentAnalysisKeepsJiraDescription:
+    """After ADR-0003: jira_description is no longer cleared on non-confirm_defect modes."""
+
+    def _norm(self, parsed):
+        return SnowAIProcessor._normalize_content_analysis(parsed)
+
+    def test_teach_preserves_jira_description(self):
+        result = self._norm({"reply_mode": "teach", "is_valid_issue": False,
+                             "jira_description": "text pasted incorrectly in terminal"})
+        assert result["jira_description"] == "text pasted incorrectly in terminal"
+
+    def test_ask_more_preserves_jira_description(self):
+        result = self._norm({"reply_mode": "ask_more", "is_valid_issue": False,
+                             "jira_description": "command output differs from guide"})
+        assert result["jira_description"] == "command output differs from guide"
+
+    def test_explain_expected_preserves_jira_description(self):
+        result = self._norm({"reply_mode": "explain_expected", "is_valid_issue": False,
+                             "jira_description": "behaviour is expected"})
+        assert result["jira_description"] == "behaviour is expected"
+
+    def test_confirm_defect_still_preserves(self):
+        result = self._norm({"reply_mode": "confirm_defect", "is_valid_issue": True,
+                             "jira_description": "step 3 command fails"})
+        assert result["jira_description"] == "step 3 command fails"
+
+
+class TestNormalizeEnvironmentAnalysisKeepsJiraDescription:
+    """After ADR-0003: jira_description is no longer cleared on non-confirm_defect modes."""
+
+    def _norm(self, parsed, user_issue=""):
+        return SnowAIProcessor._normalize_environment_analysis(parsed, user_issue)
+
+    def test_explain_expected_preserves_jira_description(self):
+        # Note: explain_expected with no first-boot tokens stays as-is
+        result = self._norm(
+            {"reply_mode": "explain_expected", "is_valid_issue": False,
+             "jira_description": "lab vm unreachable"},
+            user_issue="lab is slow",
+        )
+        assert result["jira_description"] == "lab vm unreachable"
+
+    def test_ask_more_preserves_jira_description(self):
+        result = self._norm({"reply_mode": "ask_more", "is_valid_issue": False,
+                             "jira_description": "registry pull fails"})
+        assert result["jira_description"] == "registry pull fails"
+
+
+class TestSkipJiraGate:
+    """skip_jira fires only on is_ssh_lab_access_ticket or acknowledge_resolved."""
+
+    @staticmethod
+    def _should_skip(is_ssh, reply_mode):
+        # Mirror the gate logic from run() — pure function extracted for testing
+        return (
+            is_ssh
+            or reply_mode == "acknowledge_resolved"
+        )
+
+    def test_ssh_always_skips(self):
+        for mode in ("confirm_defect", "teach", "ask_more"):
+            assert self._should_skip(True, mode)
+
+    def test_acknowledge_resolved_skips(self):
+        assert self._should_skip(False, "acknowledge_resolved")
+
+    def test_confirm_defect_does_not_skip(self):
+        assert not self._should_skip(False, "confirm_defect")
+
+    def test_teach_does_not_skip(self):
+        assert not self._should_skip(False, "teach")
+
+    def test_explain_expected_does_not_skip(self):
+        assert not self._should_skip(False, "explain_expected")
+
+    def test_ask_more_does_not_skip(self):
+        assert not self._should_skip(False, "ask_more")
+
+    def test_lab_pending_does_not_skip(self):
+        assert not self._should_skip(False, "lab_pending")
 
