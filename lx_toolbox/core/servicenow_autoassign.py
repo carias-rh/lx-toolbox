@@ -316,7 +316,7 @@ class ServiceNowAutoAssign:
                     self._email_alias_to_team_key[alias.strip().lower()] = team_key
                 self._schedule_only_team_keys.add(team_key)
 
-            if slug.startswith("audit-"):
+            if slug.startswith(("audit-", "rhls-entitlement-", "tua-")):
                 self._schedule_only_team_keys.add(team_key)
 
     def _get_team_members(self, team_key: str) -> List[str]:
@@ -579,6 +579,8 @@ class ServiceNowAutoAssign:
                 value = entry.get(key)
                 if value:
                     lines.append(f"  {label}: {value}")
+            country = entry.get('country') or ''
+            lines.append(f"  Country: {country}")
         return "\n".join(lines)
 
     def lookup_user_sys_id(self, display_name: str, team_key: str = None) -> Optional[str]:
@@ -973,6 +975,32 @@ class ServiceNowAutoAssign:
                     logger.debug(f"Audit ticket {ticket.get('number')} – no audit person on shift, skipping")
                     return None
 
+            elif 'New RHLS Course Entitlement' in short_desc and team_key:
+                rhls_assignee = self._resolve_rhls_entitlement_assignee(team_key)
+                if rhls_assignee and rhls_assignee != "None":
+                    logger.info(f"RHLS entitlement ticket {ticket.get('number')} routed to: {rhls_assignee}")
+                    assignee_name = rhls_assignee
+                    zone_id = self._gls_cx_team_zone.get(team_key)
+                    rhls_team_key = f"gls-cx-{zone_id}-rhls-entitlement-{zone_id}" if zone_id else None
+                    if rhls_team_key and rhls_team_key in self.teams:
+                        commit_config = self.teams[rhls_team_key]
+                else:
+                    logger.debug(f"RHLS entitlement ticket {ticket.get('number')} – no one on shift, skipping")
+                    return None
+
+            elif 'mentioned you in Pending TUAs' in short_desc and team_key:
+                tua_assignee = self._resolve_tua_assignee(team_key)
+                if tua_assignee and tua_assignee != "None":
+                    logger.info(f"TUA ticket {ticket.get('number')} routed to: {tua_assignee}")
+                    assignee_name = tua_assignee
+                    zone_id = self._gls_cx_team_zone.get(team_key)
+                    tua_team_key = f"gls-cx-{zone_id}-tua-{zone_id}" if zone_id else None
+                    if tua_team_key and tua_team_key in self.teams:
+                        commit_config = self.teams[tua_team_key]
+                else:
+                    logger.debug(f"TUA ticket {ticket.get('number')} – no one on shift, skipping")
+                    return None
+
             elif team_key and self._email_alias_to_team_key:
                 description = ticket.get('description', '')
                 alias_assignee, matched_alias = self._resolve_email_alias_assignee(description)
@@ -1204,6 +1232,32 @@ class ServiceNowAutoAssign:
             logger.error(f"[{team_config.team_name}] Shift commit failed: {e}")
             return None
 
+    def _resolve_zone_schedule_assignee(self, team_key: str, block_name: str) -> Optional[str]:
+        """Peek the on-shift person from a named schedule block for the zone of *team_key*.
+
+        *block_name* is the schedule-block identifier prefix, e.g. ``"audit"``,
+        ``"rhls-entitlement"``, or ``"tua"``.  The resolved team key follows the
+        convention ``gls-cx-{zone_id}-{block_name}-{zone_id}``.
+
+        Returns the assignee name, ``"None"`` if nobody is on shift for that
+        block, or ``None`` if the zone or config block is missing.
+        """
+        zone_id = self._gls_cx_team_zone.get(team_key)
+        if not zone_id:
+            logger.warning(f"Cannot determine zone for team '{team_key}' – {block_name} routing unavailable")
+            return None
+
+        schedule_team_key = f"gls-cx-{zone_id}-{block_name}-{zone_id}"
+        schedule_config = self.teams.get(schedule_team_key)
+        if not schedule_config:
+            logger.warning(
+                f"No '{block_name}' schedule block found for zone '{zone_id}' "
+                f"(expected key: {schedule_team_key})"
+            )
+            return None
+
+        return self.peek_shift(schedule_config)
+
     def _resolve_audit_assignee(self, team_key: str) -> Optional[str]:
         """Find the audit-eligible person currently on shift for the zone of the given team.
 
@@ -1211,18 +1265,15 @@ class ServiceNowAutoAssign:
         Returns the assignee name, ``"None"`` if nobody is on audit shift,
         or ``None`` if no audit config exists for the zone.
         """
-        zone_id = self._gls_cx_team_zone.get(team_key)
-        if not zone_id:
-            logger.warning(f"Cannot determine zone for team '{team_key}' – audit routing unavailable")
-            return None
+        return self._resolve_zone_schedule_assignee(team_key, "audit")
 
-        audit_team_key = f"gls-cx-{zone_id}-audit-{zone_id}"
-        audit_config = self.teams.get(audit_team_key)
-        if not audit_config:
-            logger.warning(f"No audit team config found for zone '{zone_id}' (expected key: {audit_team_key})")
-            return None
+    def _resolve_rhls_entitlement_assignee(self, team_key: str) -> Optional[str]:
+        """Find the on-shift person for 'New RHLS Course Entitlement' tickets in this zone."""
+        return self._resolve_zone_schedule_assignee(team_key, "rhls-entitlement")
 
-        return self.peek_shift(audit_config)
+    def _resolve_tua_assignee(self, team_key: str) -> Optional[str]:
+        """Find the on-shift person for 'mentioned you in Pending TUAs' tickets in this zone."""
+        return self._resolve_zone_schedule_assignee(team_key, "tua")
 
     def _resolve_email_alias_assignee(self, description: str):
         """Match a ``training-*@redhat.com`` alias in the ticket description to a sub-region schedule.
