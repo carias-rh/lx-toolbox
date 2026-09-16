@@ -5,6 +5,7 @@ import json
 import time
 import logging
 import traceback
+from html import escape
 from urllib.parse import quote
 
 import requests
@@ -417,6 +418,20 @@ class SnowAIProcessor:
         """Return the /pages/<slug> token from a ROL course URL, or '' if absent."""
         m = re.search(r"/pages/([^/?#]+)", url or "")
         return m.group(1) if m else ""
+
+    @staticmethod
+    def _jira_editor_link_html(url: str) -> str:
+        """Return an HTML anchor the Jira description editor can turn into a hyperlink.
+
+        The Cloud create dialog is ProseMirror: insertText leaves a Capture URL as
+        plain text, and wiki markup like [text|url] is no longer parsed. insertHTML
+        of an <a> is what keeps the URL clickable. Non-http(s) values return ''.
+        """
+        text = (url or "").strip()
+        if not text.lower().startswith(("http://", "https://")):
+            return ""
+        safe = escape(text, quote=True)
+        return f'<a href="{safe}">{safe}</a>'
 
     @staticmethod
     def _strip_location_from_title(title: str, course_code: str = "") -> str:
@@ -2663,28 +2678,86 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 "document.execCommand('insertText', false, arguments[0]);", text
             )
 
+        def _insert_hyperlink_in_editor(cell_el, url):
+            """Insert a Capture URL as a real hyperlink in the ProseMirror cell.
+
+            insertHTML of <a> is the primary path. ProseMirror often strips that
+            to plain text, so createLink on the inserted URL is the fallback that
+            still leaves a clickable mark.
+            """
+            html = self._jira_editor_link_html(url)
+            if not html:
+                _insert_text_in_editor(url)
+                return
+            self.driver.execute_script(
+                """
+                var cell = arguments[0];
+                var url = arguments[1];
+                var html = arguments[2];
+                if (!cell || !url) return;
+
+                function cellHasLink() {
+                    return !!(cell.querySelector && cell.querySelector('a[href]'));
+                }
+
+                function linkifyUrlText() {
+                    var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null);
+                    var node;
+                    while ((node = walker.nextNode())) {
+                        var text = node.textContent || '';
+                        var idx = text.indexOf(url);
+                        if (idx === -1) continue;
+                        var range = document.createRange();
+                        range.setStart(node, idx);
+                        range.setEnd(node, idx + url.length);
+                        var sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                        document.execCommand('createLink', false, url);
+                        sel.collapseToEnd();
+                        return cellHasLink();
+                    }
+                    return false;
+                }
+
+                document.execCommand('insertHTML', false, html);
+                if (cellHasLink()) return;
+                if (linkifyUrlText()) return;
+                document.execCommand('insertText', false, url);
+                linkifyUrlText();
+                """,
+                cell_el,
+                url,
+                html,
+            )
+
+        def _focus_table_cell(cell):
+            """Place the caret at the start of a template table value cell."""
+            inner_p = cell.find_elements(By.TAG_NAME, 'p')
+            target = inner_p[0] if inner_p else cell
+            self.driver.execute_script(
+                "var el = arguments[0]; el.focus ? el.focus() : el.click();"
+                "var range = document.createRange(); range.selectNodeContents(el);"
+                "var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);"
+                "sel.collapseToStart();",
+                target
+            )
+            time.sleep(0.2)
+
         # Click the <p> inside each <td> value cell to ensure cursor placement.
         # Empty cells have a tiny <p> with &nbsp; that's hard to click on the
         # <td> itself, so we target the inner paragraph.
         # Always fetch table_cells fresh here (no cached editor ref = no stale ref).
         table_cells = self.driver.find_elements(By.CSS_SELECTOR, '#ak-editor-textarea td')
-        cell_values = [
-            snow_info.get("URL", ""),
-            snow_info.get("RHNID", ""),
-            snow_info.get("Title", ""),
-        ]
         if table_cells:
-            for cell, value in zip(table_cells, cell_values):
-                inner_p = cell.find_elements(By.TAG_NAME, 'p')
-                target = inner_p[0] if inner_p else cell
-                self.driver.execute_script(
-                    "var el = arguments[0]; el.focus ? el.focus() : el.click();"
-                    "var range = document.createRange(); range.selectNodeContents(el);"
-                    "var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);"
-                    "sel.collapseToStart();",
-                    target
-                )
-                time.sleep(0.2)
+            capture_url_cell, *plain_cells = table_cells
+            _focus_table_cell(capture_url_cell)
+            _insert_hyperlink_in_editor(capture_url_cell, snow_info.get("URL", ""))
+            for cell, value in zip(plain_cells, (
+                snow_info.get("RHNID", ""),
+                snow_info.get("Title", ""),
+            )):
+                _focus_table_cell(cell)
                 _insert_text_in_editor(value)
         else:
             # No table — click the editor by locating it fresh, then type inline.

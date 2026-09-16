@@ -775,6 +775,40 @@ class TestExtractPageSlug:
         assert self._slug("https://rol.redhat.com/rol/app/courses/do380-4.18/") == ""
 
 
+class TestJiraEditorLinkHtml:
+    """_jira_editor_link_html turns a Capture URL into an <a> for the Jira editor.
+
+    Cloud ProseMirror does not auto-linkify insertText, so the create dialog
+    must insert HTML (not wiki [text|url] markup).
+    """
+
+    def _html(self, url):
+        return SnowAIProcessor._jira_editor_link_html(url)
+
+    def test_capture_url_becomes_anchor_with_matching_href_and_text(self):
+        url = "https://role.rhu.redhat.com/rol/app/courses/do280-4.22/pages/ch02s05"
+        assert self._html(url) == (
+            '<a href="https://role.rhu.redhat.com/rol/app/courses/do280-4.22/pages/ch02s05">'
+            "https://role.rhu.redhat.com/rol/app/courses/do280-4.22/pages/ch02s05</a>"
+        )
+
+    def test_escapes_ampersand_in_query_string(self):
+        url = "https://rol.redhat.com/rol/app/courses/do180-4.18/pages/ch04s02?foo=1&bar=2"
+        assert self._html(url) == (
+            '<a href="https://rol.redhat.com/rol/app/courses/do180-4.18/pages/ch04s02?foo=1&amp;bar=2">'
+            "https://rol.redhat.com/rol/app/courses/do180-4.18/pages/ch04s02?foo=1&amp;bar=2</a>"
+        )
+
+    def test_empty_or_blank_returns_empty(self):
+        assert self._html("") == ""
+        assert self._html(None) == ""
+        assert self._html("   ") == ""
+
+    def test_non_http_is_not_wrapped(self):
+        assert self._html("javascript:alert(1)") == ""
+        assert self._html("mdunnett") == ""
+
+
 class TestStripLocationFromTitle:
     """_strip_location_from_title removes course code / course ID / section tokens."""
 
