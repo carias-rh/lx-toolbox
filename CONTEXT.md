@@ -40,7 +40,7 @@ A Jira ticket in the PTL project representing a confirmed issue in course conten
 _Avoid_: Bug, Jira ticket, issue (overloaded)
 
 **Defect Summary**:
-The title of a Defect. A scannable prefix (Course Code, Guide page slug, Feedback id) plus a short failure name.
+The title of a Defect. A scannable prefix (Course Code, Guide page slug, Feedback id) plus a short failure name — or, for a Suggestion, a short enhancement name.
 _Avoid_: Jira title, bug title
 
 **Defect Description**:
@@ -48,7 +48,7 @@ The technical problem statement on a Defect, written impersonally. Drafted whene
 _Avoid_: Jira description, issue description (the Jira template heading)
 
 **Response**:
-A reply sent to a Learner through ServiceNow. Can close the Feedback, request clarification (Pending Customer), acknowledge that investigation is underway, or briefly acknowledge a Resolution Follow-up.
+A reply sent to a Learner through ServiceNow. Can close the Feedback, request clarification (Pending Customer), acknowledge that investigation is underway, briefly acknowledge a Resolution Follow-up, or thank a Suggestion.
 
 **Learner Follow-up**:
 A portal comment or inbound email from the Learner on a Feedback after the original description. Not a Response.
@@ -60,6 +60,10 @@ _Avoid_: Customer acknowledgement, resolved ticket (ambiguous with ServiceNow st
 
 **SSH Lab Access Feedback**:
 Feedback from an Internal Learner about connecting to a ROLE Lab via SSH (private key setup, jump host, permissions). Never a Defect. SSH Lab Access exists on ROLE and Factory; Feedback of this type only arrives from ROLE.
+
+**Suggestion**:
+Feedback that is an improvement idea or praise, not a report of something broken. Still Feedback; the LX Engineer still gets Jira search and a prefilled create dialog. The Response thanks the Learner and acknowledges the idea — it does not treat the text as a defect report.
+_Avoid_: Petition, cheer, feature request, enhancement (as the ticket kind)
 
 ### Course structure
 
@@ -189,7 +193,11 @@ The time window during which a specific engineer handles incoming tickets. Exter
 - do/ai-family Labs often need ~30–40 minutes on First Boot (Cluster Readiness Check / operators still coming up); complaints that match that startup pattern are usually expected behavior.
 - Git clone, TLS/SSL certificate, and application errors inside a running workbench are not First Boot — do not treat them as cluster warm-up.
 - SSH Lab Access Feedback is never a Defect. Classify it from the Feedback text: the Internal Learner is stuck on SSH Lab Access (private key, jump host, `rht_classroom.rsa`, `cloud-user`, `DOWNLOAD SSH KEY`, `ssh -J`). A ROLE URL alone is not enough — Internal Learners also report ordinary Guide and Lab issues. Those stay content, environment, or video Feedback and are investigated on ROL. SSH Lab Access Feedback is investigated on ROLE in the Lab Environment tab.
-- For every Feedback except SSH Lab Access Feedback and Resolution Follow-up, the LX Engineer is given a Jira search and a prefilled create dialog. That is not confirmation a Defect exists. The Response still follows whether a Defect is confirmed: only then tell the Learner the issue was identified.
+- For every Feedback except SSH Lab Access Feedback and Resolution Follow-up, the LX Engineer is given a Jira search and a prefilled create dialog. That includes Suggestion. That is not confirmation a Defect exists. The Response still follows whether a Defect is confirmed: only then tell the Learner the issue was identified.
+- A Suggestion Response thanks the Learner, acknowledges that the idea or praise was received and will be considered, and does not ask for more information or promise that the change will be made.
+- If Feedback both reports something broken and offers a Suggestion, it is not a Suggestion. Classify and investigate the broken thing.
+- Unclear Feedback is not a Suggestion. Only text that is clearly an improvement idea or praise is a Suggestion.
+- For a Suggestion, the Defect Description is an impersonal statement of the requested change, or of the praise when there is no change. Still no Learner narration and no location in the body. Guide Text on the investigation page is used so the Description can name what that page lacks.
 - The Defect Summary problem phrase is a short failure name (`copy paste from guide mangles case in edge`). It must not contain a Course Code, Course ID, or Section (not `do380`, not `do380-4.18`, not `section 4` / `ch04s01` / `4.1`), and it is not a diagnosis or a compression of the analysis reasoning.
 - The Defect Summary location token is the Guide page slug from the investigation URL (`ch02s06`, `pr01`, `ap01`), not a reconstructed `ch`+chapter+`s`+section string.
 - The Defect Description is impersonal technical prose. It is drafted whenever a create dialog is prepared, not only when a Defect is confirmed. Location belongs in the URL on the Defect, not restated as chapter/section/course. Do not write “the Learner reports…”. If stripping location tokens from the Defect Summary problem phrase leaves it empty, the phrase is the opening of the Defect Description.

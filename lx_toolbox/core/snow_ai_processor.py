@@ -138,8 +138,15 @@ class SnowAIProcessor:
             "Examples of types of issues to be manually managed:\n"
             "- I've lost many lab hours with an issue and I want hours back or a refund\n"
             "- How can I schedule an exam?\n"
-            "- UI suggestions of improvement\n"
-            "- Complaints / Praises on the learning platform or the courses.\n"
+        )
+
+        self.suggestion_examples = (
+            "Examples of Suggestion (improvement idea or praise — not a report of something broken):\n"
+            "- You may include a practical quiz\n"
+            "- Please add more examples after this exercise\n"
+            "- It would help to have a video here\n"
+            "- Great course, I enjoyed it\n"
+            "- Thanks for the clear explanations\n"
         )
 
         # Distilled operational rules from internal SNOW AI knowledge gathering.
@@ -485,9 +492,12 @@ class SnowAIProcessor:
         "pending": "lab_pending",
         "explain": "explain_expected",
         "expected": "explain_expected",
+        "suggestion": "acknowledge_suggestion",
+        "praise": "acknowledge_suggestion",
+        "acknowledge_suggestion": "acknowledge_suggestion",
     }
     _CONTENT_VALID_MODES: frozenset = frozenset(
-        {"confirm_defect", "teach", "ask_more", "lab_pending", "explain_expected", "acknowledge_resolved"}
+        {"confirm_defect", "teach", "ask_more", "lab_pending", "explain_expected", "acknowledge_resolved", "acknowledge_suggestion"}
     )
 
     _ENV_MODE_ALIASES: dict = {
@@ -546,6 +556,45 @@ class SnowAIProcessor:
             classification["is_video_issue_ticket"] = False
             classification["needs_lab_verification"] = False
         return classification
+
+    @classmethod
+    def apply_suggestion_classification(cls, classification: dict) -> dict:
+        """Keep Suggestion exclusive of broken-thing types. Mixed tickets are not Suggestions."""
+        is_broken = any((
+            classification.get("is_content_issue_ticket"),
+            classification.get("is_environment_issue_ticket"),
+            classification.get("is_video_issue_ticket"),
+            classification.get("is_ssh_lab_access_ticket"),
+        ))
+        if is_broken:
+            classification["is_suggestion_ticket"] = False
+            return classification
+        is_suggestion = bool(classification.get("is_suggestion_ticket"))
+        classification["is_suggestion_ticket"] = is_suggestion
+        if is_suggestion:
+            classification["is_content_issue_ticket"] = False
+            classification["is_environment_issue_ticket"] = False
+            classification["is_video_issue_ticket"] = False
+            classification["needs_lab_verification"] = False
+        return classification
+
+    @classmethod
+    def _normalize_suggestion_analysis(cls, parsed: dict) -> dict:
+        """A Suggestion is never a confirmed Defect. Default reply_mode is acknowledge_suggestion."""
+        raw = str(parsed.get("reply_mode", "")).strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "suggestion": "acknowledge_suggestion",
+            "praise": "acknowledge_suggestion",
+            "acknowledge_suggestion": "acknowledge_suggestion",
+        }
+        mode = aliases.get(raw, raw)
+        if mode not in {"acknowledge_suggestion", "acknowledge_resolved", "ask_more"}:
+            mode = "acknowledge_suggestion"
+        parsed["reply_mode"] = mode
+        parsed["is_valid_issue"] = False
+        if "jira_title" in parsed:
+            parsed["jira_title"] = cls._sanitize_jira_title(parsed.get("jira_title") or "")
+        return parsed
 
     @classmethod
     def _normalize_ssh_lab_access_analysis(cls, parsed: dict) -> dict:
@@ -1500,7 +1549,7 @@ Example when you cannot: {{"unchanged": true}}
     # --------------------------
     def classify_ticket_llm(self, description: str, snow_info: dict | None = None) -> dict:
         self.logger("Classifying ticket using LLM")
-        json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue_ticket": false, "is_video_issue_ticket": false, "is_ssh_lab_access_ticket": false, "needs_lab_verification": true}'
+        json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue_ticket": false, "is_video_issue_ticket": false, "is_ssh_lab_access_ticket": false, "is_suggestion_ticket": false, "needs_lab_verification": true}'
         role_note = ""
         if snow_info and self.is_role_platform_url(str(snow_info.get("URL") or "")):
             role_note = (
@@ -1517,6 +1566,7 @@ Classify the user's feedback regarding a Red Hat Training course. Types are mutu
 - environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', or the learner is reporting machine access, VM state, or lab-environment behavior *inside* the lab VMs. This is NOT ROLE SSH-from-laptop access.
 - video_issue_ticket: if the feedback is about videos not being available, video not matching the section, subtitle issues, translation problems, bad video cuts, or any other video-related problem.
 - ssh_lab_access_ticket: the Internal Learner is stuck on SSH Lab Access from their local machine to a ROLE Lab — private key setup, DOWNLOAD SSH KEY, rht_classroom.rsa, cloud-user jump host, ssh -J, permission denied (publickey). A ROLE URL alone is NOT this type; Internal Learners also report ordinary Guide and Lab issues.
+- suggestion_ticket: the Learner offers an improvement idea or praise, not a report of something broken. Examples: please add a quiz, more examples, a video; "great course". If they also report something broken (wrong command, quiz answer is wrong, lab fails), this is NOT a suggestion_ticket — classify the broken thing.
 
 Examples of content issues:
 {self.content_issues_examples}
@@ -1529,6 +1579,9 @@ Examples of video issues:
 
 Examples of SSH Lab Access Feedback:
 {self.ssh_lab_access_examples}
+
+Examples of Suggestion:
+{self.suggestion_examples}
 
 Examples of types of issues to be manually managed:
 {self.manually_managed_issues_examples}
@@ -1546,7 +1599,8 @@ Lab verification is NOT needed when:
 - There is a simple typo in the guide text (a spelling mistake visible in the guide itself, not involving lab files)
 - Video issues (missing, not matching, subtitle problems)
 - SSH Lab Access Feedback (connecting from a laptop via jump host)
-- Manually managed issues (refunds, exam scheduling, UI suggestions)
+- Manually managed issues (refunds, exam scheduling)
+- Suggestion (improvement idea or praise — not a broken quiz, not a missing step they claim is already supposed to be there)
 - The issue can be determined just by reading the guide text WITHOUT needing to check anything on the lab VM
 - The learner is complaining about theory-section example commands rather than guided exercise or lab steps
 - The issue is a likely doXXX first-boot delay that matches expected startup behavior
@@ -1559,7 +1613,8 @@ Return JSON with the following fields:
 - is_environment_issue_ticket: (true/false)
 - is_video_issue_ticket: (true/false)
 - is_ssh_lab_access_ticket: (true/false)
-- needs_lab_verification: (true/false) - whether we need to start a lab to verify the student's claim. Always false for ssh_lab_access_ticket.
+- is_suggestion_ticket: (true/false) — true only when the Feedback is clearly an improvement idea or praise and does not also report something broken. Unclear Feedback is false.
+- needs_lab_verification: (true/false) - whether we need to start a lab to verify the student's claim. Always false for ssh_lab_access_ticket and suggestion_ticket.
 
 This is the student's feedback:
 <student_feedback>
@@ -1583,6 +1638,7 @@ For example:
                 "is_environment_issue_ticket": False,
                 "is_video_issue_ticket": False,
                 "is_ssh_lab_access_ticket": False,
+                "is_suggestion_ticket": False,
                 "needs_lab_verification": False,
             }
         else:
@@ -1600,10 +1656,12 @@ For example:
                 "is_environment_issue_ticket": bool(parsed.get("is_environment_issue_ticket", False)),
                 "is_video_issue_ticket": bool(parsed.get("is_video_issue_ticket", False)),
                 "is_ssh_lab_access_ticket": bool(parsed.get("is_ssh_lab_access_ticket", False)),
+                "is_suggestion_ticket": bool(parsed.get("is_suggestion_ticket", False)),
                 "needs_lab_verification": bool(parsed.get("needs_lab_verification", False)),
             }
 
-        return self.apply_ssh_lab_access_classification(parsed, description)
+        parsed = self.apply_ssh_lab_access_classification(parsed, description)
+        return self.apply_suggestion_classification(parsed)
 
     def analyze_content_issue(self, user_issue: str, guide_text: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing content issue using LLM")
@@ -1626,7 +1684,7 @@ For example:
             "\n        \"is_valid_issue\": true," +
             "\n        \"suggested_correction\": \"If the issue is valid, indicate what words, lines, or commands that should be changed in the guide_text to fix the issue. If the issue is valid but there is not enough information it could be possible that a deeper investigation within the lab environment is required. Do not include any explanations or markdown formatting outside the JSON object.\"," +
             "\n        \"summary\": \"a short/medium summary of the 'analysis' field\"," +
-            "\n        \"reply_mode\": \"one of: confirm_defect (real defect found), teach (learner confusion — explain the concept), ask_more (not enough info), lab_pending (lab still initialising), explain_expected (expected behaviour), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up)\"," +
+            "\n        \"reply_mode\": \"one of: confirm_defect (real defect found), teach (learner confusion — explain the concept), ask_more (not enough info), lab_pending (lab still initialising), explain_expected (expected behaviour), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up), acknowledge_suggestion (improvement idea or praise — not a defect report)\"," +
             "\n        \"jira_description\": \"impersonal technical problem statement — no raw learner wording, no PII, no suggested fix, no course code, no section, no chapter references. Always generate, even when reply_mode is not confirm_defect.\"," +
             "\n        \"jira_title\": \"short failure name — words separated by spaces only, no underscores, dashes, or special chars, all lowercase. Must NOT contain a course code (e.g. do380, rh124), course ID (e.g. do380-4.18), or section identifier (e.g. ch02s06, 4.1, section 4).\"\n        }"
         )
@@ -1643,7 +1701,8 @@ For example:
 
         {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
         Compare the student's feedback with the excerpt (if any), and provide a detailed analysis of the issue.
-        Determine whether this is a real content defect, a platform/UI issue visible in the course page, or learner confusion caused by using theory content as if it were a guided exercise or lab.
+        Determine whether this is a real content defect, a platform/UI issue visible in the course page, learner confusion caused by using theory content as if it were a guided exercise or lab, or a Suggestion (an improvement idea or praise — e.g. please add a quiz — not a claim that something already on the page is wrong).
+        If the text is clearly a Suggestion, set reply_mode to acknowledge_suggestion, is_valid_issue false, and write jira_title as a short enhancement name and jira_description as an impersonal statement of the requested change (or of the praise).
         IMPORTANT: If the student's complaint involves files, directories, paths, or scripts that exist on the lab VM filesystem (not just in the guide text), you cannot confirm the issue from the guide alone. The lab start command may create or prepare files dynamically. In this case, explicitly state in your analysis that lab verification is required to confirm the claim, and do NOT present the student's suggested alternative as a confirmed fix.
         Remove from the response in the JSON any reference to titles or headings, as I already have that information.
 
@@ -1704,7 +1763,7 @@ For example:
         
         video_context = "The video player IS available on the page, so videos should be accessible." if video_available else "The video player button is NOT available on the page, which typically means videos for this course version are still being produced."
         
-        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "reply_mode": "one of: confirm_defect (real video defect), ask_more (not enough info), explain_expected (videos not yet produced), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up)", "jira_description": "impersonal technical problem statement — no raw learner wording, no PII, no course code, no section, no chapter references. Always generate.", "jira_title": "short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers."}'
+        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "reply_mode": "one of: confirm_defect (real video defect), ask_more (not enough info), explain_expected (videos not yet produced), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up), acknowledge_suggestion (please add a video or praise — not a defect report)", "jira_description": "impersonal technical problem statement — no raw learner wording, no PII, no course code, no section, no chapter references. Always generate.", "jira_title": "short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers."}'
         
         prompt_text = f"""
         You are an expert in Red Hat Training video content issues.
@@ -1724,6 +1783,8 @@ For example:
         - "subtitle_issue": Problems with subtitles (missing, incorrect, translation issues)
         - "technical_issue": Video player problems, bad cuts, audio sync issues
         - "other": Other video-related issues
+        
+        If the Learner is asking to add a video or praising the videos, not reporting that an existing video is wrong, set reply_mode to acknowledge_suggestion.
         
         Determine if a Jira ticket needs to be created:
         - If videos are not available (video player not present) AND the student is asking where videos are, this is "videos_not_ready" - NO Jira needed
@@ -1760,7 +1821,64 @@ For example:
         # Sanitize jira_title from LLM slippage
         if "jira_title" in parsed:
             parsed["jira_title"] = self._sanitize_jira_title(parsed.get("jira_title") or "")
-        return parsed
+        return self._normalize_content_analysis(parsed)
+
+    def analyze_suggestion(self, user_issue: str, guide_text: str = "", snow_info: dict | None = None) -> dict:
+        """Turn a Suggestion into Jira copy and acknowledge_suggestion reply_mode."""
+        self.logger("Analyzing Suggestion using LLM")
+        guide_block = ""
+        if (guide_text or "").strip():
+            guide_block = (
+                "Guide Text from the investigation page (use it to name what the page lacks; "
+                "do not restate chapter or section numbers):\n"
+                f"<guide_text>\n{guide_text}\n</guide_text>\n"
+            )
+        json_example = (
+            '{"analysis": "one or two sentences on whether this is an improvement idea or praise",'
+            ' "is_valid_issue": false,'
+            ' "suggested_correction": "",'
+            ' "summary": "short headline of the suggestion or praise",'
+            ' "reply_mode": "acknowledge_suggestion",'
+            ' "jira_description": "impersonal statement of the requested change, or of the praise when there is no change. No Learner narration, no course code, no section.",'
+            ' "jira_title": "short enhancement name or positive feedback — lowercase words only, no course code, course ID, or section"}'
+        )
+        prompt_text = f"""
+        You write Jira copy for a Suggestion: Feedback that is an improvement idea or praise, not a report of something broken.
+        {self._build_operational_context("content", snow_info)}
+        {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
+
+        The Learner's Feedback is:
+        <student_feedback>
+        {user_issue}
+        </student_feedback>
+
+        {guide_block}
+
+        Rules:
+        - reply_mode is acknowledge_suggestion unless the latest Learner Follow-up is a Resolution Follow-up (then acknowledge_resolved).
+        - Never use confirm_defect, teach, ask_more, lab_pending, or explain_expected.
+        - is_valid_issue is false.
+        - jira_title is a short enhancement name (e.g. add practical quiz) or "positive feedback" for praise. No course code, course ID, or section.
+        - jira_description is impersonal. For an idea, state the requested change and, when Guide Text is present, what the page lacks. For praise only, restate the praise impersonally. No "the Learner reports". No chapter/section/course in the body.
+        - suggested_correction is empty.
+
+        Return JSON:
+        {json_example}
+        {self._json_output_rules()}
+        """
+        response = self.ask_llm(prompt_text)
+        logging.getLogger(__name__).info(f"LLM Suggestion analysis response: {response}")
+        parsed = self._parse_llm_json(response, context="LLM suggestion analysis")
+        if not parsed:
+            parsed = {
+                "is_valid_issue": False,
+                "summary": "analysis parse error",
+                "suggested_correction": "",
+                "jira_title": "",
+                "jira_description": "",
+                "reply_mode": "acknowledge_suggestion",
+            }
+        return self._normalize_suggestion_analysis(parsed)
 
     def analyze_ssh_lab_access(self, user_issue: str, snow_info: dict | None = None) -> dict:
         """Analyze SSH Lab Access Feedback. Never a Defect."""
@@ -1852,7 +1970,7 @@ For example:
         "- An older 'it is fixed' does not override a newer report that the problem is back.\n"
         "- If the latest Follow-up both says the original issue is resolved AND raises a new problem, "
         "this is not a Resolution Follow-up — analyse the remaining claim with the usual modes.\n"
-        "- Do not use explain_expected, teach, or confirm_defect when acknowledge_resolved applies."
+        "- Do not use explain_expected, teach, confirm_defect, or acknowledge_suggestion when acknowledge_resolved applies."
     )
 
     # Per-mode reply instructions (#27)
@@ -1903,6 +2021,14 @@ For example:
             "- Do NOT recap their diagnosis, re-explain the cause, or give unsolicited advice.\n"
             "- Do NOT imply a Defect has been filed."
         ),
+        "acknowledge_suggestion": (
+            "A Suggestion: the Learner offered an improvement idea or praise, not a defect report.\n"
+            "- Thank them briefly and acknowledge that the idea or praise was received and will be considered.\n"
+            "- Do not ask for more information.\n"
+            "- Do not promise that the change will be made.\n"
+            "- Do NOT imply a Defect has been filed.\n"
+            "- Write 2-4 sentences in one short reply."
+        ),
     }
 
 
@@ -1925,7 +2051,8 @@ For example:
             reply_mode, cls._REPLY_MODE_INSTRUCTIONS["ask_more"]
         )
         resolved = reply_mode == "acknowledge_resolved"
-        notes_block = "" if resolved else communication_reply_notes
+        suggestion = reply_mode == "acknowledge_suggestion"
+        notes_block = "" if resolved or suggestion else communication_reply_notes
         ops_block = "" if resolved else operational_context
         analysis_block = ""
         if not resolved:
@@ -2764,12 +2891,29 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                     is_environment_issue = classification.get("is_environment_issue_ticket", False)
                     is_video_issue = classification.get("is_video_issue_ticket", False)
                     is_ssh_lab_access = classification.get("is_ssh_lab_access_ticket", False)
+                    is_suggestion = classification.get("is_suggestion_ticket", False)
                     analysis_input = snow_info.get("Description_en") or translated or full_description
 
                     if is_ssh_lab_access:
                         self.logger("SSH Lab Access Feedback — ROLE Lab Environment, no Defect")
                         analysis = self.analyze_ssh_lab_access(analysis_input, snow_info)
                         self._open_role_ssh_lab_workspace(snow_info, course_id)
+                    elif is_suggestion:
+                        self.logger("Suggestion — course page and Guide Text, no lab")
+                        chapter_section = self._goto_investigation_page(
+                            snow_info, course_id, chapter_section, environment
+                        )
+                        try:
+                            self.lab_mgr.select_lab_environment_tab("course")
+                        except Exception:
+                            pass
+                        guide_text = ""
+                        try:
+                            guide_text = self.fetch_guide_text_from_website()
+                            self.logger(f"Fetched guide text length: {len(guide_text)}")
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
+                        analysis = self.analyze_suggestion(analysis_input, guide_text, snow_info)
                     elif is_video_issue:
                         self.logger("Video issue detected - navigating to course page without starting lab")
                         chapter_section = self._goto_investigation_page(
@@ -2799,7 +2943,8 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                         analysis = self.analyze_environment_issue(analysis_input, snow_info)
 
                     # Lab verification on ROL — never for SSH Lab Access (ROLE path already ran)
-                    if not is_ssh_lab_access:
+                    # or Suggestion (no claim to reproduce in the Lab)
+                    if not is_ssh_lab_access and not is_suggestion:
                         if needs_lab:
                             self.logger("Lab verification needed - starting lab environment")
                             try:

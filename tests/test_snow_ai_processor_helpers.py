@@ -6,7 +6,7 @@ Seam: SnowAIProcessor static/class methods called directly without instantiation
 import pytest
 from lx_toolbox.core.snow_ai_processor import SnowAIProcessor
 
-VALID_CONTENT_MODES = {"confirm_defect", "teach", "ask_more", "lab_pending", "explain_expected", "acknowledge_resolved"}
+VALID_CONTENT_MODES = {"confirm_defect", "teach", "ask_more", "lab_pending", "explain_expected", "acknowledge_resolved", "acknowledge_suggestion"}
 VALID_ENV_MODES = {"confirm_defect", "explain_expected", "ask_more", "lab_pending", "acknowledge_resolved"}
 
 
@@ -101,6 +101,14 @@ class TestNormalizeContentAnalysis:
         result = self._norm({"reply_mode": "confirm_defect", "jira_title": "video_content_mismatch"})
         assert "_" not in result["jira_title"]
         assert result["jira_title"] == "video content mismatch"
+
+    def test_acknowledge_suggestion_passthrough(self):
+        result = self._norm({"reply_mode": "acknowledge_suggestion", "is_valid_issue": False})
+        assert result["reply_mode"] == "acknowledge_suggestion"
+
+    def test_alias_suggestion_resolves(self):
+        result = self._norm({"reply_mode": "suggestion", "is_valid_issue": False})
+        assert result["reply_mode"] == "acknowledge_suggestion"
 
     def test_output_mode_is_always_canonical(self):
         for mode in VALID_CONTENT_MODES:
@@ -624,6 +632,107 @@ class TestBuildStudentReplyPrompt:
         )
         assert screenshot_rule not in prompt
 
+    def test_acknowledge_suggestion_omits_generic_thank_notes(self):
+        prompt = self._prompt("acknowledge_suggestion")
+        assert _THANK_ORIGINAL_MARKER not in prompt
+
+    def test_acknowledge_suggestion_includes_mode_instructions(self):
+        prompt = self._prompt("acknowledge_suggestion")
+        assert "will be considered" in prompt.lower()
+        assert "Do not ask for more information" in prompt
+
+    def test_acknowledge_suggestion_keeps_analysis(self):
+        prompt = self._prompt("acknowledge_suggestion")
+        assert _ANALYSIS_MARKER in prompt
+
+
+# ---------------------------------------------------------------------------
+# Suggestion (ADR-0004)
+# ---------------------------------------------------------------------------
+
+class TestApplySuggestionClassification:
+    def test_suggestion_alone_clears_lab_verification(self):
+        result = SnowAIProcessor.apply_suggestion_classification({
+            "is_suggestion_ticket": True,
+            "is_content_issue_ticket": False,
+            "is_environment_issue_ticket": False,
+            "is_video_issue_ticket": False,
+            "is_ssh_lab_access_ticket": False,
+            "needs_lab_verification": True,
+        })
+        assert result["is_suggestion_ticket"] is True
+        assert result["needs_lab_verification"] is False
+
+    def test_broken_content_wins_over_suggestion(self):
+        result = SnowAIProcessor.apply_suggestion_classification({
+            "is_suggestion_ticket": True,
+            "is_content_issue_ticket": True,
+            "is_environment_issue_ticket": False,
+            "is_video_issue_ticket": False,
+            "is_ssh_lab_access_ticket": False,
+            "needs_lab_verification": True,
+        })
+        assert result["is_suggestion_ticket"] is False
+        assert result["is_content_issue_ticket"] is True
+
+    def test_ssh_wins_over_suggestion(self):
+        result = SnowAIProcessor.apply_suggestion_classification({
+            "is_suggestion_ticket": True,
+            "is_content_issue_ticket": False,
+            "is_environment_issue_ticket": False,
+            "is_video_issue_ticket": False,
+            "is_ssh_lab_access_ticket": True,
+            "needs_lab_verification": False,
+        })
+        assert result["is_suggestion_ticket"] is False
+        assert result["is_ssh_lab_access_ticket"] is True
+
+    def test_all_false_stays_not_a_suggestion(self):
+        result = SnowAIProcessor.apply_suggestion_classification({
+            "is_suggestion_ticket": False,
+            "is_content_issue_ticket": False,
+            "is_environment_issue_ticket": False,
+            "is_video_issue_ticket": False,
+            "is_ssh_lab_access_ticket": False,
+            "needs_lab_verification": False,
+        })
+        assert result["is_suggestion_ticket"] is False
+
+    def test_rht0010800_quiz_suggestion(self):
+        result = SnowAIProcessor.apply_suggestion_classification({
+            "is_suggestion_ticket": True,
+            "is_content_issue_ticket": False,
+            "is_environment_issue_ticket": False,
+            "is_video_issue_ticket": False,
+            "is_ssh_lab_access_ticket": False,
+            "needs_lab_verification": False,
+        })
+        assert result["is_suggestion_ticket"] is True
+
+
+class TestNormalizeSuggestionAnalysis:
+    def test_defaults_to_acknowledge_suggestion(self):
+        result = SnowAIProcessor._normalize_suggestion_analysis({})
+        assert result["reply_mode"] == "acknowledge_suggestion"
+        assert result["is_valid_issue"] is False
+
+    def test_keeps_jira_description(self):
+        result = SnowAIProcessor._normalize_suggestion_analysis({
+            "reply_mode": "acknowledge_suggestion",
+            "jira_description": "Add a practical quiz after the guided exercise.",
+        })
+        assert result["jira_description"] == "Add a practical quiz after the guided exercise."
+
+    def test_unknown_mode_becomes_acknowledge_suggestion(self):
+        result = SnowAIProcessor._normalize_suggestion_analysis({"reply_mode": "confirm_defect"})
+        assert result["reply_mode"] == "acknowledge_suggestion"
+
+    def test_acknowledge_resolved_passthrough(self):
+        result = SnowAIProcessor._normalize_suggestion_analysis({
+            "reply_mode": "acknowledge_resolved",
+        })
+        assert result["reply_mode"] == "acknowledge_resolved"
+
 
 class TestResolutionFollowUpAnalysisInstructions:
     def test_judges_latest_learner_follow_up(self):
@@ -860,4 +969,7 @@ class TestSkipJiraGate:
 
     def test_lab_pending_does_not_skip(self):
         assert not self._should_skip(False, "lab_pending")
+
+    def test_acknowledge_suggestion_does_not_skip(self):
+        assert not self._should_skip(False, "acknowledge_suggestion")
 
