@@ -26,6 +26,19 @@ class LabManager:
     # Interface type constants
     INTERFACE_OLD = "old"
     INTERFACE_NEW = "new"  # PF5 interface
+
+    # Workstation console. Machine count varies by course, so match the row
+    # named "workstation" rather than a fixed position.
+    # Current lab card: span.lab-card-vm-row__name + sibling console button.
+    # Older pages: table cell named workstation, button in td[3].
+    _WORKSTATION_OPEN_CONSOLE_XPATH = (
+        "//div[contains(concat(' ', normalize-space(@class), ' '), ' lab-card-vm-row ')"
+        " and .//span[contains(concat(' ', normalize-space(@class), ' '), ' lab-card-vm-row__name ')"
+        " and normalize-space()='workstation']]"
+        "//button[normalize-space()='Open Console']"
+        " | "
+        "//*[normalize-space(text())='workstation']/../td[3]/button[normalize-space()='Open Console']"
+    )
     
     def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None):
         self.config = config
@@ -1077,7 +1090,7 @@ class LabManager:
         # First wait for the workstation "Open Console" button to be available
         # This indicates the workstation is fully started and ready
         self.logger("Waiting for workstation 'Open Console' button to be available...")
-        workstation_open_console_xpath = "//*[text()='workstation']/../td[3]/button[text()='Open Console']"
+        workstation_open_console_xpath = self._WORKSTATION_OPEN_CONSOLE_XPATH
         try:
             workstation_button = WebDriverWait(self.driver, 400).until(
                 EC.element_to_be_clickable((By.XPATH, workstation_open_console_xpath))
@@ -1144,7 +1157,7 @@ class LabManager:
         self.driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(0.5)
 
-        workstation_open_console_xpath = "//*[text()='workstation']/../td[3]/button[text()='Open Console']"
+        workstation_open_console_xpath = self._WORKSTATION_OPEN_CONSOLE_XPATH
         try:
             handles_before_console = set(self.driver.window_handles)
 
