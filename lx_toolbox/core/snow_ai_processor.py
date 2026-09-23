@@ -326,9 +326,58 @@ class SnowAIProcessor:
         )
         return response
 
+    _MODELS_CORP_AUTH_STATUS_CODES = frozenset({401, 403})
+    _MODELS_CORP_AUTH_BODY_MARKERS = (
+        "expired",
+        "invalid api key",
+        "invalid_api_key",
+        "invalid user_key",
+        "user_key_invalid",
+        "authentication failed",
+        "unauthorized",
+        "invalid token",
+    )
+
+    @staticmethod
+    def _is_models_corp_credential_error(exc: BaseException) -> bool:
+        """True when Models.corp rejected the USER_KEY (expired, invalid, unauthorized)."""
+        response = getattr(exc, "response", None)
+        if response is None:
+            return False
+        status = getattr(response, "status_code", None)
+        if status in SnowAIProcessor._MODELS_CORP_AUTH_STATUS_CODES:
+            return True
+        if not isinstance(status, int) or status < 400 or status >= 500:
+            return False
+        text = (getattr(response, "text", None) or "").lower()
+        return any(marker in text for marker in SnowAIProcessor._MODELS_CORP_AUTH_BODY_MARKERS)
+
+    def _fallback_to_local_ollama(self, prompt: str, plain_text: bool, reason: str) -> str:
+        """Switch this process to local Ollama and retry the same prompt.
+
+        Models.corp USER_KEYs expire; once rejected, every later call would fail
+        the same way, so we stick with Ollama for the rest of the run.
+        """
+        logger = logging.getLogger(__name__)
+        if self.LLM_PROVIDER != "ollama":
+            logger.warning(
+                "Models.corp credential unusable (%s); falling back to local Ollama "
+                "(%s at %s). Refresh USER_KEY at https://developer.models.corp.redhat.com/",
+                reason,
+                self.OLLAMA_MODEL,
+                self.OLLAMA_HOST,
+            )
+            self.LLM_PROVIDER = "ollama"
+        return self._ask_ollama(prompt, plain_text=plain_text)
+
     def _ask_openai(self, prompt: str, plain_text: bool = False) -> str:
         """Call an OpenAI-compatible chat completions endpoint (e.g. granite-4.1-8b)."""
         logger = logging.getLogger(__name__)
+        if not (self.OPENAI_API_KEY or "").strip():
+            return self._fallback_to_local_ollama(
+                prompt, plain_text=plain_text, reason="USER_KEY is empty"
+            )
+
         messages = [{"role": "user", "content": prompt}]
         payload: dict = {
             "model": self.OPENAI_MODEL,
@@ -356,6 +405,12 @@ class SnowAIProcessor:
             resp.raise_for_status()
             data = resp.json()
         except requests.exceptions.RequestException as e:
+            if self._is_models_corp_credential_error(e):
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                reason = f"HTTP {status}" if status else str(e)
+                return self._fallback_to_local_ollama(
+                    prompt, plain_text=plain_text, reason=reason
+                )
             logger.error("Could not reach OpenAI-compatible API at %s: %s", self.OPENAI_BASE_URL, e)
             return ""
         except ValueError as e:
