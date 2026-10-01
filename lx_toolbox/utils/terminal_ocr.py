@@ -14,9 +14,26 @@ from PIL import Image, ImageFilter, ImageOps
 
 LOGGER = logging.getLogger(__name__)
 
+# GNOME Terminal draws a slashed zero. Tesseract reads that glyph as @, ®, or Ø
+# rather than 0, which drops bash lines like "real 0m29.904s".
+# Letter-shaped zeros. "@" and "®" are handled separately because tesseract
+# sometimes emits them *in addition to* a 0 for the same slashed-zero glyph.
+_OCR_LETTER_ZERO_TRANSLATION = str.maketrans({
+    "Ø": "0",
+    "ø": "0",
+    "Θ": "0",
+    "θ": "0",
+    "O": "0",
+    "o": "0",
+    "Q": "0",
+    "q": "0",
+})
+_OCR_SLASHED_ZERO_CHARS = set("@®©°")
 _REAL_DURATION_RE = re.compile(
-    r"(?im)\b(?:real|rea[l1i|])\s+(?P<minutes>[0-9OoQq]+)\s*m\s*(?P<seconds>[0-9OoQq]+(?:\s*[.,]\s*[0-9OoQq]+)?)\s*(?:s|5)?\b"
+    r"(?im)^real\s+(?P<minutes>[0-9]+)m(?P<seconds>[0-9]+(?:\.[0-9]+)?)s?\s*$"
 )
+_TIME_LAB_COMMAND_RE = re.compile(r"(?i)\btime\s+lab\b")
+_TIMING_PREFIX_RE = re.compile(r"(?i)^(rea[l1i|][a-z]*|user|sys)\b(.*)$")
 _DATE_LINE_RE = re.compile(
     r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+"
     r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+"
@@ -40,18 +57,26 @@ def parse_terminal_timing_text(text: str) -> ParsedTerminalTiming | None:
     parsed = ParsedTerminalTiming(raw_text=normalized_text)
 
     real_matches = list(_REAL_DURATION_RE.finditer(normalized_text))
-    if real_matches:
-        match = real_matches[-1]
+    time_commands = list(_TIME_LAB_COMMAND_RE.finditer(normalized_text))
+    # A later `time lab` with no `real` line under it has not finished.
+    # The previous command's timing is still on screen and is not this phase.
+    chosen_real = real_matches[-1] if real_matches else None
+    if chosen_real and time_commands and time_commands[-1].start() > chosen_real.end():
+        chosen_real = None
+
+    if chosen_real:
         try:
-            minutes = int(_normalize_duration_fragment(match.group("minutes")))
-            seconds = float(_normalize_duration_fragment(match.group("seconds")))
+            minutes = int(_normalize_duration_fragment(chosen_real.group("minutes")))
+            seconds = float(_normalize_duration_fragment(chosen_real.group("seconds")))
             parsed.real_seconds = (minutes * 60) + seconds
         except ValueError:
-            LOGGER.debug("Could not parse OCR duration from %r", match.group(0))
+            LOGGER.debug("Could not parse OCR duration from %r", chosen_real.group(0))
 
-    date_match = _DATE_LINE_RE.search(normalized_text)
-    if date_match:
-        parsed.started_at = date_match.group(0)
+    date_matches = list(_DATE_LINE_RE.finditer(normalized_text))
+    if chosen_real:
+        date_matches = [match for match in date_matches if match.start() < chosen_real.start()]
+    if date_matches:
+        parsed.started_at = date_matches[-1].group(0)
 
     if parsed.real_seconds is None and not parsed.started_at:
         return None
@@ -74,21 +99,36 @@ def parse_terminal_timing_from_screenshot(path: str | Path) -> ParsedTerminalTim
         LOGGER.debug("Skipping terminal OCR because tesseract is not installed.")
         return None
 
+    # The full frame is first. Its last `real` line is the lab command; cropped
+    # regions are only a fallback when that frame does not yield a duration.
+    # Concatenating regions lets an earlier `time` block win if a crop re-reads it.
+    chosen: ParsedTerminalTiming | None = None
     try:
         with Image.open(image_path) as image:
-            ocr_chunks: list[str] = []
-            for region in _iter_candidate_regions(image):
+            for index, region in enumerate(_iter_candidate_regions(image)):
                 ocr_text = _run_tesseract(region, tesseract_path)
-                if ocr_text.strip():
-                    ocr_chunks.append(ocr_text)
+                if not ocr_text.strip():
+                    continue
+                # A crop of an earlier `time` block must not override the full
+                # frame when the lab command on screen has not printed `real` yet.
+                if index == 0 and _lab_command_still_running(ocr_text):
+                    return parse_terminal_timing_text(ocr_text)
+                parsed = parse_terminal_timing_text(ocr_text)
+                if not parsed:
+                    continue
+                if parsed.real_seconds is not None:
+                    if chosen and chosen.started_at and not parsed.started_at:
+                        parsed.started_at = chosen.started_at
+                    return parsed
+                if chosen is None:
+                    chosen = parsed
+                elif parsed.started_at and not chosen.started_at:
+                    chosen.started_at = parsed.started_at
     except Exception as exc:
         LOGGER.debug("Could not OCR screenshot %s: %s", image_path, exc)
         return None
 
-    if not ocr_chunks:
-        return None
-
-    return parse_terminal_timing_text("\n".join(ocr_chunks))
+    return chosen
 
 
 def _normalize_ocr_text(text: str) -> str:
@@ -99,18 +139,48 @@ def _normalize_ocr_text(text: str) -> str:
             continue
         line = line.replace(",", ".")
         line = re.sub(r"\s+", " ", line)
-        line = re.sub(r"\brea[l1i|]\b", "real", line, flags=re.IGNORECASE)
-        timing_prefix = re.match(r"(?i)^(real|user|sys)\b(.*)$", line)
+        timing_prefix = _TIMING_PREFIX_RE.match(line)
         if timing_prefix:
-            prefix = timing_prefix.group(1).lower()
+            prefix_raw = timing_prefix.group(1).lower()
+            if prefix_raw.startswith("rea"):
+                prefix = "real"
+            elif prefix_raw.startswith("user"):
+                prefix = "user"
+            else:
+                prefix = "sys"
             body = _normalize_timing_line_body(timing_prefix.group(2))
             line = f"{prefix} {body}".strip()
         lines.append(line)
     return "\n".join(lines)
 
 
+def _lab_command_still_running(text: str) -> bool:
+    normalized_text = _normalize_ocr_text(text)
+    real_matches = list(_REAL_DURATION_RE.finditer(normalized_text))
+    time_commands = list(_TIME_LAB_COMMAND_RE.finditer(normalized_text))
+    if not time_commands:
+        return False
+    if not real_matches:
+        return True
+    return time_commands[-1].start() > real_matches[-1].end()
+
+
+def _translate_ocr_digits(value: str) -> str:
+    """Map slashed-zero OCR noise to 0, dropping a second read of the same glyph."""
+    translated = value.translate(_OCR_LETTER_ZERO_TRANSLATION)
+    output: list[str] = []
+    for char in translated:
+        if char in _OCR_SLASHED_ZERO_CHARS:
+            if output and output[-1] == "0":
+                continue
+            output.append("0")
+        else:
+            output.append(char)
+    return "".join(output)
+
+
 def _normalize_duration_fragment(value: str) -> str:
-    normalized = value.replace("O", "0").replace("o", "0").replace("Q", "0").replace("q", "0")
+    normalized = _translate_ocr_digits(value)
     normalized = normalized.replace(" ", "").replace(",", ".")
     if "." in normalized:
         whole, fraction = normalized.split(".", 1)
@@ -120,15 +190,25 @@ def _normalize_duration_fragment(value: str) -> str:
 
 
 def _normalize_timing_line_body(body: str) -> str:
-    normalized = body.replace(",", ".")
-    normalized = normalized.replace("O", "0").replace("o", "0").replace("Q", "0").replace("q", "0")
+    normalized = _translate_ocr_digits(body.replace(",", "."))
+    # "1" is sometimes read as l, I, or | inside the duration.
+    normalized = re.sub(r"(?<=\d)[lI|](?=\d|\s*\.)", "1", normalized)
+    normalized = re.sub(r"(?<=m)[lI|](?=\d|\s*\.)", "1", normalized)
+    # The minutes unit "m" is sometimes read as "n" (0n4.445s).
+    normalized = re.sub(r"(?<=\d)\s*n\s*(?=\d)", "m", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\s*([ms])\s*", r"\1", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"(?<=\d)\s+\.(?=\d)", ".", normalized)
-    normalized = re.sub(r"(?<=\.)\s+(?=\d)", "", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
+    # "8 . 438" and "8 .438" — the decimal point is tiny and gains spaces.
+    normalized = re.sub(r"(?<=\d)\s*\.\s*(?=\d)", ".", normalized)
+    # A dropped decimal point leaves a space: "28 569s" -> "28.569s".
+    normalized = re.sub(r"(?<=\d)\s+(?=\d{3}s\b)", ".", normalized, flags=re.IGNORECASE)
+    # "m7.261s" lost its leading zero.
+    normalized = re.sub(r"(?<!\d)m(?=\d)", "0m", normalized, flags=re.IGNORECASE)
     if "s" not in normalized.lower():
         normalized = re.sub(r"(\.\d{3})5$", r"\1s", normalized)
-    return normalized
+    # "42.721s5" — the extra 5 is a second guess at the trailing s.
+    normalized = re.sub(r"(s)5\b", r"\1", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"(s).*$", r"\1", normalized, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _iter_candidate_regions(image: Image.Image) -> list[Image.Image]:
