@@ -34,6 +34,14 @@ class JiraHandler:
     JIRA_BASE_URL = "https://redhat.atlassian.net"
     JIRA_DASHBOARD_URL = "https://redhat.atlassian.net/jira/your-work"
     JIRA_PROJECTS_URL = "https://redhat.atlassian.net/jira/software/c/projects/PTL/issues"
+    _PROFILE_TRIGGER_CSS = '[data-testid="atlassian-navigation--secondary-actions--profile--trigger"]'
+    # Notifications trigger is equally reliable and rendered earlier than the profile button.
+    _NOTIFICATIONS_TRIGGER_CSS = '[data-testid="atlassian-navigation--secondary-actions--notifications--menu-trigger"]'
+    _LOGIN_LINK_XPATH = (
+        '//a[contains(@href, "id.atlassian.com/login")] | '
+        '//a[normalize-space()="Log in"] | '
+        '//button[normalize-space()="Log in"]'
+    )
     
     def __init__(self, driver, wait: WebDriverWait, config: ConfigManager, logger=None):
         """
@@ -81,17 +89,35 @@ class JiraHandler:
         Returns:
             True if logged in, False otherwise
         """
+        if self._on_login_page():
+            return False
+        if self._has_login_link():
+            return False
+        if self._has_profile_trigger():
+            return True
         try:
             WebDriverWait(self.driver, timeout).until(
                 EC.presence_of_element_located((By.XPATH,
-                    '//button[contains(@aria-label, "@redhat.com")] | '
                     '//button[text()="Create"] | '
                     '//input[@placeholder="Search"]'
                 ))
             )
+            if self._on_login_page() or self._has_login_link():
+                return False
             return True
         except TimeoutException:
             return False
+
+    def _has_login_link(self) -> bool:
+        """True when Jira is showing a visible login affordance."""
+        return bool(self.driver.find_elements(By.XPATH, self._LOGIN_LINK_XPATH))
+
+    def _has_profile_trigger(self) -> bool:
+        """True when any authenticated Atlassian nav element is present."""
+        return (
+            bool(self.driver.find_elements(By.CSS_SELECTOR, self._PROFILE_TRIGGER_CSS))
+            or bool(self.driver.find_elements(By.CSS_SELECTOR, self._NOTIFICATIONS_TRIGGER_CSS))
+        )
     
     def _on_login_page(self) -> bool:
         """Check if the current URL indicates we're on an authentication page."""
@@ -149,16 +175,19 @@ class JiraHandler:
                     except TimeoutException:
                         pass
 
-                    # Check for "Create" button — indicates user is already logged in
-                    try:
-                        create_btn = WebDriverWait(self.driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, '//button/span[text()="Create"]'))
-                        )
-                        if create_btn:
-                            logging.getLogger(__name__).debug("Detected 'Create' button; Jira appears logged in. Skipping SSO.")
+                    # After clicking Continue, Atlassian either resumes the cached
+                    # session (redirects back to Jira) or forwards to Red Hat SSO.
+                    # Poll for up to 15 s so slow redirects don't trigger the prompt.
+                    for _tick in range(15):
+                        time.sleep(1)
+                        if self._is_logged_in(timeout=1):
+                            logging.getLogger(__name__).debug(
+                                "Detected authenticated Jira chrome after Atlassian redirect."
+                            )
                             return True
-                    except Exception as e:
-                        logging.getLogger(__name__).debug(f"Error checking for Jira 'Create' button: {e}")
+                        if any(d in (self.driver.current_url or "")
+                               for d in ("sso.redhat.com", "auth.redhat.com")):
+                            break  # arrived at Red Hat SSO — handle below
 
                     # After Atlassian redirects to Red Hat SSO (Keycloak), autofill username
                     try:
@@ -171,6 +200,9 @@ class JiraHandler:
                         )
                         return True
                     except TimeoutException:
+                        # One last chance: maybe the page settled as logged-in.
+                        if self._is_logged_in(timeout=3):
+                            return True
                         self._prompt_for_manual_login(
                             "Could not detect Red Hat SSO page. Please complete login manually."
                         )

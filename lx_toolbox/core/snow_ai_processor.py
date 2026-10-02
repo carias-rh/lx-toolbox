@@ -9,6 +9,7 @@ from html import escape
 from urllib.parse import quote
 
 import requests
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -487,6 +488,27 @@ class SnowAIProcessor:
             return ""
         safe = escape(text, quote=True)
         return f'<a href="{safe}">{safe}</a>'
+
+    @staticmethod
+    def _jira_description_editor_selector() -> str:
+        """Return a selector for the main Description editor in Jira create.
+
+        Jira currently renders several ProseMirror editors in the create dialog
+        with the same DOM id, so the Description field must be targeted by its
+        aria-label instead of by raw id.
+        """
+        return 'div[contenteditable="true"][aria-label^="Description area"]'
+
+    @staticmethod
+    def _jira_create_dialog_state(driver) -> str | None:
+        """Return whether Jira create is ready or blocked on authentication."""
+        if driver.find_elements(By.ID, 'summary-field'):
+            return "ready"
+        for dialog in driver.find_elements(By.XPATH, '//div[@role="dialog"]'):
+            text = (getattr(dialog, "text", "") or "").lower()
+            if "not authorized" in text or "please log in" in text:
+                return "unauthorized"
+        return None
 
     @staticmethod
     def _strip_location_from_title(title: str, course_code: str = "") -> str:
@@ -2442,6 +2464,18 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         """
         self.jira_handler.login(use_session=True)
 
+    def _open_background_tab(self, url: str) -> str:
+        """Open a background tab and return the new handle by identity."""
+        before = set(self.driver.window_handles)
+        self.driver.execute_script("window.open(arguments[0], '_blank');", url)
+        WebDriverWait(self.driver, 5).until(
+            lambda d: len(set(d.window_handles) - before) >= 1
+        )
+        new_handles = [h for h in self.driver.window_handles if h not in before]
+        if not new_handles:
+            raise RuntimeError(f"No new browser tab appeared for {url}")
+        return new_handles[-1]
+
     def prelogin_all(self, environment: str = "rol"):
         # ── Phase 1: parallel tab loading.
         #
@@ -2463,6 +2497,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             self.config.get_lab_base_url(environment)
             or "https://rol.redhat.com/rol/app/courses/"
         )
+        username = self.lab_mgr._get_credentials(environment)
 
         # Step 1 — first SNOW load
         self.driver.get(self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL)
@@ -2474,15 +2509,11 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         self.login_tab_handles = {}
 
         # Step 2 — fire ROL and Jira in background tabs (non-blocking)
-        self.driver.execute_script("window.open(arguments[0], '_blank');", self.jira_handler.JIRA_DASHBOARD_URL)
+        self.login_tab_handles['jira'] = self._open_background_tab(self.jira_handler.JIRA_DASHBOARD_URL)
         time.sleep(0.1)
-        self.driver.execute_script("window.open(arguments[0], '_blank');", rol_base_url + "rh124-10.0/pages/pr01")
-
-        # Capture handles (window.open is near-instant; wait briefly to be safe)
-        WebDriverWait(self.driver, 5).until(lambda d: len(d.window_handles) >= 3)
-        new_handles = [h for h in self.driver.window_handles if h != self.base_window_handle]
-        self.login_tab_handles['rol'] = new_handles[0]
-        self.login_tab_handles['jira'] = new_handles[1]
+        self.login_tab_handles['rol'] = self._open_background_tab(
+            rol_base_url + "rh124-10.0/pages/pr01"
+        )
 
 
         # ── Phase 2: login round-robin — SNOW → ROL → Jira.
@@ -2505,7 +2536,6 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             self.logger("ROL session already active")
         except:
             try:
-                username = self.lab_mgr._get_credentials(environment)
                 if username:
                     WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(
                         (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
@@ -2527,23 +2557,32 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
         # Jira — page has been loading since Phase 1. Check logged-in state
         # directly instead of re-navigating (which reloads the page).
+        # Use a longer timeout so slow tab loads don't fall through to the
+        # SSO prompt when the session is already valid.
         self.driver.switch_to.window(self.login_tab_handles['jira'])
-        if self.jira_handler._is_logged_in(timeout=1):
+        if self.jira_handler._is_logged_in(timeout=6):
             self.jira_handler._logged_in = True
             self.logger("Jira session already active")
-        else:
+        elif self.jira_handler._on_login_page():
+            # Tab landed on an Atlassian/SSO login page — do the SSO flow.
+            handled = False
             try:
-                WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(
-                    (By.XPATH, "//*[@aria-labelledby='username-uid1-label']")
-                )).send_keys(f"{username}@redhat.com")
-                WebDriverWait(self.driver, 2).until(
-                            EC.element_to_be_clickable((By.XPATH,
-                                '//*[@id="login-submit"] | '
-                                '//button[@type="submit"] | '
-                                '//span[text()="Continue"]/parent::button'
-                            ))).click()
-                self.logger("Jira session already active")
+                handled = self.jira_handler._attempt_sso_login(username=username)
             except Exception:
+                handled = False
+            if self.jira_handler._is_logged_in(timeout=5):
+                self.jira_handler._logged_in = True
+                self.logger("Jira session already active")
+            else:
+                self.login_jira()
+        else:
+            # Not on a login page but login markers not detected yet — the tab
+            # may still be rendering. Give it a few more seconds before
+            # triggering a full re-login (which reloads the page).
+            if self.jira_handler._is_logged_in(timeout=4):
+                self.jira_handler._logged_in = True
+                self.logger("Jira session already active")
+            else:
                 self.login_jira()
 
         # Return focus to ServiceNow tab.
@@ -2609,7 +2648,8 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 self._prefill_jira_attempt(snow_info, analysis, classification, _url)
                 return
             except Exception as e:
-                log.warning(f"Jira prefill attempt {attempt}/2 failed: {e}")
+                detail = str(e).strip() or type(e).__name__
+                log.warning(f"Jira prefill attempt {attempt}/2 failed: {detail}")
                 if attempt < 2:
                     log.info("Reloading Jira and retrying prefill…")
                     try:
@@ -2628,25 +2668,58 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
     def _prefill_jira_attempt(self, snow_info: dict, analysis: dict, classification: dict, url: str):
         log = logging.getLogger(__name__)
+        def _open_create_dialog():
+            create_btn = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH,
+                    '//button[text()="Create"] | '
+                    '//button[contains(@data-testid, "create-button")]'
+                ))
+            )
+            try:
+                create_btn.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", create_btn)
+
+        def _wait_for_create_dialog(timeout_seconds: int) -> str:
+            try:
+                state = WebDriverWait(self.driver, timeout_seconds).until(
+                    lambda d: self._jira_create_dialog_state(d)
+                )
+                return str(state)
+            except TimeoutException as e:
+                dialogs = []
+                for dialog in self.driver.find_elements(By.XPATH, '//div[@role="dialog"]'):
+                    text = " ".join(((dialog.text or "").split()))
+                    if text:
+                        dialogs.append(text[:160])
+                detail = ", ".join(dialogs) if dialogs else "no dialogs visible"
+                raise RuntimeError(
+                    f"Timed out waiting for Jira create dialog after {timeout_seconds}s "
+                    f"(url={self.driver.current_url}, state={detail})"
+                ) from e
+
+        def _open_and_wait_for_create_dialog() -> str:
+            _open_create_dialog()
+            try:
+                return _wait_for_create_dialog(8)
+            except RuntimeError:
+                log.info("Jira create dialog did not open after first click; retrying Create once")
+                _open_create_dialog()
+                return _wait_for_create_dialog(24)
+
         self.driver.get(url)
         self.driver.execute_script("document.body.style.zoom = '0.8'")
+        state = _open_and_wait_for_create_dialog()
+        if state == "unauthorized":
+            log.info("Jira create dialog requires login; retrying after Jira login")
+            self.jira_handler._logged_in = False
+            self.login_jira()
+            self.driver.get(url)
+            self.driver.execute_script("document.body.style.zoom = '0.8'")
+            state = _open_and_wait_for_create_dialog()
+            if state == "unauthorized":
+                raise RuntimeError("Jira create dialog still requires login after re-authentication")
 
-        # Click Create button in the top nav bar — raises on timeout to trigger retry
-        create_btn = WebDriverWait(self.driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH,
-                '//button[text()="Create"] | '
-                '//button[contains(@data-testid, "create-button")]'
-            ))
-        )
-        try:
-            create_btn.click()
-        except Exception:
-            self.driver.execute_script("arguments[0].click();", create_btn)
-
-        # Wait for the dialog to render — raises on timeout to trigger retry
-        WebDriverWait(self.driver, 30).until(
-            EC.presence_of_element_located((By.XPATH, '//input[@id="summary-field"]'))
-        )
         log.info("Jira create dialog loaded")
 
         # Change Work type to "Bug" if not already set.
