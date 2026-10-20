@@ -2,18 +2,20 @@ import time
 import re
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 # Assuming WebDriver exceptions like TimeoutException might be caught
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, NoSuchElementException
+from selenium.webdriver.common.keys import Keys
 
 from .base_selenium_driver import BaseSeleniumDriver
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger, reset_step_counter
 from ..utils.keyboard_handler import KeyboardHandler, print_status, clear_status_line
+from ..utils.terminal_ocr import parse_terminal_timing_from_screenshot
 
 
 class QAQuitException(Exception):
@@ -24,6 +26,33 @@ class LabManager:
     # Interface type constants
     INTERFACE_OLD = "old"
     INTERFACE_NEW = "new"  # PF5 interface
+
+    # Workstation console. Machine count varies by course, so match the row
+    # named "workstation" rather than a fixed position.
+    # Current lab card: span.lab-card-vm-row__name + sibling console button.
+    # Older pages: table cell named workstation, button in td[3].
+    _WORKSTATION_OPEN_CONSOLE_XPATH = (
+        "//div[contains(concat(' ', normalize-space(@class), ' '), ' lab-card-vm-row ')"
+        " and .//span[contains(concat(' ', normalize-space(@class), ' '), ' lab-card-vm-row__name ')"
+        " and normalize-space()='workstation']]"
+        "//button[normalize-space()='Open Console']"
+        " | "
+        "//*[normalize-space(text())='workstation']/../td[3]/button[normalize-space()='Open Console']"
+    )
+
+    # PF5 lab-card footer controls. DOM order is power then lifecycle
+    # (Start/Stop, then Create/Delete); callers still expect lifecycle first.
+    _LAB_CREATE_ANALYTICS_ID = "create-vt-dash-lp"
+    _LAB_DELETE_ANALYTICS_ID = "delete-vt-dash-lp"
+    _LAB_START_ANALYTICS_ID = "start-vt-dash-lp"
+    _LAB_STOP_ANALYTICS_ID = "stop-vt-dash-lp"
+    _LAB_LIFECYCLE_ANALYTICS_IDS = frozenset({_LAB_CREATE_ANALYTICS_ID, _LAB_DELETE_ANALYTICS_ID})
+    _LAB_POWER_ANALYTICS_IDS = frozenset({_LAB_START_ANALYTICS_ID, _LAB_STOP_ANALYTICS_ID})
+    _LAB_ACTION_BUTTONS_XPATH = (
+        '//*[@id="tab-course-lab-environment"]//*[@type="button"]'
+        '[contains(text(), "Creat") or contains(text(), "Delet")'
+        ' or contains(text(), "Start") or contains(text(), "Stop")]'
+    )
     
     def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None):
         self.config = config
@@ -503,50 +532,81 @@ class LabManager:
             except Exception as e:
                 raise Exception(f"Could not select tab '{tab_name}' in old interface: {e}")
             
+    @staticmethod
+    def _lab_button_text(button) -> str | None:
+        if button is None or not button.text:
+            return None
+        text = button.text.strip().upper()
+        return text or None
+
+    def _assign_lab_buttons(self, buttons) -> tuple:
+        """
+        Map lab action buttons to (lifecycle, power) regardless of DOM order.
+
+        Callers treat first as Create/Delete and second as Start/Stop. The old
+        table UI already used that order; PF5 puts Start/Stop first.
+        """
+        if not buttons:
+            return None, None, None, None
+
+        lifecycle = {}
+        power = {}
+        for button in buttons:
+            analytics_id = button.get_attribute("data-analytics-id")
+            if analytics_id in self._LAB_LIFECYCLE_ANALYTICS_IDS:
+                lifecycle[analytics_id] = button
+            elif analytics_id in self._LAB_POWER_ANALYTICS_IDS:
+                power[analytics_id] = button
+
+        if lifecycle or power:
+            first_button = (
+                lifecycle.get(self._LAB_DELETE_ANALYTICS_ID)
+                or lifecycle.get(self._LAB_CREATE_ANALYTICS_ID)
+            )
+            second_button = (
+                power.get(self._LAB_STOP_ANALYTICS_ID)
+                or power.get(self._LAB_START_ANALYTICS_ID)
+            )
+        else:
+            first_button = buttons[0] if len(buttons) >= 1 else None
+            second_button = buttons[1] if len(buttons) >= 2 else None
+
+        return (
+            first_button,
+            self._lab_button_text(first_button),
+            second_button,
+            self._lab_button_text(second_button),
+        )
+
     def _get_lab_buttons_by_position(self, timeout: int = 3) -> tuple:
         """
-        Get lab action buttons by their position (first and second).
-        
-        Lab button positions indicate state:
+        Get lab action buttons by semantic role (lifecycle, then power).
+
+        Lab button roles indicate state:
         - No lab: first=CREATE, second=None
         - Creating: first=CREATING, second=STARTING
         - Running: first=DELETE, second=STOP
         - Stopped: first=DELETE, second=START
         - Stopping: first=DELETE, second=STOPPING
         - Deleting: first=DELETING, second=None
-        
+
+        On the PF5 lab card the visible order is reversed (Start/Stop then
+        Create/Delete). Analytics IDs are used to restore the roles above.
+
         Returns:
             Tuple of (first_button, first_text, second_button, second_text)
             Any value may be None if button doesn't exist.
         """
-        first_button = None
-        first_text = None
-        second_button = None
-        second_text = None
-        
         try:
-            # Get all action buttons in the lab environment tab
-            # These are the main action buttons (Create, Delete, Start, Stop, etc.)
-            buttons_xpath = '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Creat") or contains(text(), "Delet") or contains(text(), "Start") or contains(text(), "Stop")]'
-            
             buttons = WebDriverWait(self.driver, timeout).until(
-                EC.presence_of_all_elements_located((By.XPATH, buttons_xpath))
+                EC.presence_of_all_elements_located((By.XPATH, self._LAB_ACTION_BUTTONS_XPATH))
             )
-            
-            if buttons and len(buttons) >= 1:
-                first_button = buttons[0]
-                first_text = first_button.text.strip().upper() if first_button.text else None
-                
-            if buttons and len(buttons) >= 2:
-                second_button = buttons[1]
-                second_text = second_button.text.strip().upper() if second_button.text else None
-                
+            return self._assign_lab_buttons(buttons)
         except TimeoutException:
-            pass
+            return None, None, None, None
         except Exception as e:
             logging.getLogger(__name__).debug(f"Error getting lab buttons by position: {e}")
-        
-        return first_button, first_text, second_button, second_text
+            return None, None, None, None
 
     def _get_lab_action_button(self, action_texts: list[str], timeout: int = 1, position: str = None):
         """
@@ -555,7 +615,7 @@ class LabManager:
         Args:
             action_texts: List of button text values to search for (case-insensitive match)
             timeout: Maximum seconds to wait for button
-            position: Optional "first" or "second" to restrict search to specific position
+            position: Optional "first" (Create/Delete) or "second" (Start/Stop)
             
         Returns:
             Tuple of (button_element, button_text) or (None, None) if not found
@@ -864,7 +924,7 @@ class LabManager:
                         f"Unknown button_xpath_part '{button_xpath_part}' for new interface"
                     )
                     return
-                adj_button = WebDriverWait(self.driver, 10).until(
+                adj_button = WebDriverWait(self.driver, 2).until(
                     EC.element_to_be_clickable((By.XPATH, button_xpath))
                 )
                 for _ in range(times):
@@ -1055,6 +1115,33 @@ class LabManager:
             except Exception:
                 pass
 
+    def _apply_terminal_timing_from_screenshot(self, exercise, phase: str, screenshot_path: str, fallback_duration: float):
+        """Prefer the shell's `time real` output when OCR can parse the screenshot."""
+        duration_attr = f"{phase}_duration_secs"
+        source_attr = f"{phase}_duration_source"
+        started_at_attr = f"{phase}_started_at"
+
+        setattr(exercise, duration_attr, fallback_duration)
+        setattr(exercise, source_attr, "manual")
+        setattr(exercise, started_at_attr, "")
+
+        parsed_timing = parse_terminal_timing_from_screenshot(screenshot_path)
+        if not parsed_timing:
+            return
+
+        if parsed_timing.started_at:
+            setattr(exercise, started_at_attr, parsed_timing.started_at)
+
+        if parsed_timing.real_seconds is not None:
+            setattr(exercise, duration_attr, parsed_timing.real_seconds)
+            setattr(exercise, source_attr, "ocr")
+            logging.getLogger(__name__).debug(
+                "Parsed %s duration %.3fs from screenshot %s",
+                phase,
+                parsed_timing.real_seconds,
+                screenshot_path,
+            )
+
     def open_workstation_console(self, course_id: str, tune_workstation: bool = False):
         """
         Opens the workstation console for a course and optionally sets up the environment.
@@ -1069,16 +1156,16 @@ class LabManager:
         self._course_tab_handle = self.driver.current_window_handle
                 
         # Scroll to top and zoom out to ensure button is visible
-        self.driver.execute_script("document.body.style.zoom = '0.70'")
+        self.driver.execute_script("document.body.style.zoom = '0.85'")
         self.driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(0.5)
         
         # First wait for the workstation "Open Console" button to be available
         # This indicates the workstation is fully started and ready
         self.logger("Waiting for workstation 'Open Console' button to be available...")
-        workstation_open_console_xpath = "//*[text()='workstation']/../td[3]/button[text()='Open Console']"
+        workstation_open_console_xpath = self._WORKSTATION_OPEN_CONSOLE_XPATH
         try:
-            workstation_button = WebDriverWait(self.driver, 300).until(
+            workstation_button = WebDriverWait(self.driver, 400).until(
                 EC.element_to_be_clickable((By.XPATH, workstation_open_console_xpath))
             )
         except TimeoutException:
@@ -1088,6 +1175,7 @@ class LabManager:
         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", workstation_button)
         time.sleep(0.5)
         self.driver.execute_script("arguments[0].click();", workstation_button)
+        self.driver.execute_script("document.body.style.zoom = '0.85'")
         
         # Wait for new window/tab and switch to it
         WebDriverWait(self.driver, 30).until(EC.number_of_windows_to_be(2))
@@ -1099,29 +1187,8 @@ class LabManager:
                 break
         self.driver.switch_to.window(self._console_tab_handle)
 
-        # Open virtual keyboard in the console (with retry and verification)
-        max_keyboard_retries = 3
-        
-        for attempt in range(max_keyboard_retries):
-            try:
-                show_keyboard_button = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="showKeyboard"]'))
-                )
-                show_keyboard_button.click()
-                time.sleep(2.5)
-                
-                # Verify keyboard is enabled by checking if Esc key is visible
-                self._click_virtual_keyboard_key("Esc")
-                break
-            except TimeoutException:
-                if attempt < max_keyboard_retries - 1:
-                    logging.getLogger(__name__).debug(f"Keyboard not enabled after attempt {attempt + 1}, retrying...")
-                    time.sleep(1)
-                else:
-                    logging.getLogger(__name__).error("Failed to enable virtual keyboard after multiple attempts. Enable manually in the qa console tab.")
+        self._enable_virtual_keyboard_in_console()
 
-
-        
         if tune_workstation:
             self._tune_workstation()
 
@@ -1163,7 +1230,7 @@ class LabManager:
         self.driver.execute_script("window.scrollTo(0, 0);")
         time.sleep(0.5)
 
-        workstation_open_console_xpath = "//*[text()='workstation']/../td[3]/button[text()='Open Console']"
+        workstation_open_console_xpath = self._WORKSTATION_OPEN_CONSOLE_XPATH
         try:
             handles_before_console = set(self.driver.window_handles)
 
@@ -1247,23 +1314,79 @@ class LabManager:
                 self.driver.switch_to.window(handles[1])
                 self._console_tab_handle = handles[1]
 
-    def _click_virtual_keyboard_key(self, key_name: str, timeout: int = 10):
+    def _enable_virtual_keyboard_in_console(self, max_retries: int = 3) -> None:
         """
-        Click a key on the virtual keyboard.
-        
-        Args:
-            key_name: The name of the key (e.g., "Enter", "Tab", "Esc", "Alt", "F2")
-            timeout: Maximum time to wait for the key to be clickable
+        Open the virtual keyboard in the console.
+        Retries on timeout; raises on final failure so callers do not continue
+        trying to press keys against a keyboard that never opened.
+        """
+
+        for attempt in range(max_retries):
+            try:
+                self.switch_to_console_tab()
+                show_keyboard_button = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR,
+                        'button:has(svg.lucide-keyboard), '
+                        'button[aria-label="Show keyboard"], '
+                        'button[title="Show keyboard"]'
+                    ))
+                )
+                show_keyboard_button.click()
+                time.sleep(0.5)
+                return
+
+            except TimeoutException:
+                if attempt < max_retries - 1:
+                    logging.getLogger(__name__).debug(
+                        f"Keyboard not enabled after attempt {attempt + 1}, retrying..."
+                    )
+                    time.sleep(1)
+                else:
+                    raise RuntimeError(
+                        "Failed to enable virtual keyboard after multiple attempts. "
+                        "Enable manually in the qa console tab."
+                    )
+
+    def _disable_virtual_keyboard_in_console(self):
+        """
+        Disable the virtual keyboard in the console if it is open.
         """
         try:
-            key_xpath = f'//div[@class="guac-keyboard-group"]//div[text()="{key_name}"]'
-            key_element = WebDriverWait(self.driver, timeout).until(
-                EC.element_to_be_clickable((By.XPATH, key_xpath))
+            close_keyboard_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, '//button[@title="Close"]'))
             )
-            key_element.click()
-            time.sleep(0.3)
+            close_keyboard_button.click()
+            time.sleep(0.5)
         except TimeoutException:
-            logging.getLogger(__name__).debug(f"Could not find virtual keyboard key: {key_name}")
+            logging.getLogger(__name__).debug(f"Could not find close keyboard button")
+            pass
+
+    def _click_virtual_keyboard_key(self, key_name: str | Sequence[str], timeout: int = 10):
+        """
+        Click one or more keys on the virtual keyboard.
+        
+        Args:
+            key_name: A key name or key combination (e.g., "Enter", ("Alt", "F2"), ("Ctrl", "l"))
+            timeout: Maximum time to wait for each key to be clickable
+        """
+        keys_to_click = [key_name] if isinstance(key_name, str) else list(key_name)
+        if not keys_to_click:
+            raise ValueError("At least one virtual keyboard key must be provided.")
+
+        key_aliases = {"Enter": "↵", "Return": "↵"}
+
+        try:
+            for current_key in keys_to_click:
+                current_key = key_aliases.get(current_key, current_key)
+                key_xpath = f'//button[normalize-space()="{current_key}"]'
+                key_element = WebDriverWait(self.driver, timeout).until(
+                    EC.element_to_be_clickable((By.XPATH, key_xpath))
+                )
+                key_element.click()
+                time.sleep(0.2)
+        except TimeoutException:
+            combo_name = " + ".join(keys_to_click)
+            logging.getLogger(__name__).debug(f"Could not find virtual keyboard key: {combo_name}")
             raise
 
     def _login_as_student(self):
@@ -1272,7 +1395,7 @@ class LabManager:
         """
         self._click_virtual_keyboard_key("Esc")
         self._click_virtual_keyboard_key("Esc")
-        self._click_virtual_keyboard_key("Enter")
+        self._click_virtual_keyboard_key("↵")
         time.sleep(2.5)
 
         self.introduce_command_to_console('student', auto_enter=True)
@@ -1281,11 +1404,8 @@ class LabManager:
         """
         Opens a terminal.
         """
-        self._click_virtual_keyboard_key("Esc")
-        self._click_virtual_keyboard_key("Super")
-        self._click_virtual_keyboard_key("Super")
-        time.sleep(0.5)
-        self.introduce_command_to_console('terminal', auto_enter=True)
+        self._click_virtual_keyboard_key(("Alt", "F2"))
+        self.introduce_command_to_console('gnome-terminal', auto_enter=True)
 
 
     def _tune_workstation(self):
@@ -1308,29 +1428,25 @@ class LabManager:
         
         # Run the ansible playbook
         self.introduce_command_to_console('cd classroom_env; ansible-playbook playbook.yml', auto_enter=True)
-        time.sleep(60)
-        # Confirm reboot request
-        self.introduce_command_to_console('yes', auto_enter=True)
-        time.sleep(60)
+
+        try:
+            retry_connection_button = WebDriverWait(self.driver, 60).until(
+                EC.element_to_be_clickable((By.XPATH, '//button[text()="Retry Connection"]'))
+            )
+            retry_connection_button.click()
+            time.sleep(0.5)
+        except TimeoutException:
+            pass
 
         self._login_as_student()
         self._open_terminal()
         
         self.logger("Lab environment tuned!")
 
-    def _wait_for_command_to_paste(self, command: str, min_wait: float = 0.5):
-        """Wait a proportional time based on the command length for pasting to complete.
-        
-        Args:
-            command: The command being pasted
-            min_wait: Minimum wait time in seconds (default 0.5s to allow modal to close)
-        """
-        calculated_wait = len(command) * 0.1
-        time.sleep(max(calculated_wait, min_wait))
 
     def introduce_command_to_console(self, command: str, auto_enter: bool = True):
         """
-        Introduces a command to the console using the Guacamole "Send Text to Client" dialog.
+        Introduces a command to the console using the "Enter large text" dialog.
 
         Args:
             command: The command to send
@@ -1339,93 +1455,93 @@ class LabManager:
         if not command:
             return
 
-        _log = logging.getLogger(__name__)
         short_cmd = command[:60] + ("..." if len(command) > 60 else "")
+        textarea_xpath = (
+            '//textarea[contains(@placeholder, "Type or paste text here")]'
+            ' | //*[@id="root"]/div/div[3]/div/div[2]/textarea'
+        )
 
         def _close_dialog_if_open():
             """Best-effort dialog cleanup so the UI is never left in a broken state."""
             try:
                 close_btn = self.driver.find_element(
-                    By.XPATH,
-                    '//*[@id="sendTextDialog"]//button[contains(@class,"close") or contains(text(),"Close")]'
-                    ' | //button[@data-dismiss="modal"]'
+                    By.CSS_SELECTOR,
+                    'button[aria-label="Close"], button[title="Close"], button:has(svg.lucide-x)'
                 )
                 self.driver.execute_script("arguments[0].click();", close_btn)
             except Exception:
-                pass
+                try:
+                    self.driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+                except Exception:
+                    pass
 
-        # --- Step 1: Open the "Send Text to Client" dialog ---
+        # --- Step 1: Open the "Enter large text" dialog ---
         try:
-            send_text_dialog_button = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="showSendTextDialog"]'))
+            send_text_button = WebDriverWait(self.driver, 3).until(
+                EC.element_to_be_clickable((By.XPATH, '//button[@aria-label="Enter large text"]'))
             )
-            send_text_dialog_button.click()
+            send_text_button.click()
+            time.sleep(0.15)
         except TimeoutException:
-            _log.error(f"[console] Step 1 FAILED: 'Send Text' button not found within 10s (cmd: {short_cmd})")
+            logging.getLogger(__name__).error(f"[console] Step 1 FAILED: 'Enter large text' button not found within 10s (cmd: {short_cmd})")
             return
         except Exception as e:
-            _log.error(f"[console] Step 1 FAILED: unexpected error clicking dialog button: {e} (cmd: {short_cmd})")
+            logging.getLogger(__name__).error(f"[console] Step 1 FAILED: unexpected error clicking dialog button: {e} (cmd: {short_cmd})")
             return
 
-        # --- Step 2: Wait for modal and find the textarea ---
+        # --- Step 2: Find the textarea ---
         try:
-            # Give the Bootstrap modal animation time to complete
-            WebDriverWait(self.driver, 5).until(
-                EC.visibility_of_element_located((By.XPATH, '//*[@id="sendTextInput"]'))
-            )
-            text_input_area = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="sendTextInput"]'))
+            text_input_area = WebDriverWait(self.driver, 3).until(
+                EC.element_to_be_clickable((By.XPATH, textarea_xpath))
             )
         except TimeoutException:
-            _log.error(f"[console] Step 2 FAILED: textarea #sendTextInput not visible/clickable after dialog open (cmd: {short_cmd})")
+            logging.getLogger(__name__).error(f"[console] Step 2 FAILED: textarea not visible/clickable after dialog open (cmd: {short_cmd})")
             _close_dialog_if_open()
             return
         except Exception as e:
-            _log.error(f"[console] Step 2 FAILED: unexpected error finding textarea: {e} (cmd: {short_cmd})")
+            logging.getLogger(__name__).error(f"[console] Step 2 FAILED: unexpected error finding textarea: {e} (cmd: {short_cmd})")
             _close_dialog_if_open()
             return
 
-        # --- Step 3: Type the command ---
+        # --- Step 3: Paste the command ---
         try:
+            text_input_area.click()
             text_input_area.clear()
             text_input_area.send_keys(command)
         except Exception as e:
-            _log.error(f"[console] Step 3 FAILED: could not type into textarea: {e} (cmd: {short_cmd})")
+            logging.getLogger(__name__).error(f"[console] Step 3 FAILED: could not type into textarea: {e} (cmd: {short_cmd})")
             _close_dialog_if_open()
             return
 
-        # --- Step 4: Click Send ---
+        # --- Step 4: Send via Ctrl+Enter (dialog placeholder tip) ---
         try:
-            send_text_button = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="sendTextButton"]'))
-            )
-            send_text_button.click()
-        except TimeoutException:
-            _log.error(f"[console] Step 4 FAILED: 'Send' button #sendTextButton not clickable (cmd: {short_cmd})")
-            _close_dialog_if_open()
-            return
+            text_input_area.send_keys(Keys.CONTROL + Keys.ENTER)
         except Exception as e:
-            _log.error(f"[console] Step 4 FAILED: unexpected error clicking Send: {e} (cmd: {short_cmd})")
-            _close_dialog_if_open()
-            return
+            logging.getLogger(__name__).warning(f"[console] Step 4: Ctrl+Enter failed ({e}); trying Send button (cmd: {short_cmd})")
+            try:
+                send_button = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "Send")]'))
+                )
+                send_button.click()
+            except Exception as e_send:
+                logging.getLogger(__name__).error(f"[console] Step 4 FAILED: could not send text: {e_send} (cmd: {short_cmd})")
+                _close_dialog_if_open()
+                return
 
-        # Wait proportional to command length for VNC session to receive the text
-        self._wait_for_command_to_paste(command)
-
-        # --- Step 5: Wait for modal backdrop to close ---
+        # --- Step 5: Wait for the text dialog to close ---
         try:
             WebDriverWait(self.driver, 5).until(
-                EC.invisibility_of_element_located((By.CSS_SELECTOR, ".modal-backdrop"))
+                EC.invisibility_of_element_located((By.XPATH, textarea_xpath))
             )
         except TimeoutException:
-            _log.debug("[console] Step 5: modal backdrop still present after Send — continuing anyway")
+            logging.getLogger(__name__).debug("[console] Step 5: text dialog still present after Send — continuing anyway")
 
         # --- Step 6: Press Enter on the virtual keyboard ---
         if auto_enter:
             try:
-                self._click_virtual_keyboard_key("Enter")
+                self._click_virtual_keyboard_key("↵")
             except Exception as e_enter:
-                _log.warning(f"[console] Step 6: could not press Enter key: {e_enter} (cmd: {short_cmd})")
+                logging.getLogger(__name__).warning(f"[console] Step 6: could not press Enter key: {e_enter} (cmd: {short_cmd})")
 
     def click_on_show_solution_buttons(self):
         """Click all 'Show Solution' buttons on the current page, starting from the bottom.
@@ -2055,9 +2171,7 @@ class LabManager:
         # Lab start/setup commands
         if re.match(r"lab .*start", command) or re.match(r"lab .*setup", command):
             # Ctrl+L to clear the terminal screen via the virtual keyboard
-            self._click_virtual_keyboard_key("Ctrl")
-            self._click_virtual_keyboard_key("l")
-            self._click_virtual_keyboard_key("Ctrl")  # Release Ctrl
+            self._click_virtual_keyboard_key(("Ctrl", "l"))
             time.sleep(0.5)
             command = "cd; date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
@@ -2072,7 +2186,7 @@ class LabManager:
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
                     ex.start_screenshot = path
-                    ex.start_duration_secs = duration
+                    self._apply_terminal_timing_from_screenshot(ex, "start", path, duration)
                 self._qa_report.save()
             return True
             
@@ -2091,7 +2205,7 @@ class LabManager:
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
                     ex.grade_screenshot = path
-                    ex.grade_duration_secs = duration
+                    self._apply_terminal_timing_from_screenshot(ex, "grade", path, duration)
 
             # Prompt for PASS/FAIL (default: PASS)
             if self._keyboard_handler:
@@ -2123,7 +2237,7 @@ class LabManager:
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
                     ex.finish_screenshot = path
-                    ex.finish_duration_secs = duration
+                    self._apply_terminal_timing_from_screenshot(ex, "finish", path, duration)
 
                     # Guided Exercises have no grade script — prompt for PASS/FAIL here
                     if not ex.grade_result:
@@ -2248,8 +2362,14 @@ class LabManager:
             return True
             
         # OC create/apply with -f or -k commands
-        if ("oc create" in command or "oc apply" in command) and (" -f " in command or " -k " in command):
+        if ("oc create" in command or "oc apply" in command or "oc replace" in command) and (" -f " in command or " -k " in command):
             self._prompt_user_to_continue("when the yaml file has been saved.")
+            self.introduce_command_to_console(command, auto_enter=True)
+            return True
+
+        # Helm install commands
+        if "helm install" in command or "helm upgrade" in command:
+            self._prompt_user_to_continue("when the helm chart has been installed.")
             self.introduce_command_to_console(command, auto_enter=True)
             return True
             
@@ -2357,8 +2477,11 @@ class LabManager:
                 except QAQuitException:
                     self.logger("QA quit requested by user.")
                     break
-                except Exception as e:
-                    logging.getLogger(__name__).error(f"Error during QA of {chapter_section}: {e}")
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "Error during QA of %s",
+                        chapter_section,
+                    )
                     self._prompt_user_to_continue(f"after handling error in {chapter_section}.")
             
             if self._qa_quit_requested:
@@ -2432,28 +2555,36 @@ class LabManager:
             print(f"\n$ {command}")
             if command_num < total_commands:
                 print('-------------------------------------------------')
-            
-            # Check if this is a special command that needs specific handling
-            if not self._handle_special_command(command):
-                # Regular command - just execute it
-                self.introduce_command_to_console(command, auto_enter=True)
 
-            # Mid-exercise screenshot (proof of QA execution)
-            if not mid_screenshot_taken and i >= mid_command_index and self._qa_report and self._current_exercise_section:
-                path = self._qa_report.screenshot_path(self._current_exercise_section, "mid")
-                self._screenshot_monitor_console(path)
-                ex = self._qa_report.get_exercise(self._current_exercise_section)
-                if ex:
-                    ex.mid_screenshot = path
-                self._qa_report.save()
-                mid_screenshot_taken = True
+            try:
+                # Check if this is a special command that needs specific handling
+                if not self._handle_special_command(command):
+                    # Regular command - just execute it
+                    self.introduce_command_to_console(command, auto_enter=True)
 
-            # Interactive delay with keyboard checking
-            command_delay = self.config.get("QA", "command_delay_seconds", 3)
-            if isinstance(command_delay, str):
-                command_delay = int(command_delay)
-            
-            self._interactive_delay(command_delay, command_num, total_commands)
+                # Mid-exercise screenshot (proof of QA execution)
+                if not mid_screenshot_taken and i >= mid_command_index and self._qa_report and self._current_exercise_section:
+                    path = self._qa_report.screenshot_path(self._current_exercise_section, "mid")
+                    self._screenshot_monitor_console(path)
+                    ex = self._qa_report.get_exercise(self._current_exercise_section)
+                    if ex:
+                        ex.mid_screenshot = path
+                    self._qa_report.save()
+                    mid_screenshot_taken = True
+
+                # Interactive delay with keyboard checking
+                command_delay = self.config.get("QA", "command_delay_seconds", 1.5)
+                if isinstance(command_delay, str):
+                    command_delay = int(command_delay)
+
+                self._interactive_delay(command_delay, command_num, total_commands)
+            except QAQuitException:
+                raise
+            except Exception as e:
+                raise RuntimeError(
+                    f"QA command {command_num}/{total_commands} failed in "
+                    f"{chapter_section}: {command}"
+                ) from e
 
         clear_status_line()
         self.logger(f"Finished QA for {course_id} - {chapter_section}")

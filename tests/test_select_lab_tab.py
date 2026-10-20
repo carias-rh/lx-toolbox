@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from selenium.common.exceptions import ElementClickInterceptedException
 
 from lx_toolbox.core.lab_manager import LabManager

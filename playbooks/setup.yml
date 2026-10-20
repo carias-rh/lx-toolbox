@@ -25,6 +25,8 @@
           - chromedriver
           - asciidoctor
           - pandoc
+          - tesseract
+          - tesseract-langpack-eng
         state: present
       tags: install
 

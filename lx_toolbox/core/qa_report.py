@@ -30,6 +30,12 @@ class ExerciseResult:
     start_duration_secs: float = 0.0
     grade_duration_secs: float = 0.0
     finish_duration_secs: float = 0.0
+    start_duration_source: str = "manual"
+    grade_duration_source: str = "manual"
+    finish_duration_source: str = "manual"
+    start_started_at: str = ""
+    grade_started_at: str = ""
+    finish_started_at: str = ""
     notes: str = ""
 
 
@@ -152,14 +158,17 @@ class QAReport:
 
     @staticmethod
     def _format_duration(seconds: float) -> str:
-        """Format seconds into a human-readable string like '1m 30s' or '45s'."""
+        """Format seconds into a human-readable string, truncating fractional seconds."""
         if seconds <= 0:
             return ""
-        minutes = int(seconds) // 60
-        secs = int(seconds) % 60
+
+        whole_seconds = int(seconds)
+        minutes = whole_seconds // 60
+        secs = whole_seconds % 60
+
         if minutes > 0:
-            return f"{minutes}m {secs}s"
-        return f"{secs}s"
+            return f"{minutes}m {secs:02d}s"
+        return f"{whole_seconds}s"
 
     @staticmethod
     def _chapter_number(chapter_section: str) -> str:
@@ -170,6 +179,16 @@ class QAReport:
     # ------------------------------------------------------------------
     # AsciiDoc generation
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _sort_key(ex: "ExerciseResult") -> tuple:
+        """Return a (chapter, section) tuple for ordering exercises."""
+        m = re.match(r"ch(\d+)s(\d+)", ex.chapter_section)
+        return (int(m.group(1)), int(m.group(2))) if m else (999, 999)
+
+    def _sorted_exercises(self) -> list:
+        """Return exercises sorted by chapter and section number."""
+        return sorted(self.exercises, key=self._sort_key)
 
     def generate_asciidoc(self, output_path: str = None) -> str:
         """
@@ -182,6 +201,7 @@ class QAReport:
             output_path = str(self.report_dir / f"qa_report_{self.course_id}.adoc")
 
         lines: list[str] = []
+        exercises = self._sorted_exercises()
 
         # --- Header ---
         lines.append(f"= QA Report: {self.course_id}")
@@ -205,7 +225,7 @@ class QAReport:
         lines.append("|===")
         lines.append("| Exercise | Result | Start time | Grade time | Finish time")
         lines.append("")
-        for ex in self.exercises:
+        for ex in exercises:
             result_str = ex.grade_result if ex.grade_result else "-"
             start_str = self._format_duration(ex.start_duration_secs) or "-"
             grade_str = self._format_duration(ex.grade_duration_secs) or "-"
@@ -221,7 +241,7 @@ class QAReport:
 
         # --- Per-exercise detail grouped by chapter ---
         current_chapter = None
-        for ex in self.exercises:
+        for ex in exercises:
             ch = self._chapter_number(ex.chapter_section)
             if ch != current_chapter:
                 current_chapter = ch
@@ -287,7 +307,7 @@ class QAReport:
         with open(output_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            for ex in self.exercises:
+            for ex in self._sorted_exercises():
                 writer.writerow({
                     "Guided Exercise/Lab Name": ex.title,
                     "PASS/FAIL": ex.grade_result,
