@@ -39,6 +39,20 @@ class LabManager:
         " | "
         "//*[normalize-space(text())='workstation']/../td[3]/button[normalize-space()='Open Console']"
     )
+
+    # PF5 lab-card footer controls. DOM order is power then lifecycle
+    # (Start/Stop, then Create/Delete); callers still expect lifecycle first.
+    _LAB_CREATE_ANALYTICS_ID = "create-vt-dash-lp"
+    _LAB_DELETE_ANALYTICS_ID = "delete-vt-dash-lp"
+    _LAB_START_ANALYTICS_ID = "start-vt-dash-lp"
+    _LAB_STOP_ANALYTICS_ID = "stop-vt-dash-lp"
+    _LAB_LIFECYCLE_ANALYTICS_IDS = frozenset({_LAB_CREATE_ANALYTICS_ID, _LAB_DELETE_ANALYTICS_ID})
+    _LAB_POWER_ANALYTICS_IDS = frozenset({_LAB_START_ANALYTICS_ID, _LAB_STOP_ANALYTICS_ID})
+    _LAB_ACTION_BUTTONS_XPATH = (
+        '//*[@id="tab-course-lab-environment"]//*[@type="button"]'
+        '[contains(text(), "Creat") or contains(text(), "Delet")'
+        ' or contains(text(), "Start") or contains(text(), "Stop")]'
+    )
     
     def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None):
         self.config = config
@@ -492,50 +506,81 @@ class LabManager:
             except Exception as e:
                 raise Exception(f"Could not select tab '{tab_name}' in old interface: {e}")
             
+    @staticmethod
+    def _lab_button_text(button) -> str | None:
+        if button is None or not button.text:
+            return None
+        text = button.text.strip().upper()
+        return text or None
+
+    def _assign_lab_buttons(self, buttons) -> tuple:
+        """
+        Map lab action buttons to (lifecycle, power) regardless of DOM order.
+
+        Callers treat first as Create/Delete and second as Start/Stop. The old
+        table UI already used that order; PF5 puts Start/Stop first.
+        """
+        if not buttons:
+            return None, None, None, None
+
+        lifecycle = {}
+        power = {}
+        for button in buttons:
+            analytics_id = button.get_attribute("data-analytics-id")
+            if analytics_id in self._LAB_LIFECYCLE_ANALYTICS_IDS:
+                lifecycle[analytics_id] = button
+            elif analytics_id in self._LAB_POWER_ANALYTICS_IDS:
+                power[analytics_id] = button
+
+        if lifecycle or power:
+            first_button = (
+                lifecycle.get(self._LAB_DELETE_ANALYTICS_ID)
+                or lifecycle.get(self._LAB_CREATE_ANALYTICS_ID)
+            )
+            second_button = (
+                power.get(self._LAB_STOP_ANALYTICS_ID)
+                or power.get(self._LAB_START_ANALYTICS_ID)
+            )
+        else:
+            first_button = buttons[0] if len(buttons) >= 1 else None
+            second_button = buttons[1] if len(buttons) >= 2 else None
+
+        return (
+            first_button,
+            self._lab_button_text(first_button),
+            second_button,
+            self._lab_button_text(second_button),
+        )
+
     def _get_lab_buttons_by_position(self, timeout: int = 3) -> tuple:
         """
-        Get lab action buttons by their position (first and second).
-        
-        Lab button positions indicate state:
+        Get lab action buttons by semantic role (lifecycle, then power).
+
+        Lab button roles indicate state:
         - No lab: first=CREATE, second=None
         - Creating: first=CREATING, second=STARTING
         - Running: first=DELETE, second=STOP
         - Stopped: first=DELETE, second=START
         - Stopping: first=DELETE, second=STOPPING
         - Deleting: first=DELETING, second=None
-        
+
+        On the PF5 lab card the visible order is reversed (Start/Stop then
+        Create/Delete). Analytics IDs are used to restore the roles above.
+
         Returns:
             Tuple of (first_button, first_text, second_button, second_text)
             Any value may be None if button doesn't exist.
         """
-        first_button = None
-        first_text = None
-        second_button = None
-        second_text = None
-        
         try:
-            # Get all action buttons in the lab environment tab
-            # These are the main action buttons (Create, Delete, Start, Stop, etc.)
-            buttons_xpath = '//*[@id="tab-course-lab-environment"]//*[@type="button"][contains(text(), "Creat") or contains(text(), "Delet") or contains(text(), "Start") or contains(text(), "Stop")]'
-            
             buttons = WebDriverWait(self.driver, timeout).until(
-                EC.presence_of_all_elements_located((By.XPATH, buttons_xpath))
+                EC.presence_of_all_elements_located((By.XPATH, self._LAB_ACTION_BUTTONS_XPATH))
             )
-            
-            if buttons and len(buttons) >= 1:
-                first_button = buttons[0]
-                first_text = first_button.text.strip().upper() if first_button.text else None
-                
-            if buttons and len(buttons) >= 2:
-                second_button = buttons[1]
-                second_text = second_button.text.strip().upper() if second_button.text else None
-                
+            return self._assign_lab_buttons(buttons)
         except TimeoutException:
-            pass
+            return None, None, None, None
         except Exception as e:
             logging.getLogger(__name__).debug(f"Error getting lab buttons by position: {e}")
-        
-        return first_button, first_text, second_button, second_text
+            return None, None, None, None
 
     def _get_lab_action_button(self, action_texts: list[str], timeout: int = 1, position: str = None):
         """
@@ -544,7 +589,7 @@ class LabManager:
         Args:
             action_texts: List of button text values to search for (case-insensitive match)
             timeout: Maximum seconds to wait for button
-            position: Optional "first" or "second" to restrict search to specific position
+            position: Optional "first" (Create/Delete) or "second" (Start/Stop)
             
         Returns:
             Tuple of (button_element, button_text) or (None, None) if not found
