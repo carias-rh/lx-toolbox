@@ -8,6 +8,7 @@ from lx_toolbox.core.servicenow_api import (
     ServiceNowAPIClient,
     ServiceNowAPIError,
     FEEDBACK_TABLE,
+    parse_journal_display_value,
 )
 
 
@@ -144,44 +145,51 @@ class TestGetTicket:
 
 
 # ---------------------------------------------------------------------------
-# get_journal_entries
+# get_journal_entries — comments display_value (not sys_journal_field)
 # ---------------------------------------------------------------------------
 
-RAW_JOURNAL_ENTRIES = [
-    {
-        "sys_created_on": "2026-01-15 10:00:00",
-        "sys_created_by": "learner@redhat.com",
-        "element": "Additional comments",
-        "value": "I still cannot connect to the lab.",
-    },
-    {
-        "sys_created_on": "2026-01-15 11:00:00",
-        "sys_created_by": "engineer@redhat.com",
-        "element": "Email sent",
-        "value": "We are looking into this.",
-    },
-    {
-        # Should be filtered out — author is in SKIP_AUTHORS
-        "sys_created_on": "2026-01-15 09:00:00",
-        "sys_created_by": "api_snow_autoassign",
-        "element": "Additional comments",
-        "value": "Auto-assigned.",
-    },
-    {
-        # Should be filtered out — element type not relevant
-        "sys_created_on": "2026-01-15 12:00:00",
-        "sys_created_by": "system@redhat.com",
-        "element": "Work notes",
-        "value": "Internal note.",
-    },
-    {
-        # Should be filtered out — empty value
-        "sys_created_on": "2026-01-15 13:00:00",
-        "sys_created_by": "learner@redhat.com",
-        "element": "Email received",
-        "value": "   ",
-    },
-]
+# Shape matches hub.redhat.com: GET x_redha_rht_task/{sys_id}
+# with sysparm_display_value=true. sys_journal_field is empty for this API user.
+COMMENTS_DISPLAY_VALUE = """\
+2026-08-24 02:14:49 - Guest (Additional comments)
+Hi,
+
+reloading the browser page, seemed to do the trick.
+
+2026-08-22 17:48:13 - Carlos Arias (Additional comments)
+Dear Nils, we confirmed the rendering issue.
+
+2026-08-22 11:06:41 - api_snow_autoassign (Additional comments)
+Thanks for submitting your feedback.
+
+2026-08-22 11:06:38 - System (Additional comments)
+Received from: rht-earlyaccess@redhat.com
+Original ticket description.
+
+2026-08-22 10:00:00 - Engineer (Work notes)
+Internal note only.
+
+2026-08-22 09:00:00 - Guest (Additional comments)
+   
+"""
+
+
+def _comments_response(comments: str):
+    return _mock_response(json_body={"result": {"comments": comments}})
+
+
+class TestParseJournalDisplayValue:
+    def test_empty_string(self):
+        assert parse_journal_display_value("") == []
+        assert parse_journal_display_value("   ") == []
+
+    def test_splits_entries_on_headers(self):
+        entries = parse_journal_display_value(COMMENTS_DISPLAY_VALUE)
+        authors = [e["author"] for e in entries]
+        assert authors[0] == "Guest"
+        assert "Carlos Arias" in authors
+        assert "api_snow_autoassign" in authors
+        assert "System" in authors
 
 
 class TestGetJournalEntries:
@@ -191,7 +199,7 @@ class TestGetJournalEntries:
     def test_returns_list_of_dicts(self):
         client = self._client()
         client._session.get = MagicMock(
-            return_value=_mock_response(json_body={"result": RAW_JOURNAL_ENTRIES})
+            return_value=_comments_response(COMMENTS_DISPLAY_VALUE)
         )
         result = client.get_journal_entries("abc123")
         assert isinstance(result, list)
@@ -199,26 +207,44 @@ class TestGetJournalEntries:
     def test_each_entry_has_required_keys(self):
         client = self._client()
         client._session.get = MagicMock(
-            return_value=_mock_response(json_body={"result": RAW_JOURNAL_ENTRIES})
+            return_value=_comments_response(COMMENTS_DISPLAY_VALUE)
         )
         result = client.get_journal_entries("abc123")
         for entry in result:
             for key in ("timestamp", "author", "type", "text"):
                 assert key in entry, f"Missing key '{key}' in entry: {entry}"
 
+    def test_keeps_learner_follow_up_and_agent_reply(self):
+        client = self._client()
+        client._session.get = MagicMock(
+            return_value=_comments_response(COMMENTS_DISPLAY_VALUE)
+        )
+        result = client.get_journal_entries("abc123")
+        texts = [e["text"] for e in result]
+        assert any("reloading the browser page" in t for t in texts)
+        assert any("we confirmed the rendering issue" in t for t in texts)
+
     def test_filters_out_autoassign_author(self):
         client = self._client()
         client._session.get = MagicMock(
-            return_value=_mock_response(json_body={"result": RAW_JOURNAL_ENTRIES})
+            return_value=_comments_response(COMMENTS_DISPLAY_VALUE)
         )
         result = client.get_journal_entries("abc123")
         authors = [e["author"] for e in result]
         assert "api_snow_autoassign" not in authors
 
+    def test_filters_out_system_author(self):
+        client = self._client()
+        client._session.get = MagicMock(
+            return_value=_comments_response(COMMENTS_DISPLAY_VALUE)
+        )
+        authors = [e["author"] for e in client.get_journal_entries("abc123")]
+        assert "System" not in authors
+
     def test_filters_out_irrelevant_element_types(self):
         client = self._client()
         client._session.get = MagicMock(
-            return_value=_mock_response(json_body={"result": RAW_JOURNAL_ENTRIES})
+            return_value=_comments_response(COMMENTS_DISPLAY_VALUE)
         )
         result = client.get_journal_entries("abc123")
         types = {e["type"] for e in result}
@@ -227,7 +253,7 @@ class TestGetJournalEntries:
     def test_filters_out_empty_text(self):
         client = self._client()
         client._session.get = MagicMock(
-            return_value=_mock_response(json_body={"result": RAW_JOURNAL_ENTRIES})
+            return_value=_comments_response(COMMENTS_DISPLAY_VALUE)
         )
         result = client.get_journal_entries("abc123")
         for entry in result:
@@ -236,16 +262,29 @@ class TestGetJournalEntries:
     def test_returns_only_relevant_entries(self):
         client = self._client()
         client._session.get = MagicMock(
-            return_value=_mock_response(json_body={"result": RAW_JOURNAL_ENTRIES})
+            return_value=_comments_response(COMMENTS_DISPLAY_VALUE)
         )
         result = client.get_journal_entries("abc123")
-        # Only the first two raw entries should survive all filters
+        # Guest follow-up + Carlos reply; System, autoassign, work notes, empty dropped
         assert len(result) == 2
+
+    def test_reads_comments_display_value_from_ticket_record(self):
+        client = self._client()
+        mock_get = MagicMock(return_value=_comments_response(COMMENTS_DISPLAY_VALUE))
+        client._session.get = mock_get
+        client.get_journal_entries("abc123")
+        called_url = mock_get.call_args[0][0]
+        params = mock_get.call_args.kwargs.get("params") or mock_get.call_args[1].get("params")
+        assert FEEDBACK_TABLE in called_url
+        assert "abc123" in called_url
+        assert "sys_journal_field" not in called_url
+        assert params["sysparm_display_value"] == "true"
+        assert params["sysparm_fields"] == "comments"
 
     def test_empty_result(self):
         client = self._client()
         client._session.get = MagicMock(
-            return_value=_mock_response(json_body={"result": []})
+            return_value=_comments_response("")
         )
         result = client.get_journal_entries("abc123")
         assert result == []

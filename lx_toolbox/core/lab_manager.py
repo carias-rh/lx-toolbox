@@ -439,6 +439,32 @@ class LabManager:
         else:
             self._select_tab_old_interface(tab_config["old"], tab_name)
 
+    def expand_ssh_key_info(self):
+        """Unroll the SSH Lab Access instruction panel on the Lab Environment tab.
+
+        The panel is available before CREATE. Do not scrape or return the live
+        jump-host IP — it belongs to the current session, not the Internal Learner.
+        """
+        heading_xpath = '//*[@id="ssh-key-info--heading"]'
+        toggle_xpath = '//*[@id="ssh-key-info--heading"]/div/div/svg'
+        body_xpath = '//*[@id="ssh-key-info--body"]/div'
+        try:
+            heading = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, heading_xpath))
+            )
+            expanded = (heading.get_attribute("aria-expanded") or "").lower() == "true"
+            if not expanded:
+                try:
+                    self.driver.find_element(By.XPATH, toggle_xpath).click()
+                except Exception:
+                    heading.click()
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, body_xpath))
+            )
+            self.logger("SSH Lab Access instruction panel expanded")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Could not expand SSH key info panel: {e}")
+
     def _element_is_unobscured(self, element) -> bool:
         """True when the element's center is not covered by another node (e.g. a PF skeleton)."""
         return bool(
@@ -648,10 +674,11 @@ class LabManager:
         return primary_status, secondary_status
 
 
-    def create_lab(self, course_id: str):
+    def create_lab(self, course_id: str, wait: bool = True):
         """
         Creates a lab environment for the specified course.
         Only works when no lab exists (first button is CREATE).
+        When wait is False, click CREATE and return immediately.
         """
         self.logger(f"Creating lab for course: {course_id}")
         self.select_lab_environment_tab("lab-environment")
@@ -660,11 +687,12 @@ class LabManager:
             create_button, btn_text = self._get_lab_action_button(["Create"], position="first")
             if create_button and btn_text == "CREATE":
                 create_button.click()
-                # Wait until status changes from CREATE to CREATING/DELETE/etc
-                WebDriverWait(self.driver, 60).until(
-                    lambda d: self._get_lab_buttons_by_position()[1] in ("CREATING", "DELETE", "DELETING"),
-                    message="Lab did not appear to start creating or finish creating."
-                )
+                if wait:
+                    # Wait until status changes from CREATE to CREATING/DELETE/etc
+                    WebDriverWait(self.driver, 60).until(
+                        lambda d: self._get_lab_buttons_by_position()[1] in ("CREATING", "DELETE", "DELETING"),
+                        message="Lab did not appear to start creating or finish creating."
+                    )
                 self.logger("Lab creation initiated")
             else:
                 self.logger(f"Create button not available (current first button: {btn_text})")
@@ -1516,39 +1544,55 @@ class LabManager:
                 logging.getLogger(__name__).warning(f"[console] Step 6: could not press Enter key: {e_enter} (cmd: {short_cmd})")
 
     def click_on_show_solution_buttons(self):
-        """Click all 'Show Solution' buttons on the current page, starting from the bottom."""
+        """Click all 'Show Solution' buttons on the current page, starting from the bottom.
+
+        Guided-exercise buttons typically become 'Hide Solution' after click.
+        Quiz (resequencing) Show Solution buttons keep the same label — and may
+        be no-ops when answer data is missing — so each button is attempted
+        at most once.
+        """
         try:
-            # First scroll to the bottom of the page
             self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(0.5)
-            
-            while True:
+
+            attempted = set()
+            max_clicks = 30
+            clicks = 0
+            while clicks < max_clicks:
                 try:
-                    # Find all Show Solution buttons
                     buttons = self.driver.find_elements(By.XPATH, "//button[text()='Show Solution']")
-                    if not buttons:
+                    last_button = None
+                    last_key = None
+                    for button in reversed(buttons):
+                        try:
+                            key = button.get_attribute("data-analytics-id") or button.id
+                        except StaleElementReferenceException:
+                            continue
+                        if key and key not in attempted:
+                            last_button = button
+                            last_key = key
+                            break
+                    if last_button is None:
                         break
-                    
-                    # Get the last button (bottommost)
-                    last_button = buttons[-1]
-                    
-                    # Scroll the button into view
+
                     self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", last_button)
                     time.sleep(0.3)
-                    
-                    # Wait for it to be clickable and click
-                    WebDriverWait(self.driver, 1.5).until(
-                        EC.element_to_be_clickable(last_button)
-                    )
-                    last_button.click()
+
+                    try:
+                        WebDriverWait(self.driver, 1.5).until(
+                            EC.element_to_be_clickable(last_button)
+                        )
+                        last_button.click()
+                    except (TimeoutException, StaleElementReferenceException):
+                        try:
+                            self.driver.execute_script("arguments[0].click();", last_button)
+                        except Exception:
+                            pass
+                    attempted.add(last_key)
+                    clicks += 1
                     time.sleep(0.3)
-                    
-                    # Scroll up a bit
-                    #self.driver.execute_script("window.scrollBy(0, -100);")
-                    #time.sleep(0.3)
-                    
-                except (TimeoutException, StaleElementReferenceException):
-                    # Button became stale or not clickable, continue to find remaining buttons
+
+                except StaleElementReferenceException:
                     continue
                 except Exception:
                     break

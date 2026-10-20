@@ -5,6 +5,7 @@ import json
 import time
 import logging
 import traceback
+from html import escape
 from urllib.parse import quote
 
 import requests
@@ -108,7 +109,7 @@ class SnowAIProcessor:
             "- lab script is not available\n"
             "- lab is stuck in starting/stopping state\n"
             "- cluster is taking too long to start\n"
-            "- ssh to the lab workstation VM is not working, ~/.ssh/rht_classroom.rsa, cloud-user@some-ip:22022, -J jump host, is not working\n"
+            "- ssh to the lab workstation VM from inside the lab is not working\n"
         )
 
         self.video_issues_examples = (
@@ -125,12 +126,28 @@ class SnowAIProcessor:
             "- The exercise in the guide doesn't match with the video from the instructor\n"
         )
 
+        self.ssh_lab_access_examples = (
+            "Examples of SSH Lab Access Feedback (Internal Learners on ROLE only):\n"
+            "- Cannot connect with rht_classroom.rsa\n"
+            "- DOWNLOAD SSH KEY is disabled or missing\n"
+            "- Permission denied (publickey) when using the classroom SSH key\n"
+            "- ssh -J cloud-user@<ip>:22022 student@workstation fails\n"
+            "- chmod / ssh-add / jump-host instructions from the Lab Environment page\n"
+        )
+
         self.manually_managed_issues_examples = (
             "Examples of types of issues to be manually managed:\n"
             "- I've lost many lab hours with an issue and I want hours back or a refund\n"
             "- How can I schedule an exam?\n"
-            "- UI suggestions of improvement\n"
-            "- Complaints / Praises on the learning platform or the courses.\n"
+        )
+
+        self.suggestion_examples = (
+            "Examples of Suggestion (improvement idea or praise — not a report of something broken):\n"
+            "- You may include a practical quiz\n"
+            "- Please add more examples after this exercise\n"
+            "- It would help to have a video here\n"
+            "- Great course, I enjoyed it\n"
+            "- Thanks for the clear explanations\n"
         )
 
         # Distilled operational rules from internal SNOW AI knowledge gathering.
@@ -309,9 +326,58 @@ class SnowAIProcessor:
         )
         return response
 
+    _MODELS_CORP_AUTH_STATUS_CODES = frozenset({401, 403})
+    _MODELS_CORP_AUTH_BODY_MARKERS = (
+        "expired",
+        "invalid api key",
+        "invalid_api_key",
+        "invalid user_key",
+        "user_key_invalid",
+        "authentication failed",
+        "unauthorized",
+        "invalid token",
+    )
+
+    @staticmethod
+    def _is_models_corp_credential_error(exc: BaseException) -> bool:
+        """True when Models.corp rejected the USER_KEY (expired, invalid, unauthorized)."""
+        response = getattr(exc, "response", None)
+        if response is None:
+            return False
+        status = getattr(response, "status_code", None)
+        if status in SnowAIProcessor._MODELS_CORP_AUTH_STATUS_CODES:
+            return True
+        if not isinstance(status, int) or status < 400 or status >= 500:
+            return False
+        text = (getattr(response, "text", None) or "").lower()
+        return any(marker in text for marker in SnowAIProcessor._MODELS_CORP_AUTH_BODY_MARKERS)
+
+    def _fallback_to_local_ollama(self, prompt: str, plain_text: bool, reason: str) -> str:
+        """Switch this process to local Ollama and retry the same prompt.
+
+        Models.corp USER_KEYs expire; once rejected, every later call would fail
+        the same way, so we stick with Ollama for the rest of the run.
+        """
+        logger = logging.getLogger(__name__)
+        if self.LLM_PROVIDER != "ollama":
+            logger.warning(
+                "Models.corp credential unusable (%s); falling back to local Ollama "
+                "(%s at %s). Refresh USER_KEY at https://developer.models.corp.redhat.com/",
+                reason,
+                self.OLLAMA_MODEL,
+                self.OLLAMA_HOST,
+            )
+            self.LLM_PROVIDER = "ollama"
+        return self._ask_ollama(prompt, plain_text=plain_text)
+
     def _ask_openai(self, prompt: str, plain_text: bool = False) -> str:
         """Call an OpenAI-compatible chat completions endpoint (e.g. granite-4.1-8b)."""
         logger = logging.getLogger(__name__)
+        if not (self.OPENAI_API_KEY or "").strip():
+            return self._fallback_to_local_ollama(
+                prompt, plain_text=plain_text, reason="USER_KEY is empty"
+            )
+
         messages = [{"role": "user", "content": prompt}]
         payload: dict = {
             "model": self.OPENAI_MODEL,
@@ -339,6 +405,12 @@ class SnowAIProcessor:
             resp.raise_for_status()
             data = resp.json()
         except requests.exceptions.RequestException as e:
+            if self._is_models_corp_credential_error(e):
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                reason = f"HTTP {status}" if status else str(e)
+                return self._fallback_to_local_ollama(
+                    prompt, plain_text=plain_text, reason=reason
+                )
             logger.error("Could not reach OpenAI-compatible API at %s: %s", self.OPENAI_BASE_URL, e)
             return ""
         except ValueError as e:
@@ -379,6 +451,290 @@ class SnowAIProcessor:
         if provider == "openai":
             return self._ask_openai(prompt, plain_text=plain_text)
         return self._ask_ollama(prompt, plain_text=plain_text)
+
+    @staticmethod
+    def _sanitize_jira_title(value) -> str:
+        """Return a clean lowercase Jira title with words separated by single spaces.
+
+        Replaces underscores and dashes with spaces, strips any remaining
+        non-alphanumeric characters, collapses whitespace runs, and lowercases.
+        Accepts None and returns an empty string in that case.
+        """
+        if not value:
+            return ""
+        text = str(value)
+        text = re.sub(r"[_\-]+", " ", text)
+        text = re.sub(r"[^\w\s]", "", text)
+        text = re.sub(r"\s{2,}", " ", text)
+        return text.lower().strip()
+
+    @staticmethod
+    def _extract_page_slug(url: str) -> str:
+        """Return the /pages/<slug> token from a ROL course URL, or '' if absent."""
+        m = re.search(r"/pages/([^/?#]+)", url or "")
+        return m.group(1) if m else ""
+
+    @staticmethod
+    def _jira_editor_link_html(url: str) -> str:
+        """Return an HTML anchor the Jira description editor can turn into a hyperlink.
+
+        The Cloud create dialog is ProseMirror: insertText leaves a Capture URL as
+        plain text, and wiki markup like [text|url] is no longer parsed. insertHTML
+        of an <a> is what keeps the URL clickable. Non-http(s) values return ''.
+        """
+        text = (url or "").strip()
+        if not text.lower().startswith(("http://", "https://")):
+            return ""
+        safe = escape(text, quote=True)
+        return f'<a href="{safe}">{safe}</a>'
+
+    @staticmethod
+    def _strip_location_from_title(title: str, course_code: str = "") -> str:
+        """Remove course code, course ID, and section identifiers from a Jira title.
+
+        Strips (case-insensitive):
+        - The supplied course_code (e.g. 'DO380', 'rh124')
+        - Any 'courseCode-N.NN' pattern (e.g. 'do380-4.18')
+        - Any 'chNNsMM' section slug (e.g. 'ch02s06')
+        - Bare N.M section references at the start/surrounded by spaces (e.g. '4.1')
+        - 'section N' phrases
+        Returns the cleaned text, or '' if nothing is left.
+        """
+        text = str(title or "")
+        # Strip course-code-version (e.g. do380-4.18)
+        text = re.sub(r"\b[a-zA-Z]{2,4}\d{2,4}-\d+\.\d+\b", "", text, flags=re.IGNORECASE)
+        # Strip explicit course code if provided (e.g. DO380, rh124)
+        if course_code:
+            text = re.sub(r"\b" + re.escape(course_code) + r"\b", "", text, flags=re.IGNORECASE)
+        # Strip chNNsMM slugs
+        text = re.sub(r"\bch\d+s\d+\b", "", text, flags=re.IGNORECASE)
+        # Strip 'section N' or 'section N.M'
+        text = re.sub(r"\bsection\s+\d+(?:\.\d+)?\b", "", text, flags=re.IGNORECASE)
+        # Strip bare N.M that looks like a section reference (digits dot digits, no surrounding alphanum)
+        text = re.sub(r"(?<![.\w])\d{1,2}\.\d{1,2}(?![.\w])", "", text)
+        # Collapse and strip
+        text = re.sub(r"\s{2,}", " ", text).strip()
+        return text
+
+    @classmethod
+    def _build_defect_summary(cls, snow_info: dict, jira_title: str, jira_description: str = "") -> str:
+        """Assemble the Defect Summary: '{Course Code}: {page slug} - {title} - {Feedback id}'.
+
+        - page slug: extracted from the investigation URL (e.g. 'ch02s06', 'pr01').
+          When absent the slug segment is omitted entirely (no orphan dash).
+        - title: jira_title after sanitizing and stripping location tokens; if empty,
+          falls back to the first ~8 words of jira_description.
+        """
+        course = snow_info.get("Course") or ""
+        snow_id = snow_info.get("snow_id") or ""
+        url = snow_info.get("URL") or ""
+        slug = cls._extract_page_slug(url)
+
+        # Clean the problem phrase
+        raw = cls._sanitize_jira_title(jira_title)
+        clean = cls._strip_location_from_title(raw, course_code=course)
+
+        # Fallback: first ~8 words of description
+        if not clean and jira_description:
+            words = jira_description.split()
+            clean = " ".join(words[:8])
+
+        location = f"{slug} - " if slug else ""
+        return f"{course}: {location}{clean or '(no title)'} - {snow_id}"
+
+    # ------------------------------------------------------------------
+    # Reply-mode normalizers (#24)
+    # ------------------------------------------------------------------
+
+    # Canonical reply-mode value for a confirmed Defect.  Used wherever the
+    # codebase needs to compare or assign this mode to avoid magic strings.
+    _MODE_CONFIRM_DEFECT: str = "confirm_defect"
+
+    _CONTENT_MODE_ALIASES: dict = {
+        "confirm": "confirm_defect",
+        "defect": "confirm_defect",
+        "teaching": "teach",
+        "confusion": "teach",
+        "ask": "ask_more",
+        "need_more": "ask_more",
+        "needs_more": "ask_more",
+        "lab": "lab_pending",
+        "pending": "lab_pending",
+        "explain": "explain_expected",
+        "expected": "explain_expected",
+        "suggestion": "acknowledge_suggestion",
+        "praise": "acknowledge_suggestion",
+        "acknowledge_suggestion": "acknowledge_suggestion",
+    }
+    _CONTENT_VALID_MODES: frozenset = frozenset(
+        {"confirm_defect", "teach", "ask_more", "lab_pending", "explain_expected", "acknowledge_resolved", "acknowledge_suggestion"}
+    )
+
+    _ENV_MODE_ALIASES: dict = {
+        "confirm": "confirm_defect",
+        "defect": "confirm_defect",
+        "teach": "explain_expected",
+        "teaching": "explain_expected",
+        "first_boot": "explain_expected",
+        "firstboot": "explain_expected",
+        "explain": "explain_expected",
+        "expected": "explain_expected",
+        "ask": "ask_more",
+        "need_more": "ask_more",
+        "lab": "lab_pending",
+        "pending": "lab_pending",
+    }
+    _ENV_VALID_MODES: frozenset = frozenset(
+        {"confirm_defect", "explain_expected", "ask_more", "lab_pending", "acknowledge_resolved"}
+    )
+
+    # SSH Lab Access Feedback — Internal Learner stuck on ROLE SSH instructions.
+    # A ROLE URL alone is not enough; Internal Learners also file ordinary Guide/Lab Feedback.
+    _SSH_LAB_ACCESS_TOKENS: tuple = (
+        "rht_classroom.rsa",
+        "download ssh key",
+        "ssh private key",
+        "ssh-add",
+        "cloud-user@",
+        ":22022",
+        "-j cloud-user",
+    )
+
+    @staticmethod
+    def is_role_platform_url(url: str) -> bool:
+        """True when the Feedback URL is on ROLE (role.rhu.redhat.com)."""
+        return "role.rhu.redhat.com" in (url or "").lower()
+
+    @classmethod
+    def looks_like_ssh_lab_access(cls, text: str) -> bool:
+        """True when Feedback text matches SSH Lab Access instruction markers."""
+        if not text:
+            return False
+        lowered = text.lower()
+        return any(token in lowered for token in cls._SSH_LAB_ACCESS_TOKENS)
+
+    @classmethod
+    def apply_ssh_lab_access_classification(cls, classification: dict, feedback_text: str) -> dict:
+        """Force mutually exclusive SSH Lab Access flags when the LLM or heuristic says so."""
+        is_ssh = bool(classification.get("is_ssh_lab_access_ticket")) or cls.looks_like_ssh_lab_access(
+            feedback_text
+        )
+        classification["is_ssh_lab_access_ticket"] = is_ssh
+        if is_ssh:
+            classification["is_content_issue_ticket"] = False
+            classification["is_environment_issue_ticket"] = False
+            classification["is_video_issue_ticket"] = False
+            classification["needs_lab_verification"] = False
+        return classification
+
+    @classmethod
+    def apply_suggestion_classification(cls, classification: dict) -> dict:
+        """Keep Suggestion exclusive of broken-thing types. Mixed tickets are not Suggestions."""
+        is_broken = any((
+            classification.get("is_content_issue_ticket"),
+            classification.get("is_environment_issue_ticket"),
+            classification.get("is_video_issue_ticket"),
+            classification.get("is_ssh_lab_access_ticket"),
+        ))
+        if is_broken:
+            classification["is_suggestion_ticket"] = False
+            return classification
+        is_suggestion = bool(classification.get("is_suggestion_ticket"))
+        classification["is_suggestion_ticket"] = is_suggestion
+        if is_suggestion:
+            classification["is_content_issue_ticket"] = False
+            classification["is_environment_issue_ticket"] = False
+            classification["is_video_issue_ticket"] = False
+            classification["needs_lab_verification"] = False
+        return classification
+
+    @classmethod
+    def _normalize_suggestion_analysis(cls, parsed: dict) -> dict:
+        """A Suggestion is never a confirmed Defect. Default reply_mode is acknowledge_suggestion."""
+        raw = str(parsed.get("reply_mode", "")).strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "suggestion": "acknowledge_suggestion",
+            "praise": "acknowledge_suggestion",
+            "acknowledge_suggestion": "acknowledge_suggestion",
+        }
+        mode = aliases.get(raw, raw)
+        if mode not in {"acknowledge_suggestion", "acknowledge_resolved", "ask_more"}:
+            mode = "acknowledge_suggestion"
+        parsed["reply_mode"] = mode
+        parsed["is_valid_issue"] = False
+        if "jira_title" in parsed:
+            parsed["jira_title"] = cls._sanitize_jira_title(parsed.get("jira_title") or "")
+        return parsed
+
+    @classmethod
+    def _normalize_ssh_lab_access_analysis(cls, parsed: dict) -> dict:
+        """SSH Lab Access is never a Defect. Default reply_mode is teach."""
+        raw = str(parsed.get("reply_mode", "")).strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {"ask": "ask_more", "need_more": "ask_more", "teaching": "teach", "confusion": "teach"}
+        mode = aliases.get(raw, raw)
+        if mode not in {"teach", "ask_more", "acknowledge_resolved"}:
+            mode = "teach"
+        parsed["reply_mode"] = mode
+        parsed["is_valid_issue"] = False
+        parsed["jira_description"] = ""
+        if "jira_title" in parsed:
+            parsed["jira_title"] = cls._sanitize_jira_title(parsed.get("jira_title") or "")
+        return parsed
+
+    @classmethod
+    def _normalize_content_analysis(cls, parsed: dict) -> dict:
+        """Canonicalise reply_mode and sanitize jira_title.
+
+        jira_description is kept regardless of reply_mode (ADR-0003): the create
+        dialog is always prepared so the engineer can override the model's verdict.
+        """
+        raw = str(parsed.get("reply_mode", "")).strip().lower().replace("-", "_").replace(" ", "_")
+        mode = cls._CONTENT_MODE_ALIASES.get(raw, raw)
+        if mode not in cls._CONTENT_VALID_MODES:
+            mode = cls._MODE_CONFIRM_DEFECT if parsed.get("is_valid_issue") else "ask_more"
+        parsed["reply_mode"] = mode
+        if "jira_title" in parsed:
+            parsed["jira_title"] = cls._sanitize_jira_title(parsed.get("jira_title") or "")
+        return parsed
+
+    # Tokens that indicate the feedback is NOT a First Boot / cluster warm-up issue.
+    _NON_FIRST_BOOT_TOKENS: tuple = (
+        "git clone", "sslverify", "ssl verify", "certificate", "cert issue",
+        "tls", "http.ssl", "github.com", "x509", "ssl certificate",
+    )
+    # Tokens that confirm the feedback IS about cluster startup.
+    _STARTUP_TOKENS: tuple = (
+        "verifying cluster", "cluster state", "cluster readiness",
+        "authentication timed out", "lab start", "operators",
+        "kube-apiserver",
+    )
+
+    @classmethod
+    def _normalize_environment_analysis(cls, parsed: dict, user_issue: str = "") -> dict:
+        """Canonicalise reply_mode and sanitize jira_title after environment analysis.
+
+        Applies First Boot hard negatives: if the feedback contains git/TLS/SSL
+        tokens but lacks genuine startup-shaped evidence, force reply_mode away
+        from explain_expected so git/cert errors are never treated as cluster warm-up.
+        """
+        raw = str(parsed.get("reply_mode", "")).strip().lower().replace("-", "_").replace(" ", "_")
+        mode = cls._ENV_MODE_ALIASES.get(raw, raw)
+        if mode not in cls._ENV_VALID_MODES:
+            mode = "confirm_defect" if parsed.get("is_valid_issue") else "ask_more"
+
+        # First Boot hard-negative guard (#25)
+        if mode == "explain_expected":
+            feedback_l = (user_issue or "").lower()
+            has_non_first_boot = any(t in feedback_l for t in cls._NON_FIRST_BOOT_TOKENS)
+            has_startup = any(t in feedback_l for t in cls._STARTUP_TOKENS)
+            if has_non_first_boot and not has_startup:
+                mode = "ask_more"
+
+        parsed["reply_mode"] = mode
+        # jira_description is kept regardless of reply_mode (ADR-0003).
+        if "jira_title" in parsed:
+            parsed["jira_title"] = cls._sanitize_jira_title(parsed.get("jira_title") or "")
+        return parsed
 
     @staticmethod
     def _normalize_suggested_correction(value) -> str:
@@ -587,6 +943,8 @@ Follow-up journal entries (newest first), each labeled as either CUSTOMER or OUR
 Instructions:
 - First, if there are any OUR TEAM entries, summarize in 1-3 sentences the concrete findings or conclusions from our own prior investigation/reply (e.g. what was checked, what was found, what explanation or fix was already given). Preserve specific technical details (names, commands, paths, image/version names) rather than vague statements like "already addressed".
 - Then, extract any NEW technical facts, clarifications, or additional issues the CUSTOMER raised beyond the original description AND beyond what our own prior reply already covered.
+- Keep CUSTOMER statements that the problem is gone, resolved, was on their side (browser, cache, local setup), or was not a course issue — even if they also thank us. Those are Resolution Follow-up facts, not empty thank-yous.
+- If the latest CUSTOMER entry both says the original issue is fixed AND raises a new problem, include both.
 - Never present our own prior reply as if it were new information from the customer — clearly attribute investigation findings to "our team" / "we".
 - Omit greetings, thank-yous, signatures, email addresses, phone numbers, and any personal information.
 - Omit anything that simply repeats the original ticket description.
@@ -721,7 +1079,8 @@ Instructions:
             issue_specific_notes = [
                 "Classification rules:",
                 "- Treat quiz problems, missing instructions, missing details hidden only in Show Solution, and grading-script logic mismatches as content issues first.",
-                "- Treat lab startup, lab finish, lab grade, building, starting, stopping, VM access, and lab-environment behavior as environment issues.",
+                "- SSH Lab Access Feedback is a separate type: Internal Learner stuck on ROLE SSH-from-laptop (rht_classroom.rsa, DOWNLOAD SSH KEY, cloud-user jump host). Never classify that as environment or content. A ROLE URL alone is not SSH Lab Access — Internal Learners also report ordinary Guide, Lab, and video Feedback.",
+                "- Treat lab startup, lab finish, lab grade, building, starting, stopping, VM access *inside the lab*, and lab-environment behavior as environment issues. SSH from a laptop via jump host is not this type.",
                 "- Treat account, exam, subscription, refund, and unrelated platform requests as manually managed issues.",
                 "- If the learner ran commands from a theory section and expected lab-validated output, learner confusion is often more likely than an environment defect.",
                 "- A doXXX or aiXXX course taking a long time to start on first use may be expected first-boot behavior and may not need lab verification if the report matches that pattern.",
@@ -977,6 +1336,163 @@ Instructions:
         """Switch to SNOW content iframe through macroponent shadow DOM."""
         self.snow_handler.switch_to_iframe()
 
+    # ------------------------------------------------------------------
+    # Issue Section (ADR-0002)
+    # ------------------------------------------------------------------
+
+    _SECTION_SLUG_RE = re.compile(r"ch(\d{1,2})s(\d{1,2})", re.IGNORECASE)
+    _CHAPTER_SECTION_WORDS_RE = re.compile(
+        r"chapter\s+(\d{1,2})\s*,?\s*section\s+(\d{1,2})", re.IGNORECASE
+    )
+    _EXERCISE_NM_RE = re.compile(
+        r"(?:演習|exercise|guided exercise|\bge\b|\blab\b)\s*(\d{1,2})\s*[.\s]\s*(\d{1,2})",
+        re.IGNORECASE,
+    )
+    _BARE_NM_RE = re.compile(r"\b(\d{1,2})\.(\d{1,2})\b")
+
+    @classmethod
+    def text_names_a_section(cls, text: str, course_version: str = "") -> bool:
+        """Heuristic: does this Learner text look like it names a Section?"""
+        raw = text or ""
+        if cls._SECTION_SLUG_RE.search(raw):
+            return True
+        if cls._CHAPTER_SECTION_WORDS_RE.search(raw):
+            return True
+        if cls._EXERCISE_NM_RE.search(raw):
+            return True
+        version = (course_version or "").strip()
+        for match in cls._BARE_NM_RE.finditer(raw):
+            token = f"{match.group(1)}.{match.group(2)}"
+            if version and token == version:
+                continue
+            return True
+        return False
+
+    @classmethod
+    def parse_issue_section(cls, parsed: dict | None) -> tuple[str, str] | None:
+        """Return zero-padded (chapter, section) or None if unchanged/invalid."""
+        if not parsed:
+            return None
+        if parsed.get("unchanged") in (True, "true", "True"):
+            return None
+        slug = str(parsed.get("section_slug") or parsed.get("slug") or "").strip()
+        slug_match = cls._SECTION_SLUG_RE.search(slug)
+        if slug_match:
+            return cls._pad_chapter_section(slug_match.group(1), slug_match.group(2))
+        chapter = str(parsed.get("chapter") or "").strip()
+        section = str(parsed.get("section") or "").strip()
+        digits = re.compile(r"^\d{1,2}$")
+        if digits.match(chapter) and digits.match(section):
+            return cls._pad_chapter_section(chapter, section)
+        return None
+
+    @staticmethod
+    def _pad_chapter_section(chapter: str, section: str) -> tuple[str, str]:
+        return (chapter.zfill(2), section.zfill(2))
+
+    @staticmethod
+    def rewrite_page_url(url: str, chapter: str, section: str) -> str:
+        """Replace /pages/<slug> keeping host, Course ID, and Platform."""
+        slug = f"ch{chapter}s{section}"
+        if re.search(r"/pages/[^/?#]+", url or ""):
+            return re.sub(r"/pages/[^/?#]+", f"/pages/{slug}", url, count=1)
+        return url
+
+    @staticmethod
+    def page_slug_from_url(url: str) -> str:
+        match = re.search(r"/pages/([^/?#]+)", url or "")
+        return match.group(1) if match else ""
+
+    @classmethod
+    def chapter_section_from_url(cls, url: str) -> tuple[str, str]:
+        slug = cls.page_slug_from_url(url)
+        match = re.match(r"ch(\d{2})s(\d{2})$", slug or "", re.IGNORECASE)
+        if match:
+            return match.group(1), match.group(2)
+        return "", ""
+
+    @staticmethod
+    def issue_section_inference_text(snow_info: dict) -> str:
+        """Description plus Learner Follow-ups; never the Feedback Title."""
+        parts = [str(snow_info.get("Description") or "").strip()]
+        for update in snow_info.get("customer_updates") or []:
+            role = (update.get("role") or "customer").lower()
+            if role in ("agent", "response"):
+                continue
+            text = (update.get("text") or "").strip()
+            if text:
+                parts.append(text)
+        return "\n\n".join(p for p in parts if p)
+
+    @classmethod
+    def apply_issue_section(cls, snow_info: dict, chapter: str, section: str) -> dict:
+        """Point Chapter, Section, and investigation URL at the Issue Section."""
+        current_url = snow_info.get("URL") or ""
+        if "CaptureURL" not in snow_info:
+            snow_info["CaptureURL"] = current_url
+        snow_info["Chapter"] = chapter
+        snow_info["Section"] = section
+        snow_info["URL"] = cls.rewrite_page_url(current_url, chapter, section)
+        return snow_info
+
+    @classmethod
+    def restore_capture_location(cls, snow_info: dict) -> dict:
+        """Revert investigation URL/Chapter/Section to the Capture URL page."""
+        capture = snow_info.get("CaptureURL") or ""
+        if not capture:
+            return snow_info
+        snow_info["URL"] = capture
+        chapter, section = cls.chapter_section_from_url(capture)
+        snow_info["Chapter"] = chapter
+        snow_info["Section"] = section
+        return snow_info
+
+    def _resolve_issue_section(self, snow_info: dict) -> dict:
+        """If Learner text names a Section, ask the LLM and update snow_info."""
+        text = self.issue_section_inference_text(snow_info)
+        version = str(snow_info.get("Version") or "")
+        if not self.text_names_a_section(text, course_version=version):
+            return snow_info
+        course_id = (
+            f"{str(snow_info.get('Course') or '').lower()}-{version}".strip("-")
+        )
+        capture_url = snow_info.get("URL") or ""
+        self.logger("Inferring Issue Section from Feedback text")
+        prompt = f"""You infer which course Section a Learner is complaining about.
+
+Course ID (frozen — do not change it): {course_id}
+Capture URL (page where they opened the Feedback form): {capture_url}
+
+Learner text (original description, then any Learner Follow-ups).
+A Follow-up that names a Section is the Issue Section:
+{text}
+
+Rules:
+- Return the Issue Section as chapter and section numbers (chapter 8 section 8 is 8 and 8).
+- "N.M", "chapter N section M", "chNNsMM", "Exercise N.M", "演習N.M" all mean chapter N section M.
+- If a Follow-up names a Section, use that, not the original description.
+- If the text does not clearly name one Section, or names two with no primary, return unchanged.
+- Do not invent a different course.
+
+JSON only.
+Example when you can tell: {{"chapter": "8", "section": "8"}}
+Example when you cannot: {{"unchanged": true}}
+{self._json_output_rules()}
+"""
+        response = self.ask_llm(prompt)
+        logging.getLogger(__name__).info("Issue Section inference: %s", response)
+        parsed = self._parse_llm_json(response, context="Issue Section inference")
+        pair = self.parse_issue_section(parsed)
+        if not pair:
+            return snow_info
+        chapter, section = pair
+        current_slug = self.page_slug_from_url(capture_url)
+        new_slug = f"ch{chapter}s{section}"
+        if current_slug == new_slug:
+            return snow_info
+        self.logger(f"Issue Section {new_slug} (Capture URL page was {current_slug or 'unknown'})")
+        return self.apply_issue_section(snow_info, chapter, section)
+
     def get_snow_info(self, snow_id: str) -> dict:
         """
         Return key Feedback ticket fields.
@@ -1001,6 +1517,8 @@ Instructions:
                 f"Customer updates summary: {info['customer_updates_summary']}"
             )
 
+        info = self._resolve_issue_section(info)
+
         logging.getLogger(__name__).info(f"ServiceNow ticket info: {json.dumps({k: v for k, v in info.items() if k != 'customer_updates'}, indent=2)}")
         return info
 
@@ -1014,12 +1532,13 @@ Instructions:
         course = re.findall("Course:.*", description)[0].split(":  ")[1].upper().split(" ")[0].strip()
         version = re.findall("Version:.*", description)[0].split(":  ")[1].strip()
         url = re.findall("URL:.*", description)[0].split(":  ")[1].strip()
-        if "role.rhu.redhat.com/rol-rhu" in url:
-            url = url.replace("role.rhu.redhat.com/rol-rhu", "rol.redhat.com/rol")
-        elif "role.rhu.redhat.com/rol" in url:
-            url = url.replace("role.rhu.redhat.com/rol", "rol.redhat.com/rol")
-        # ROL sometimes embeds course slugs like do180f-4.18; canonical path uses do180-4.18
-        url = re.sub(r"([A-Za-z]{2}\d{3})f(?=-)", r"\1", url)
+        # Keep the original host. ROLE URLs must stay on role.rhu.redhat.com for
+        # SSH Lab Access Feedback; ordinary ROLE Guide/Lab Feedback still navigates
+        # via the ROL base URL in _navigate_to_course_page, not this field.
+        # ROL foundation slugs (rh124f-10.0, RH124F) navigate via the canonical course id.
+        _strip_f = lambda s: re.sub(r"([A-Za-z]{2}\d{3})f\b", r"\1", s, flags=re.IGNORECASE)
+        url = _strip_f(url)
+        course = _strip_f(course)
 
         try:
             chapter = re.findall("ch[0-9][0-9]", url)[0].split("ch")[1]
@@ -1100,15 +1619,24 @@ Instructions:
     # --------------------------
     def classify_ticket_llm(self, description: str, snow_info: dict | None = None) -> dict:
         self.logger("Classifying ticket using LLM")
-        json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue_ticket": false, "is_video_issue_ticket": false, "needs_lab_verification": true}'
+        json_example = '{"student_feedback": "hay un error en el laboratorio", "language": "es", "summary": "The student is reporting an error in the lab", "is_content_issue_ticket": true, "is_environment_issue_ticket": false, "is_video_issue_ticket": false, "is_ssh_lab_access_ticket": false, "is_suggestion_ticket": false, "needs_lab_verification": true}'
+        role_note = ""
+        if snow_info and self.is_role_platform_url(str(snow_info.get("URL") or "")):
+            role_note = (
+                "Supporting context: the Feedback URL is on ROLE (Internal Learner). "
+                "That does not by itself mean SSH Lab Access Feedback — classify from the text. "
+                "Ordinary Guide, Lab, and video Feedback from ROLE still use those types.\n"
+            )
         prompt = f"""
 You are an expert classifier of Red Hat Training tickets.
 {self._build_operational_context("classification", snow_info)}
-
-Classify the user's feedback regarding a Red Hat Training course, there are three types of tickets:
+{role_note}
+Classify the user's feedback regarding a Red Hat Training course. Types are mutually exclusive:
 - content_issue_ticket: a mismatch or inconsistency between the user's complaint and the text in the guide, a typo, a missing step, a missing command, a quiz problem, missing lab specification details, or a grading-script logic mismatch.
-- environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', or the learner is reporting machine access, VM state, or lab-environment behavior, it's an environment issue.
+- environment_issue_ticket: if the feedback includes words such as 'lab start', 'lab finish', ' lab grade','SUCCESS', 'FAIL', 'stuck', or 'lab is taking to long to start', or the learner is reporting machine access, VM state, or lab-environment behavior *inside* the lab VMs. This is NOT ROLE SSH-from-laptop access.
 - video_issue_ticket: if the feedback is about videos not being available, video not matching the section, subtitle issues, translation problems, bad video cuts, or any other video-related problem.
+- ssh_lab_access_ticket: the Internal Learner is stuck on SSH Lab Access from their local machine to a ROLE Lab — private key setup, DOWNLOAD SSH KEY, rht_classroom.rsa, cloud-user jump host, ssh -J, permission denied (publickey). A ROLE URL alone is NOT this type; Internal Learners also report ordinary Guide and Lab issues.
+- suggestion_ticket: the Learner offers an improvement idea or praise, not a report of something broken. Examples: please add a quiz, more examples, a video; "great course". If they also report something broken (wrong command, quiz answer is wrong, lab fails), this is NOT a suggestion_ticket — classify the broken thing.
 
 Examples of content issues:
 {self.content_issues_examples}
@@ -1118,6 +1646,12 @@ Examples of environment issues:
 
 Examples of video issues:
 {self.video_issues_examples}
+
+Examples of SSH Lab Access Feedback:
+{self.ssh_lab_access_examples}
+
+Examples of Suggestion:
+{self.suggestion_examples}
 
 Examples of types of issues to be manually managed:
 {self.manually_managed_issues_examples}
@@ -1134,7 +1668,9 @@ IMPORTANT: Determine if lab verification is needed. Lab verification IS needed w
 Lab verification is NOT needed when:
 - There is a simple typo in the guide text (a spelling mistake visible in the guide itself, not involving lab files)
 - Video issues (missing, not matching, subtitle problems)
-- Manually managed issues (refunds, exam scheduling, UI suggestions)
+- SSH Lab Access Feedback (connecting from a laptop via jump host)
+- Manually managed issues (refunds, exam scheduling)
+- Suggestion (improvement idea or praise — not a broken quiz, not a missing step they claim is already supposed to be there)
 - The issue can be determined just by reading the guide text WITHOUT needing to check anything on the lab VM
 - The learner is complaining about theory-section example commands rather than guided exercise or lab steps
 - The issue is a likely doXXX first-boot delay that matches expected startup behavior
@@ -1146,7 +1682,9 @@ Return JSON with the following fields:
 - is_content_issue_ticket: (true/false)
 - is_environment_issue_ticket: (true/false)
 - is_video_issue_ticket: (true/false)
-- needs_lab_verification: (true/false) - whether we need to start a lab to verify the student's claim
+- is_ssh_lab_access_ticket: (true/false)
+- is_suggestion_ticket: (true/false) — true only when the Feedback is clearly an improvement idea or praise and does not also report something broken. Unclear Feedback is false.
+- needs_lab_verification: (true/false) - whether we need to start a lab to verify the student's claim. Always false for ssh_lab_access_ticket and suggestion_ticket.
 
 This is the student's feedback:
 <student_feedback>
@@ -1162,32 +1700,38 @@ For example:
         logging.getLogger(__name__).info(f"LLM Triaging response:\n {response}")
         parsed = self._parse_llm_json(response, context="LLM triaging")
         if not parsed:
-            return {
+            parsed = {
                 "student_feedback": description,
                 "language": "en",
                 "summary": "Error parsing LLM response",
                 "is_content_issue_ticket": False,
                 "is_environment_issue_ticket": False,
                 "is_video_issue_ticket": False,
+                "is_ssh_lab_access_ticket": False,
+                "is_suggestion_ticket": False,
                 "needs_lab_verification": False,
             }
+        else:
+            # Tolerate near-miss field names from some models (e.g. truncated keys).
+            if "is_environment_issue_ticket" not in parsed:
+                for key in list(parsed.keys()):
+                    if key.startswith("is_environment_issue"):
+                        parsed["is_environment_issue_ticket"] = bool(parsed[key])
+                        break
+            parsed = {
+                "student_feedback": str(parsed.get("student_feedback", description)),
+                "language": str(parsed.get("language", "en")).lower(),
+                "summary": str(parsed.get("summary", "No summary provided")),
+                "is_content_issue_ticket": bool(parsed.get("is_content_issue_ticket", False)),
+                "is_environment_issue_ticket": bool(parsed.get("is_environment_issue_ticket", False)),
+                "is_video_issue_ticket": bool(parsed.get("is_video_issue_ticket", False)),
+                "is_ssh_lab_access_ticket": bool(parsed.get("is_ssh_lab_access_ticket", False)),
+                "is_suggestion_ticket": bool(parsed.get("is_suggestion_ticket", False)),
+                "needs_lab_verification": bool(parsed.get("needs_lab_verification", False)),
+            }
 
-        # Tolerate near-miss field names from some models (e.g. truncated keys).
-        if "is_environment_issue_ticket" not in parsed:
-            for key in list(parsed.keys()):
-                if key.startswith("is_environment_issue"):
-                    parsed["is_environment_issue_ticket"] = bool(parsed[key])
-                    break
-
-        return {
-            "student_feedback": str(parsed.get("student_feedback", description)),
-            "language": str(parsed.get("language", "en")).lower(),
-            "summary": str(parsed.get("summary", "No summary provided")),
-            "is_content_issue_ticket": bool(parsed.get("is_content_issue_ticket", False)),
-            "is_environment_issue_ticket": bool(parsed.get("is_environment_issue_ticket", False)),
-            "is_video_issue_ticket": bool(parsed.get("is_video_issue_ticket", False)),
-            "needs_lab_verification": bool(parsed.get("needs_lab_verification", False)),
-        }
+        parsed = self.apply_ssh_lab_access_classification(parsed, description)
+        return self.apply_suggestion_classification(parsed)
 
     def analyze_content_issue(self, user_issue: str, guide_text: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing content issue using LLM")
@@ -1210,7 +1754,9 @@ For example:
             "\n        \"is_valid_issue\": true," +
             "\n        \"suggested_correction\": \"If the issue is valid, indicate what words, lines, or commands that should be changed in the guide_text to fix the issue. If the issue is valid but there is not enough information it could be possible that a deeper investigation within the lab environment is required. Do not include any explanations or markdown formatting outside the JSON object.\"," +
             "\n        \"summary\": \"a short/medium summary of the 'analysis' field\"," +
-            "\n        \"jira_title\": \"a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes\"\n        }"
+            "\n        \"reply_mode\": \"one of: confirm_defect (real defect found), teach (learner confusion — explain the concept), ask_more (not enough info), lab_pending (lab still initialising), explain_expected (expected behaviour), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up), acknowledge_suggestion (improvement idea or praise — not a defect report)\"," +
+            "\n        \"jira_description\": \"impersonal technical problem statement — no raw learner wording, no PII, no suggested fix, no course code, no section, no chapter references. Always generate, even when reply_mode is not confirm_defect.\"," +
+            "\n        \"jira_title\": \"short failure name — words separated by spaces only, no underscores, dashes, or special chars, all lowercase. Must NOT contain a course code (e.g. do380, rh124), course ID (e.g. do380-4.18), or section identifier (e.g. ch02s06, 4.1, section 4).\"\n        }"
         )
 
         prompt_text = f"""
@@ -1223,8 +1769,10 @@ For example:
 
         {guide_text_prompt}
 
+        {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
         Compare the student's feedback with the excerpt (if any), and provide a detailed analysis of the issue.
-        Determine whether this is a real content defect, a platform/UI issue visible in the course page, or learner confusion caused by using theory content as if it were a guided exercise or lab.
+        Determine whether this is a real content defect, a platform/UI issue visible in the course page, learner confusion caused by using theory content as if it were a guided exercise or lab, or a Suggestion (an improvement idea or praise — e.g. please add a quiz — not a claim that something already on the page is wrong).
+        If the text is clearly a Suggestion, set reply_mode to acknowledge_suggestion, is_valid_issue false, and write jira_title as a short enhancement name and jira_description as an impersonal statement of the requested change (or of the praise).
         IMPORTANT: If the student's complaint involves files, directories, paths, or scripts that exist on the lab VM filesystem (not just in the guide text), you cannot confirm the issue from the guide alone. The lab start command may create or prepare files dynamically. In this case, explicitly state in your analysis that lab verification is required to confirm the claim, and do NOT present the student's suggested alternative as a confirmed fix.
         Remove from the response in the JSON any reference to titles or headings, as I already have that information.
 
@@ -1240,14 +1788,17 @@ For example:
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Content analysis response: {response}")
         parsed = self._parse_llm_json(response, context="LLM content analysis")
-        return parsed or {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
+        if not parsed:
+            parsed = {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": "", "reply_mode": "ask_more"}
+        return self._normalize_content_analysis(parsed)
 
     def analyze_environment_issue(self, user_issue: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing environment issue using LLM")
-        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "jira_title": "a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes"}'
+        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "reply_mode": "one of: confirm_defect, explain_expected, ask_more, lab_pending, acknowledge_resolved", "jira_description": "impersonal technical problem statement — no raw learner wording, no PII, no course code, no section, no chapter references. Always generate.", "jira_title": "short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers."}'
         prompt_text = f"""
         You are an expert in Red Hat Training lab environments.
         {self._build_operational_context("environment", snow_info)}
+        {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
         We have a student who reported an issue within the lab environment. The student's feedback is:
         <student_feedback>
         {user_issue}
@@ -1263,7 +1814,9 @@ For example:
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Environment analysis response:\n {response}")
         parsed = self._parse_llm_json(response, context="LLM environment analysis")
-        return parsed or {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": ""}
+        if not parsed:
+            parsed = {"is_valid_issue": False, "summary": "analysis parse error", "suggested_correction": "", "jira_title": "", "reply_mode": "ask_more"}
+        return self._normalize_environment_analysis(parsed, user_issue=user_issue)
 
     def analyze_video_issue(self, user_issue: str, video_available: bool, snow_info: dict | None = None) -> dict:
         """
@@ -1280,12 +1833,13 @@ For example:
         
         video_context = "The video player IS available on the page, so videos should be accessible." if video_available else "The video player button is NOT available on the page, which typically means videos for this course version are still being produced."
         
-        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "jira_title": "a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes"}'
+        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "reply_mode": "one of: confirm_defect (real video defect), ask_more (not enough info), explain_expected (videos not yet produced), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up), acknowledge_suggestion (please add a video or praise — not a defect report)", "jira_description": "impersonal technical problem statement — no raw learner wording, no PII, no course code, no section, no chapter references. Always generate.", "jira_title": "short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers."}'
         
         prompt_text = f"""
         You are an expert in Red Hat Training video content issues.
         {self._build_operational_context("video", snow_info, video_available=video_available)}
         
+        {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
         A student has reported a video-related issue. The student's feedback is:
         <student_feedback>
         {user_issue}
@@ -1299,6 +1853,8 @@ For example:
         - "subtitle_issue": Problems with subtitles (missing, incorrect, translation issues)
         - "technical_issue": Video player problems, bad cuts, audio sync issues
         - "other": Other video-related issues
+        
+        If the Learner is asking to add a video or praising the videos, not reporting that an existing video is wrong, set reply_mode to acknowledge_suggestion.
         
         Determine if a Jira ticket needs to be created:
         - If videos are not available (video player not present) AND the student is asking where videos are, this is "videos_not_ready" - NO Jira needed
@@ -1314,7 +1870,7 @@ For example:
         - video_issue_type: one of "videos_not_ready", "content_mismatch", "subtitle_issue", "technical_issue", "other"
         - suggested_correction: what needs to be fixed (empty if videos_not_ready)
         - summary: short summary of the analysis
-        - jira_title: a short and precise title of the issue at hand without mentioning the exercise type, course section, or course name, all characters in lowercase separated by spaces, no dashes
+        - jira_title: short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers (e.g. do380, rh124-9.3, ch02s06, 4.1).
         
         Do not include any explanations, xml or markdown formatting outside the JSON object.
         {self._json_output_rules()}
@@ -1322,14 +1878,126 @@ For example:
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Video analysis response: {response}")
         parsed = self._parse_llm_json(response, context="LLM video analysis")
-        return parsed or {
-            "is_valid_issue": False,
-            "needs_jira": False,
-            "video_issue_type": "other",
-            "summary": "analysis parse error",
-            "suggested_correction": "",
-            "jira_title": ""
-        }
+        if not parsed:
+            parsed = {
+                "is_valid_issue": False,
+                "needs_jira": False,
+                "video_issue_type": "other",
+                "summary": "analysis parse error",
+                "suggested_correction": "",
+                "jira_title": "",
+                "reply_mode": "ask_more",
+            }
+        # Sanitize jira_title from LLM slippage
+        if "jira_title" in parsed:
+            parsed["jira_title"] = self._sanitize_jira_title(parsed.get("jira_title") or "")
+        return self._normalize_content_analysis(parsed)
+
+    def analyze_suggestion(self, user_issue: str, guide_text: str = "", snow_info: dict | None = None) -> dict:
+        """Turn a Suggestion into Jira copy and acknowledge_suggestion reply_mode."""
+        self.logger("Analyzing Suggestion using LLM")
+        guide_block = ""
+        if (guide_text or "").strip():
+            guide_block = (
+                "Guide Text from the investigation page (use it to name what the page lacks; "
+                "do not restate chapter or section numbers):\n"
+                f"<guide_text>\n{guide_text}\n</guide_text>\n"
+            )
+        json_example = (
+            '{"analysis": "one or two sentences on whether this is an improvement idea or praise",'
+            ' "is_valid_issue": false,'
+            ' "suggested_correction": "",'
+            ' "summary": "short headline of the suggestion or praise",'
+            ' "reply_mode": "acknowledge_suggestion",'
+            ' "jira_description": "impersonal statement of the requested change, or of the praise when there is no change. No Learner narration, no course code, no section.",'
+            ' "jira_title": "short enhancement name or positive feedback — lowercase words only, no course code, course ID, or section"}'
+        )
+        prompt_text = f"""
+        You write Jira copy for a Suggestion: Feedback that is an improvement idea or praise, not a report of something broken.
+        {self._build_operational_context("content", snow_info)}
+        {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
+
+        The Learner's Feedback is:
+        <student_feedback>
+        {user_issue}
+        </student_feedback>
+
+        {guide_block}
+
+        Rules:
+        - reply_mode is acknowledge_suggestion unless the latest Learner Follow-up is a Resolution Follow-up (then acknowledge_resolved).
+        - Never use confirm_defect, teach, ask_more, lab_pending, or explain_expected.
+        - is_valid_issue is false.
+        - jira_title is a short enhancement name (e.g. add practical quiz) or "positive feedback" for praise. No course code, course ID, or section.
+        - jira_description is impersonal. For an idea, state the requested change and, when Guide Text is present, what the page lacks. For praise only, restate the praise impersonally. No "the Learner reports". No chapter/section/course in the body.
+        - suggested_correction is empty.
+
+        Return JSON:
+        {json_example}
+        {self._json_output_rules()}
+        """
+        response = self.ask_llm(prompt_text)
+        logging.getLogger(__name__).info(f"LLM Suggestion analysis response: {response}")
+        parsed = self._parse_llm_json(response, context="LLM suggestion analysis")
+        if not parsed:
+            parsed = {
+                "is_valid_issue": False,
+                "summary": "analysis parse error",
+                "suggested_correction": "",
+                "jira_title": "",
+                "jira_description": "",
+                "reply_mode": "acknowledge_suggestion",
+            }
+        return self._normalize_suggestion_analysis(parsed)
+
+    def analyze_ssh_lab_access(self, user_issue: str, snow_info: dict | None = None) -> dict:
+        """Analyze SSH Lab Access Feedback. Never a Defect."""
+        self.logger("Analyzing SSH Lab Access Feedback using LLM")
+        json_example = (
+            '{"analysis": "2-4 sentence diagnostic conclusion of which SSH Lab Access step the Internal Learner is stuck on",'
+            ' "is_valid_issue": false,'
+            ' "suggested_correction": "",'
+            ' "summary": "one-line headline",'
+            ' "reply_mode": "teach, ask_more, or acknowledge_resolved",'
+            ' "jira_description": "",'
+            ' "jira_title": ""}'
+        )
+        prompt_text = f"""
+        You are an expert in ROLE SSH Lab Access for Internal Learners (Red Hat employees).
+
+        SSH Lab Access is how Internal Learners reach a ROLE Lab from their local machine:
+        download rht_classroom.rsa, chmod 0600, ssh-add, then jump via
+        ssh -i ~/.ssh/rht_classroom.rsa -J cloud-user@<ip>:22022 student@workstation.
+        The jump-host IP changes per Lab. This is never a Defect.
+
+        The Internal Learner's Feedback is:
+        <student_feedback>
+        {user_issue}
+        </student_feedback>
+
+        {self._RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS}
+        Identify which instruction step they are stuck on (CREATE, DOWNLOAD SSH KEY, key install, ssh-add, jump host).
+        All string fields must be in English.
+        reply_mode is teach when you can explain the step; ask_more when there is no error text and no SSH-step clue; acknowledge_resolved when the latest Learner Follow-up is a Resolution Follow-up.
+        Never use confirm_defect, lab_pending, or explain_expected.
+        Never invent a jump-host IP.
+
+        Return JSON:
+        {json_example}
+        {self._json_output_rules()}
+        """
+        response = self.ask_llm(prompt_text)
+        logging.getLogger(__name__).info(f"LLM SSH Lab Access analysis response: {response}")
+        parsed = self._parse_llm_json(response, context="LLM SSH Lab Access analysis")
+        if not parsed:
+            parsed = {
+                "is_valid_issue": False,
+                "summary": "analysis parse error",
+                "suggested_correction": "",
+                "jira_title": "",
+                "reply_mode": "teach",
+            }
+        return self._normalize_ssh_lab_access_analysis(parsed)
 
     def is_long_boot_lab_first_start(self, snow_info: dict, analysis_response_json: dict) -> bool:
         course = snow_info.get("Course", "")
@@ -1362,66 +2030,168 @@ For example:
             return str(response).strip().lower().startswith("true")
         return False
 
+    _RESOLUTION_FOLLOW_UP_ANALYSIS_INSTRUCTIONS = (
+        "Resolution Follow-up (conversation state, not issue type):\n"
+        "- Judge only from the latest Learner Follow-up, not from earlier Follow-ups "
+        "and not from our team's prior notes.\n"
+        "- If that latest Follow-up states the reported problem is gone or was not a course issue, "
+        "and it does not raise another problem that still needs help, set reply_mode to "
+        "acknowledge_resolved. is_valid_issue must be false. jira_description must be empty.\n"
+        "- An older 'it is fixed' does not override a newer report that the problem is back.\n"
+        "- If the latest Follow-up both says the original issue is resolved AND raises a new problem, "
+        "this is not a Resolution Follow-up — analyse the remaining claim with the usual modes.\n"
+        "- Do not use explain_expected, teach, confirm_defect, or acknowledge_suggestion when acknowledge_resolved applies."
+    )
+
+    # Per-mode reply instructions (#27)
+    _REPLY_MODE_INSTRUCTIONS: dict = {
+        "confirm_defect": (
+            "A defect has been confirmed in the course content or lab.\n"
+            "- Warmly acknowledge the Learner's report.\n"
+            "- Let them know the team has identified the issue and a Defect report has been filed.\n"
+            "- Do NOT describe the diagnosis, the analysis steps, or what exactly was wrong.\n"
+            "- Do NOT mention Jira, internal ticket numbers, or internal workflows.\n"
+            "- Do NOT suggest a workaround unless one is obvious and harmless."
+        ),
+        "teach": (
+            "The Learner's question stems from confusion about expected course behaviour, not a defect.\n"
+            "- Open with a validating phrase such as 'Good question' or 'That is a common point of confusion'.\n"
+            "- Explain the relevant concept directly and factually in second person.\n"
+            "- Do NOT imply that anything is broken or that a Defect has been filed.\n"
+            "- Do NOT diagnose out loud or describe what the LLM analysis found.\n"
+            "- Be specific: tell the Learner exactly what the expected behaviour is and why."
+        ),
+        "ask_more": (
+            "There is not enough information to confirm or rule out a defect.\n"
+            "- Politely thank the Learner and acknowledge the report.\n"
+            "- Ask for the one or two specific pieces of information that are missing (screenshot, exact error text, steps taken, course page URL).\n"
+            "- Do NOT speculate about the cause or imply a Defect has been found.\n"
+            "- Keep the reply brief and the request concrete."
+        ),
+        "lab_pending": (
+            "The Lab is still performing its First Boot (OpenShift Cluster Readiness Check).\n"
+            "- Explain that do/ai-family Labs need about 30–40 minutes on first boot for the OpenShift cluster to be ready.\n"
+            "- Suggest they wait and then run: ssh lab@utility followed by ./wait.sh to monitor progress.\n"
+            "- Do NOT imply a Defect has been filed.\n"
+            "- Be reassuring: this is expected behaviour, not a failure."
+        ),
+        "explain_expected": (
+            "The behaviour the Learner reported is expected by design.\n"
+            "- Acknowledge the Learner's concern warmly.\n"
+            "- Explain clearly why the observed behaviour is expected, without implying anything is broken.\n"
+            "- Do NOT imply a Defect has been filed.\n"
+            "- If relevant, suggest a concrete next step (e.g. wait, use previous version, consult course page)."
+        ),
+        "acknowledge_resolved": (
+            "The latest Learner Follow-up is a Resolution Follow-up: the Learner says the reported "
+            "problem is gone or was not a course issue, and nothing else still needs help.\n"
+            "- Thank them briefly and say we are glad it is resolved.\n"
+            "- Invite them to reach out if anything else comes up.\n"
+            "- Write 2-4 sentences in one short reply.\n"
+            "- Do NOT recap their diagnosis, re-explain the cause, or give unsolicited advice.\n"
+            "- Do NOT imply a Defect has been filed."
+        ),
+        "acknowledge_suggestion": (
+            "A Suggestion: the Learner offered an improvement idea or praise, not a defect report.\n"
+            "- Thank them briefly and acknowledge that the idea or praise was received and will be considered.\n"
+            "- Do not ask for more information.\n"
+            "- Do not promise that the change will be made.\n"
+            "- Do NOT imply a Defect has been filed.\n"
+            "- Write 2-4 sentences in one short reply."
+        ),
+    }
+
+
+    @classmethod
+    def _build_student_reply_prompt(
+        cls,
+        *,
+        reply_mode: str,
+        student_name: str,
+        url: str,
+        analysis_response_json: dict,
+        language_rule: str,
+        ssh_rule: str,
+        operational_context: str,
+        communication_reply_notes: str,
+        json_output_rules: str,
+    ) -> str:
+        """Build the Learner-facing Response prompt. No LLM call."""
+        mode_instructions = cls._REPLY_MODE_INSTRUCTIONS.get(
+            reply_mode, cls._REPLY_MODE_INSTRUCTIONS["ask_more"]
+        )
+        resolved = reply_mode == "acknowledge_resolved"
+        suggestion = reply_mode == "acknowledge_suggestion"
+        notes_block = "" if resolved or suggestion else communication_reply_notes
+        ops_block = "" if resolved else operational_context
+        analysis_block = ""
+        if not resolved:
+            analysis_block = (
+                f"Analysis summary: {analysis_response_json.get('summary', '')}\n"
+                f"Analysis conclusion: {analysis_response_json.get('analysis', '')}"
+            )
+        ssh_block = "" if resolved else ssh_rule
+        json_example = '{"response": "the response to the student"}'
+        return f"""
+    You are a helpful Red Hat Training support representative responding to a Learner's Feedback.
+    {ops_block}
+    {notes_block}
+
+    Learner name: {student_name}
+    Course page: {url}
+
+    {analysis_block}
+
+    Mode: {reply_mode}
+    Mode-specific instructions:
+    {mode_instructions}
+
+    Universal rules (apply on top of the mode instructions):
+    - Address the Learner in second person by their first name. Never use third person.
+    - Do NOT include a greeting ("Dear …" / "Hi …") — it is added automatically.
+    - Do NOT add a closing salutation or signature.
+    - Do NOT mention Jira, Defect IDs, internal tracking, or internal workflows.
+    - Do NOT mention course codes, chapter numbers, section numbers, or "valid issue" status.
+    - NEVER use the words 'guide text', 'guide_text', or 'course guide text'. Use 'course material', 'exercise instructions', or 'course content'.
+    - Write in short paragraphs separated by blank lines. Each paragraph covers one idea.
+    - {language_rule}
+    {ssh_block}
+
+    Format: JSON with one field.
+    {json_output_rules}
+    Example: {json_example}
+    """
+
     def craft_llm_response(self, snow_info: dict, analysis_response_json: dict, classification_data: dict | None = None) -> dict:
         self.logger("LLM Crafting reply to student")
         student_name = snow_info.get("full_name", "").split(" ")[0]
-        course = snow_info.get("Course", "")
-        chapter = snow_info.get("Chapter", "")
-        section = snow_info.get("Section", "")
         url = snow_info.get("URL", "")
-        json_example = '{"response": "the response to the student"}'
-        prompt_text = f"""
-    You are a helpful Red Hat Training support representative responding to a student's feedback.
-    {self._build_operational_context("reply", snow_info)}
-    {self.communication_reply_notes}
+        reply_mode = analysis_response_json.get("reply_mode", "ask_more")
+        learner_language = (classification_data or {}).get("language", "en")
+        if learner_language.startswith("en"):
+            language_rule = "Write the reply in English."
+        else:
+            language_rule = f"Write the reply in the Learner's language: {learner_language}. Do NOT write in English."
 
-    Student Information:
-    - Name: {student_name}
-    - Course: {course}
-    - Chapter: {chapter}
-    - Section: {section}
+        ssh_rule = ""
+        if (classification_data or {}).get("is_ssh_lab_access_ticket"):
+            ssh_rule = (
+                "- This is SSH Lab Access Feedback. Teach the Internal Learner through the SSH key and jump-host steps.\n"
+                "- Never invent or paste a jump-host IP address. Theirs is already in the Feedback and changes per Lab.\n"
+                "- Do not mention ROLE, Factory, assignment groups, or internal handover."
+            )
 
-    Student's Original Feedback:
-    {snow_info.get('Description', '')}
-
-    Course guide URL:
-    {url}
-
-    Analysis Results:
-    - Issue Summary: {analysis_response_json.get('summary', '')}
-    - Is Valid Issue: {analysis_response_json.get('is_valid_issue', False)}
-    - Suggested Correction: {self._normalize_suggested_correction(analysis_response_json.get('suggested_correction', ''))}
-    - Analysis: {analysis_response_json.get('analysis', '')}
-    - Video Issue Type: {analysis_response_json.get('video_issue_type', '')}
-    - Classification Flags: {json.dumps(classification_data or {}, ensure_ascii=True)}
-
-    Craft a professional, helpful response to the student based on the analysis results that:
-    1. Do NOT include a greeting line such as 'Dear Name,' or 'Hi Name,' — the greeting is added separately.
-    2. Start directly with thanking them and acknowledging the feedback shortly.
-    3. If the analysis is not valid or the evidence is insufficient, ask for more information, a screenshot, and confirmation of the exact course section.
-    4. Don't add a signature nor final salutation to the response.
-    5. Do not mention Jira or internal tracking.
-    6. NEVER use the words 'guide text', 'guide_text', or 'course guide text'. Use natural alternatives like 'course material', 'exercise instructions', 'course page', or 'course content'.
-    7. Write the reply in short paragraphs separated by blank lines (two newlines). Each paragraph should cover one distinct idea: acknowledgement, explanation of the issue, what we are doing about it, and next steps for the learner. Do NOT write the entire reply as a single block of text.
-
-    Keep the response concise but informative.
-
-    Special cases:
-    - If the issue looks like a doXXX first-boot delay, explain that the first boot can take about 30-40 minutes and mention ssh lab@utility plus ./wait.sh.
-    - If videos for this version are not ready, explain that clearly and suggest using the previous version if video is important.
-    - Only suggest deleting and recreating the lab when the analysis indicates that this is an appropriate recovery step.
-    - If the learner seems to have used theory content as if it were a guided exercise or lab, clarify that politely.
-    - IMPORTANT: If the analysis says lab verification is needed, or the issue involves files, directories, or scripts on the lab VM that we have not yet verified, do NOT tell the learner what the fix is. Instead, say something like: 'Thank you for your feedback. We are currently looking into this and verifying it in the lab environment. We will get back to you once we have confirmed the issue.' Keep it short and reassuring.
-    - Never confirm an unverified filesystem claim as fact in the reply.
-
-    Format the response as a JSON object with the following fields:
-    - response: the response to the student
-
-    {self._json_output_rules()}
-
-    Example:
-    {json_example}
-    """
+        prompt_text = self._build_student_reply_prompt(
+            reply_mode=reply_mode,
+            student_name=student_name,
+            url=url,
+            analysis_response_json=analysis_response_json,
+            language_rule=language_rule,
+            ssh_rule=ssh_rule,
+            operational_context=self._build_operational_context("reply", snow_info),
+            communication_reply_notes=self.communication_reply_notes,
+            json_output_rules=self._json_output_rules(),
+        )
         logging.getLogger(__name__).debug(f"LLM student reply prompt length: {len(prompt_text)} chars")
         response = self.ask_llm(prompt_text)
         logging.getLogger(__name__).info(f"LLM Student reply output ({len(response)} chars):\n {response}")
@@ -1451,89 +2221,65 @@ For example:
         COMMENTS_XPATH = '//*[@id="activity-stream-comments-textarea"]'
 
         try:
-            # Add work note with summary of analysis
-            summary = self._clean_llm_text(analysis_response_json.get('summary', 'No summary available'))
-            analysis = self._clean_llm_text(analysis_response_json.get('analysis', ''))
-            work_note = f"Summary:\n{summary}\n\nLLM Analysis:\n{analysis}\n"
+            # ------------------------------------------------------------------
+            # Work notes — always in English (#28)
+            # ------------------------------------------------------------------
+            reply_mode = analysis_response_json.get("reply_mode", "ask_more")
+            learner_language = classification_data.get("language", "en")
+            summary = self._clean_llm_text(analysis_response_json.get("summary", "No summary available"))
+            analysis_text = self._clean_llm_text(analysis_response_json.get("analysis", ""))
+            # Only include translated feedback when the Learner wrote in a non-English language
+            if learner_language.startswith("en"):
+                work_note = (
+                    f"Summary:\n{summary}\n\n"
+                    f"LLM Analysis:\n{analysis_text}\n"
+                )
+            else:
+                translated_feedback = classification_data.get("translated_student_feedback", snow_info.get("Description", ""))
+                work_note = (
+                    f"Translated feedback:\n{translated_feedback}\n\n"
+                    f"Summary:\n{summary}\n\n"
+                    f"LLM Analysis:\n{analysis_text}\n"
+                )
             try:
                 WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(work_note)
             except Exception:
                 pass
 
-            # Prepare and add student reply
-            reply_text = ""
-            if classification_data.get("is_content_issue_ticket", False):
-                crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
-                reply_text = crafted.get("response", "")
-                default_jira_reply = (
-                    f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
-                    f"We created a Jira ticket to fix it in the next release.\n\n"
-                    f"Thanks again for your contributions to improving the course guide! \n\n"
-                )
+            # ------------------------------------------------------------------
+            # Learner-facing reply — driven by reply_mode (#27)
+            # ------------------------------------------------------------------
+            crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
+            reply_text = crafted.get("response", "")
+
+            try:
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
+            except Exception:
+                pass
+
+            # Annotate work notes with Jira gate decision
+            jira_note = (
+                f"\n\nreply_mode: {reply_mode}"
+                if reply_mode != "confirm_defect"
+                else f"\n\nreply_mode: {reply_mode} — Jira Defect to be filed."
+            )
+            try:
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(jira_note)
+            except Exception:
+                pass
+
+            # English copy of the reply — only when the Learner is not writing in English (#28)
+            if reply_text.strip() and not learner_language.startswith("en"):
+                english_reply = self.translate_text(reply_text, learner_language)
                 try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys("\n\nDEFAULT RESPONSE:")
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(default_jira_reply + signature)
-                except Exception:
-                    pass
-            elif classification_data.get("is_video_issue_ticket", False):
-                # Handle video issues
-                video_issue_type = analysis_response_json.get("video_issue_type", "other")
-                needs_jira = analysis_response_json.get("needs_jira", False)
-                
-                if video_issue_type == "videos_not_ready" or not needs_jira:
-                    # Videos not yet available for this course version - no Jira needed
-                    reply_text = (
-                        f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
-                        f"Thank you for reaching out regarding the video content for this course.\n\n"
-                        f"The videos for this course version are still being produced by our team. "
-                        f"Once they become available, the \"Enable video player\" button will appear "
-                        f"in the dock bar at the bottom of the learning platform.\n\n"
-                        f"If video is an important resource for you right now, I would recommend using "
-                        f"the previous version of the course in the meantime, because the written content "
-                        f"usually does not change much between versions.\n\n"
-                        f"We appreciate your patience and understanding. Please check back later "
-                        f"for video availability.\n\n"
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(
+                        f"\n\nLearner reply (English):\n{english_reply}\n"
                     )
-                    try:
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys("\n\nVIDEO NOT READY - No Jira needed. Videos for this course version are still being produced.")
-                    except Exception:
-                        pass
-                else:
-                    # Video content issue that needs a Jira ticket
-                    crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
-                    reply_text = crafted.get("response", "")
-                    default_jira_reply = (
-                        f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
-                        f"We have created a Jira ticket to address this video issue.\n\n"
-                        f"Thanks for helping us improve the video content!\n\n"
-                    )
-                    try:
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys("\n\nVIDEO ISSUE - Jira ticket created with 'Video Content' component.")
-                        WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, WORK_NOTES_XPATH))).send_keys(default_jira_reply + signature)
-                    except Exception:
-                        pass
-            elif classification_data.get("is_environment_issue_ticket", False) and self.is_long_boot_lab_first_start(snow_info, analysis_response_json):
-                reply_text = (
-                    f"\n\nDear {snow_info.get('full_name','').split(' ')[0]},\n\n"
-                    f"Thank you for your feedback. Labs in this course can take about 30-40 minutes to finish the setup the first time they are booted up, so please give it some more time. Once everything is working, it should be much faster.\n\n"
-                    f"You can monitor the status of the cluster by ssh lab@utility and running the ./wait.sh script. Once the script has finished the scripts are ready to be run.\n\n"
-                    f"If by the time you read this message it is still not working fine, I would suggest deleting and creating a new lab environment, and then try to run the lab again.\n\n"
-                    f"Please, let me know if the issue persists.\n\n"
-                )
-                try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
                 except Exception:
                     pass
-            else:
-                crafted = self.craft_llm_response(snow_info, analysis_response_json, classification_data)
-                reply_text = crafted.get("response", "")
-                try:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, COMMENTS_XPATH))).send_keys(reply_text + signature)
-                except Exception:
-                    pass
+
+            if classification_data.get("is_ssh_lab_access_ticket"):
+                self._prefill_ssh_lab_access_handover()
 
             # Do NOT click the Post button automatically.
             # The journal fields are pre-filled for human review;
@@ -1565,6 +2311,57 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
     # --------------------------
     # High-level helpers
     # --------------------------
+    SSH_HANDOVER_ASSIGNMENT_GROUP = "RHT Learner Experience"
+    SSH_HANDOVER_ASSIGNEE = "Yashashvi Singh"
+
+    def _snow_typeahead_fill(self, field_id: str, value: str) -> None:
+        """Prefill a ServiceNow reference/typeahead field. Human still Saves."""
+        field = WebDriverWait(self.driver, 10).until(
+            EC.element_to_be_clickable((By.ID, field_id))
+        )
+        field.click()
+        field.send_keys(Keys.CONTROL, "a")
+        field.send_keys(Keys.BACKSPACE)
+        field.send_keys(value)
+        time.sleep(0.8)
+        field.send_keys(Keys.TAB)
+
+    def _prefill_ssh_lab_access_handover(self) -> None:
+        """Assignment group first (T1), then Assigned to Yashashvi Singh."""
+        try:
+            self._snow_typeahead_fill(
+                "sys_display.x_redha_rht_task.assignment_group",
+                self.SSH_HANDOVER_ASSIGNMENT_GROUP,
+            )
+            time.sleep(0.4)
+            self._snow_typeahead_fill(
+                "sys_display.x_redha_rht_task.assigned_to",
+                self.SSH_HANDOVER_ASSIGNEE,
+            )
+            self.logger(
+                f"Prefills: Assignment group={self.SSH_HANDOVER_ASSIGNMENT_GROUP}, "
+                f"Assigned to={self.SSH_HANDOVER_ASSIGNEE}"
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Could not prefill SSH Lab Access handover fields: {e}")
+
+    def _open_role_ssh_lab_workspace(self, snow_info: dict, course_id: str) -> None:
+        """Open the original ROLE URL, Lab Environment tab, expand SSH panel, CREATE without waiting."""
+        url = snow_info.get("URL") or ""
+        self.logger(f"Opening ROLE URL for SSH Lab Access: {url}")
+        self.driver.get(url)
+        WebDriverWait(self.driver, 30).until(
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, ".course__content-wrapper, #ssh-key-info--heading, [role='tab']")
+            )
+        )
+        self.lab_mgr.select_lab_environment_tab("lab-environment")
+        self.lab_mgr.expand_ssh_key_info()
+        try:
+            self.lab_mgr.create_lab(course_id=course_id, wait=False)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"CREATE Lab on ROLE did not complete: {e}")
+
     def _navigate_to_course_page(self, course_id: str, chapter_section: str, environment: str = "rol"):
         """
         Fast course navigation for the snowai per-ticket flow.
@@ -1586,6 +2383,39 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 (By.CSS_SELECTOR, ".course__content-wrapper")
             )
         )
+
+    def _goto_investigation_page(
+        self,
+        snow_info: dict,
+        course_id: str,
+        chapter_section: str,
+        environment: str,
+    ) -> str:
+        """Open the Issue Section page; fall back to the Capture URL page on load failure."""
+        try:
+            self._navigate_to_course_page(
+                course_id=course_id,
+                chapter_section=chapter_section,
+                environment=environment,
+            )
+            return chapter_section
+        except Exception as exc:
+            capture_slug = self.page_slug_from_url(
+                snow_info.get("CaptureURL") or snow_info.get("URL") or ""
+            )
+            if not capture_slug or capture_slug == chapter_section:
+                raise
+            logging.getLogger(__name__).warning(
+                f"Issue Section page {chapter_section} did not load ({exc}); "
+                f"falling back to Capture URL page {capture_slug}"
+            )
+            self.restore_capture_location(snow_info)
+            self._navigate_to_course_page(
+                course_id=course_id,
+                chapter_section=capture_slug,
+                environment=environment,
+            )
+            return capture_slug
 
     def start_lab_for_course(self, course_id: str, chapter_section: str = "pr01", environment: str = "rol"):
         self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
@@ -1668,27 +2498,32 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # is already active (header nav button visible) to avoid the costly
         # go_to_url + accept_trustarc + username-field-timeout sequence.
         self.driver.switch_to.window(self.login_tab_handles['rol'])
-        try:
 
-            username = self.lab_mgr._get_credentials(environment)
-            if username:
-                WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(
-                    (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
-                )).send_keys(f"{username}@redhat.com")
-                WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(
-                    (By.XPATH, '//*[@id="login-show-step2"]'))).click()
-            WebDriverWait(self.driver, 5).until(
-                EC.presence_of_element_located((By.XPATH,
-                    '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))
-            )
+        try:
+            avatar = WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH,
+                '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
             self.logger("ROL session already active")
-            self._rol_logged_in = True
-        except Exception:
+        except:
             try:
-                self.lab_mgr.login(environment=environment)
+                username = self.lab_mgr._get_credentials(environment)
+                if username:
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(
+                        (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
+                    )).send_keys(f"{username}@redhat.com")
+                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(
+                        (By.XPATH, '//*[@id="login-show-step2"]'))).click()
+                #WebDriverWait(self.driver, 5).until(
+                #    EC.presence_of_element_located((By.XPATH,
+                #        '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))
+                #)
+                self.logger("ROL session already active")
                 self._rol_logged_in = True
-            except Exception as e:
-                logging.getLogger(__name__).warning(f"ROL login issue: {e}")
+            except Exception:
+                try:
+                    self.lab_mgr.login(environment=environment)
+                    self._rol_logged_in = True
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"ROL login issue: {e}")
 
         # Jira — page has been loading since Phase 1. Check logged-in state
         # directly instead of re-navigating (which reloads the page).
@@ -1729,7 +2564,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             "Return null only if nothing from tiers 1–5 applies.\n"
             "NEVER return a bare Kubernetes/container infrastructure noun without a qualifying name: "
             "'pod', 'image', 'container', 'operator', 'deployment', 'service', 'namespace' alone are too generic. "
-            "NEVER return a course code or course ID (e.g. 'DO188', 'rh124') or a section identifier (e.g. 'ch01s02') — those are already in the search query.\n\n"
+            "NEVER return a course code or course ID (e.g. 'DO188', 'rh124') or a section identifier (e.g. 'ch01s02'), nor general course words such as lab, comprehensive review, guided exercise, etc. — those are already in the search query.\n\n"
             f"<feedback>\n{snow_info.get('Description', '')}\n</feedback>\n\n"
             'Output JSON: {"keyword": "<value>"} or {"keyword": null}\n'
             f"{self._json_output_rules()}"
@@ -1742,16 +2577,27 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
     def build_jira_search_url(self, snow_info: dict, keyword: str) -> str:
         course = snow_info.get("Course", "")
-        if snow_info.get("Section"):
-            chapter_and_section = f"ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')}"
-        else:
-            chapter_and_section = f"ch{snow_info.get('Chapter','')}"
         if course == "RH199":
             component_clause = 'component in (RH134, RH199, RH124)'
         else:
             component_clause = f'component = "{course}"'
         term = (keyword or course).replace('"', '').replace("'", "")
-        jql = f'project = PTL AND resolution = Unresolved AND description ~ {chapter_and_section} AND {component_clause} AND text ~ "{term}" ORDER BY priority DESC, updated DESC'
+
+        # Only narrow by page when the investigation page is a real Section (chNNsMM).
+        # Preface (pr01) and appendix (ap01) pages are Capture URL noise — searching
+        # by them hides duplicates filed under the actual exercise page (ADR-0003).
+        slug = self._extract_page_slug(snow_info.get("URL", ""))
+        if re.fullmatch(r"ch\d+s\d+", slug, flags=re.IGNORECASE):
+            location_clause = f"AND description ~ {slug} "
+        else:
+            location_clause = ""
+
+        jql = (
+            f"project = PTL AND resolution = Unresolved "
+            f"{location_clause}"
+            f"AND {component_clause} AND text ~ \"{term}\" "
+            f"ORDER BY priority DESC, updated DESC"
+        )
         return f"https://redhat.atlassian.net/issues/?jql={quote(jql)}"
 
 
@@ -1844,7 +2690,16 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
         # Fill in Summary — uses element_to_be_clickable to guard against a
         # still-rendering form when Bug type was just changed.
-        summary_value = f"{snow_info.get('Course','')}: ch{snow_info.get('Chapter','')}s{snow_info.get('Section','')} - {analysis.get('jira_title', '')} - {snow_info.get('snow_id','')}"
+        # Format: '{Course Code}: {page slug} - {short failure name} - {Feedback id}'
+        # Page slug comes from the investigation URL. Problem phrase strips any
+        # location tokens the LLM may have slipped in; falls back to the first
+        # ~8 words of jira_description when the phrase is empty (ADR-0003).
+        jira_desc = (analysis.get("jira_description") or "").strip()
+        summary_value = self._build_defect_summary(
+            snow_info,
+            analysis.get("jira_title") or "",
+            jira_desc,
+        )
         summary_field = WebDriverWait(self.driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, '//input[@id="summary-field"]'))
         )
@@ -1854,7 +2709,9 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # The "Create Bug" template pre-fills a table with URL / Reporter RHNID /
         # Section Title rows plus an "Issue description" heading.
         # We use JS insertText for instant paste (send_keys types char-by-char).
-        translated = classification.get("translated_student_feedback", snow_info.get("Description", ""))
+        # Use the LLM-cleaned impersonal description (ADR-0003: always drafted).
+        # Fall back to translated feedback only when the description is missing.
+        translated = jira_desc or classification.get("translated_student_feedback", snow_info.get("Description", ""))
 
         # Wait for the editor to be present, then wait for the Bug template's
         # <td> cells to render.  We intentionally avoid caching the element
@@ -1876,28 +2733,86 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 "document.execCommand('insertText', false, arguments[0]);", text
             )
 
+        def _insert_hyperlink_in_editor(cell_el, url):
+            """Insert a Capture URL as a real hyperlink in the ProseMirror cell.
+
+            insertHTML of <a> is the primary path. ProseMirror often strips that
+            to plain text, so createLink on the inserted URL is the fallback that
+            still leaves a clickable mark.
+            """
+            html = self._jira_editor_link_html(url)
+            if not html:
+                _insert_text_in_editor(url)
+                return
+            self.driver.execute_script(
+                """
+                var cell = arguments[0];
+                var url = arguments[1];
+                var html = arguments[2];
+                if (!cell || !url) return;
+
+                function cellHasLink() {
+                    return !!(cell.querySelector && cell.querySelector('a[href]'));
+                }
+
+                function linkifyUrlText() {
+                    var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null);
+                    var node;
+                    while ((node = walker.nextNode())) {
+                        var text = node.textContent || '';
+                        var idx = text.indexOf(url);
+                        if (idx === -1) continue;
+                        var range = document.createRange();
+                        range.setStart(node, idx);
+                        range.setEnd(node, idx + url.length);
+                        var sel = window.getSelection();
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                        document.execCommand('createLink', false, url);
+                        sel.collapseToEnd();
+                        return cellHasLink();
+                    }
+                    return false;
+                }
+
+                document.execCommand('insertHTML', false, html);
+                if (cellHasLink()) return;
+                if (linkifyUrlText()) return;
+                document.execCommand('insertText', false, url);
+                linkifyUrlText();
+                """,
+                cell_el,
+                url,
+                html,
+            )
+
+        def _focus_table_cell(cell):
+            """Place the caret at the start of a template table value cell."""
+            inner_p = cell.find_elements(By.TAG_NAME, 'p')
+            target = inner_p[0] if inner_p else cell
+            self.driver.execute_script(
+                "var el = arguments[0]; el.focus ? el.focus() : el.click();"
+                "var range = document.createRange(); range.selectNodeContents(el);"
+                "var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);"
+                "sel.collapseToStart();",
+                target
+            )
+            time.sleep(0.2)
+
         # Click the <p> inside each <td> value cell to ensure cursor placement.
         # Empty cells have a tiny <p> with &nbsp; that's hard to click on the
         # <td> itself, so we target the inner paragraph.
         # Always fetch table_cells fresh here (no cached editor ref = no stale ref).
         table_cells = self.driver.find_elements(By.CSS_SELECTOR, '#ak-editor-textarea td')
-        cell_values = [
-            snow_info.get("URL", ""),
-            snow_info.get("RHNID", ""),
-            snow_info.get("Title", ""),
-        ]
         if table_cells:
-            for cell, value in zip(table_cells, cell_values):
-                inner_p = cell.find_elements(By.TAG_NAME, 'p')
-                target = inner_p[0] if inner_p else cell
-                self.driver.execute_script(
-                    "var el = arguments[0]; el.focus ? el.focus() : el.click();"
-                    "var range = document.createRange(); range.selectNodeContents(el);"
-                    "var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);"
-                    "sel.collapseToStart();",
-                    target
-                )
-                time.sleep(0.2)
+            capture_url_cell, *plain_cells = table_cells
+            _focus_table_cell(capture_url_cell)
+            _insert_hyperlink_in_editor(capture_url_cell, snow_info.get("URL", ""))
+            for cell, value in zip(plain_cells, (
+                snow_info.get("RHNID", ""),
+                snow_info.get("Title", ""),
+            )):
+                _focus_table_cell(cell)
                 _insert_text_in_editor(value)
         else:
             # No table — click the editor by locating it fresh, then type inline.
@@ -1942,8 +2857,12 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             time.sleep(0.2)
 
         _fill_section("Issue description", translated)
-        _fill_section("Workaround", self._normalize_suggested_correction(
-            analysis.get('suggested_correction', '')))
+
+        # Workaround only when a Defect is confirmed — a suggested fix is not
+        # honest until the engineer decides to actually file (ADR-0003).
+        if analysis.get("reply_mode") == self._MODE_CONFIRM_DEFECT:
+            _fill_section("Workaround", self._normalize_suggested_correction(
+                analysis.get('suggested_correction', '')))
 
         # Priority tab -> set priority to Minor
         try:
@@ -2064,12 +2983,14 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 snow_info = self.get_snow_info(snow_id)
                 full_description = self._build_full_description(snow_info)
                 classification = self.classify_ticket_llm(full_description, snow_info)
-                if classification.get("language") == "en":
+                if classification.get("language", "en").startswith("en"):
                     translated = full_description
                 else:
                     translated = self.translate_text(full_description, classification.get("language", "en"))
                 classification["translated_student_feedback"] = translated
-                analysis = {"summary": "", "suggested_correction": "", "jira_title": "", "is_valid_issue": False}
+                # Store English translation so analysis methods use it as primary evidence (#28)
+                snow_info["Description_en"] = translated
+                analysis = {"summary": "", "suggested_correction": "", "jira_title": "", "is_valid_issue": False, "reply_mode": "ask_more"}
 
                 # Tab 2: ROL chapter/section
                 self.driver.switch_to.window(ticket_window)
@@ -2097,18 +3018,41 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                     is_content_issue = classification.get("is_content_issue_ticket", False)
                     is_environment_issue = classification.get("is_environment_issue_ticket", False)
                     is_video_issue = classification.get("is_video_issue_ticket", False)
-                    
-                    # For video issues, just navigate and check video player availability
-                    if is_video_issue:
-                        self.logger("Video issue detected - navigating to course page without starting lab")
-                        self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
-                        video_player_available = self.lab_mgr.check_video_player_available()
-                        analysis = self.analyze_video_issue(full_description, video_player_available, snow_info)
-                    elif is_content_issue:
-                        # Navigate to the course page
-                        self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                    is_ssh_lab_access = classification.get("is_ssh_lab_access_ticket", False)
+                    is_suggestion = classification.get("is_suggestion_ticket", False)
+                    analysis_input = snow_info.get("Description_en") or translated or full_description
 
-                        # Fetch guide text for "content guide" issue analysis
+                    if is_ssh_lab_access:
+                        self.logger("SSH Lab Access Feedback — ROLE Lab Environment, no Defect")
+                        analysis = self.analyze_ssh_lab_access(analysis_input, snow_info)
+                        self._open_role_ssh_lab_workspace(snow_info, course_id)
+                    elif is_suggestion:
+                        self.logger("Suggestion — course page and Guide Text, no lab")
+                        chapter_section = self._goto_investigation_page(
+                            snow_info, course_id, chapter_section, environment
+                        )
+                        try:
+                            self.lab_mgr.select_lab_environment_tab("course")
+                        except Exception:
+                            pass
+                        guide_text = ""
+                        try:
+                            guide_text = self.fetch_guide_text_from_website()
+                            self.logger(f"Fetched guide text length: {len(guide_text)}")
+                        except Exception as e:
+                            logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
+                        analysis = self.analyze_suggestion(analysis_input, guide_text, snow_info)
+                    elif is_video_issue:
+                        self.logger("Video issue detected - navigating to course page without starting lab")
+                        chapter_section = self._goto_investigation_page(
+                            snow_info, course_id, chapter_section, environment
+                        )
+                        video_player_available = self.lab_mgr.check_video_player_available()
+                        analysis = self.analyze_video_issue(analysis_input, video_player_available, snow_info)
+                    elif is_content_issue:
+                        chapter_section = self._goto_investigation_page(
+                            snow_info, course_id, chapter_section, environment
+                        )
                         try:
                             self.lab_mgr.select_lab_environment_tab("course")
                         except Exception:
@@ -2121,27 +3065,33 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                         except Exception as e:
                             logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
 
-                        # Perform analysis based on issue type
-                        analysis = self.analyze_content_issue(full_description, guide_text, snow_info)
+                        analysis = self.analyze_content_issue(analysis_input, guide_text, snow_info)
 
                     elif is_environment_issue:
-                        analysis = self.analyze_environment_issue(full_description, snow_info)
+                        analysis = self.analyze_environment_issue(analysis_input, snow_info)
 
-                    # If the issue requires lab verification, start the lab
-                    if needs_lab:
-                        self.logger("Lab verification needed - starting lab environment")
-                        try:
-                            self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
-                        except Exception as e:
-                            logging.getLogger(__name__).warning(f"Failed to start lab: {e}")
-                    else:
-                        self.logger("No lab verification needed - navigating to course page only")
-                        self._navigate_to_course_page(course_id=course_id, chapter_section=chapter_section, environment=environment)
-                        self.lab_mgr.select_lab_environment_tab("course")
-                        if is_video_issue:
-                            self.lab_mgr.toggle_video_player(state=True)
+                    # Lab verification on ROL — never for SSH Lab Access (ROLE path already ran)
+                    # or Suggestion (no claim to reproduce in the Lab)
+                    if not is_ssh_lab_access and not is_suggestion:
+                        if needs_lab:
+                            self.logger("Lab verification needed - starting lab environment")
+                            try:
+                                chapter_section = self._goto_investigation_page(
+                                    snow_info, course_id, chapter_section, environment
+                                )
+                                self.start_lab_for_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
+                            except Exception as e:
+                                logging.getLogger(__name__).warning(f"Failed to start lab: {e}")
                         else:
-                            self.lab_mgr.toggle_video_player(state=False)
+                            self.logger("No lab verification needed - navigating to course page only")
+                            chapter_section = self._goto_investigation_page(
+                                snow_info, course_id, chapter_section, environment
+                            )
+                            self.lab_mgr.select_lab_environment_tab("course")
+                            if is_video_issue:
+                                self.lab_mgr.toggle_video_player(state=True)
+                            else:
+                                self.lab_mgr.toggle_video_player(state=False)
 
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"ROL tab setup failed for {snow_id}: {e}\n{traceback.format_exc()}")
@@ -2153,15 +3103,18 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"Failed updating SNOW notes/reply for {snow_id}: {e}")
 
-                # Determine if Jira ticket is needed
-                # Skip Jira for video issues where videos are just not ready yet
+                # Open Jira search + create for every Feedback except the two that
+                # structurally cannot produce a Defect (ADR-0003):
+                #   - SSH Lab Access Feedback: never a Defect by domain rule
+                #   - Resolution Follow-up (acknowledge_resolved): nothing left to file
+                reply_mode = analysis.get("reply_mode", "ask_more")
                 skip_jira = (
-                    classification.get("is_video_issue_ticket", False) and 
-                    (analysis.get("video_issue_type") == "videos_not_ready" or not analysis.get("needs_jira", True))
+                    classification.get("is_ssh_lab_access_ticket", False)
+                    or reply_mode == "acknowledge_resolved"
                 )
 
                 if skip_jira:
-                    self.logger("Skipping Jira creation - videos not ready, no ticket needed")
+                    self.logger("Skipping Jira — SSH Lab Access or Resolution Follow-up, no Defect possible")
                 else:
                     # Tab 3: Jira search of similar tickets
                     self.driver.switch_to.window(ticket_window)

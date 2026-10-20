@@ -10,6 +10,10 @@ Automation tools for the Learner Experience (LX) team to triage learner feedback
 A person taking a Red Hat training course on a Production Platform.
 _Avoid_: Student, customer, user
 
+**Internal Learner**:
+A Red Hat employee taking a course on ROLE. A kind of Learner; not partners or contractors.
+_Avoid_: Employee, student, user
+
 **LX Engineer**:
 A member of the Learner Experience team who triages Feedback, investigates issues, creates Defects, and responds to Learners.
 _Avoid_: Operator, support agent
@@ -20,16 +24,46 @@ _Avoid_: Operator, support agent
 A ServiceNow ticket submitted by a Learner reporting a problem or observation about a course. Processed by the LX team (T2).
 _Avoid_: Ticket (ambiguous), case, incident
 
+**Capture URL**:
+The Guide page URL stamped into the Feedback when the Learner opened the form. Not necessarily the Issue Section.
+_Avoid_: Ticket URL (ambiguous with ServiceNow)
+
+**Issue Section**:
+The Section the Learner is complaining about. Named in the Feedback text in many forms (8.8, chapter 8 section 8, ch08s08, 演習8.8).
+
 **Support Request**:
 A ServiceNow ticket for account, subscription, or exam issues. Processed by the TTS team (T1).
 _Avoid_: Ticket (ambiguous)
 
 **Defect**:
-A Jira ticket in the PTL project representing a confirmed issue in course content, lab scripts, or video. Component = Course Code.
+A Jira ticket in the PTL project representing a confirmed issue in course content, lab scripts, or video. Component = Course Code. A prefilled create dialog is not a Defect until the LX Engineer submits it.
 _Avoid_: Bug, Jira ticket, issue (overloaded)
 
+**Defect Summary**:
+The title of a Defect. A scannable prefix (Course Code, Guide page slug, Feedback id) plus a short failure name — or, for a Suggestion, a short enhancement name.
+_Avoid_: Jira title, bug title
+
+**Defect Description**:
+The technical problem statement on a Defect, written impersonally. Drafted whenever a create dialog is prepared, including before a Defect is confirmed. It does not locate the issue and does not narrate the Learner.
+_Avoid_: Jira description, issue description (the Jira template heading)
+
 **Response**:
-A reply sent to a Learner through ServiceNow. Can close the Feedback, request clarification (Pending Customer), or acknowledge that investigation is underway.
+A reply sent to a Learner through ServiceNow. Can close the Feedback, request clarification (Pending Customer), acknowledge that investigation is underway, briefly acknowledge a Resolution Follow-up, or thank a Suggestion.
+
+**Learner Follow-up**:
+A portal comment or inbound email from the Learner on a Feedback after the original description. Not a Response.
+_Avoid_: Customer update, journal entry, additional comments
+
+**Resolution Follow-up**:
+A Learner Follow-up that states the reported problem is gone or was not a course issue. Not a retraction of a remaining Defect claim, and not a workaround while the Learner still wants a fix.
+_Avoid_: Customer acknowledgement, resolved ticket (ambiguous with ServiceNow state)
+
+**SSH Lab Access Feedback**:
+Feedback from an Internal Learner about connecting to a ROLE Lab via SSH (private key setup, jump host, permissions). Never a Defect. SSH Lab Access exists on ROLE and Factory; Feedback of this type only arrives from ROLE.
+
+**Suggestion**:
+Feedback that is an improvement idea or praise, not a report of something broken. Still Feedback; the LX Engineer still gets Jira search and a prefilled create dialog. The Response thanks the Learner and acknowledges the idea — it does not treat the text as a defect report.
+_Avoid_: Petition, cheer, feature request, enhancement (as the ticket kind)
 
 ### Course structure
 
@@ -111,17 +145,28 @@ _Avoid_: Lab start (ambiguous with Lab Script)
 A command run inside the Workstation VM: `lab start <exercise>`, `lab grade <exercise>`, or `lab finish <exercise>`. Initializes, evaluates, or cleans up a specific exercise.
 _Avoid_: Lab command
 
+**First Boot**:
+The first time a do/ai-family Lab brings up its OpenShift cluster after Start Lab / `lab start`. Lab Scripts run an OpenShift Cluster Readiness Check (waiting on operators such as authentication, kube-apiserver, network) and may take about 30–40 minutes before the Lab is usable. Expected platform warm-up, not a Defect by itself.
+_Avoid_: Slow lab (ambiguous), certificate error, git clone failure, SSL error
+
 **Workstation**:
 The primary VM in a Lab. The Learner's entry point; all Lab Scripts are run from here. Connects via SSH to other VMs (servera, serverb, utility, etc.).
 
 **Platform**:
-The deployment where courses are hosted and Labs are provisioned: ROL, Factory, or China.
+The deployment where courses are hosted and Labs are provisioned: ROL, ROLE, Factory, or China.
 
 **Production Platform**:
-A Platform used by Learners: ROL or China. Issues are always reproduced on the same Production Platform the Learner reported from.
+A Platform used by Learners: ROL, ROLE, or China. Issues are always reproduced on the same Production Platform the Learner reported from.
+
+**ROLE**:
+Production Platform for Internal Learners. Hosted at `role.rhu.redhat.com`. Internal Learners report ordinary Guide, Lab, and video Feedback as well as SSH Lab Access Feedback. Only SSH Lab Access Feedback is investigated on ROLE itself; other types are reproduced on ROL.
+
+**SSH Lab Access**:
+How Internal Learners reach a ROLE Lab: download an SSH private key from the Lab page, then SSH from their local machine through a jump host (`cloud-user@<ip>:22022`) as `student@workstation`. The jump host IP changes per Lab.
+_Avoid_: Employee SSH, remote SSH, ROLE SSH
 
 **Development Platform**:
-Factory. Used by curriculum developers (content authoring) and LX engineers (QA testing). Not accessible to Learners.
+Factory. Used by curriculum developers (content authoring) and LX engineers (QA testing). Not accessible to Learners. SSH Lab Access exists here but does not generate Feedback.
 _Avoid_: Staging
 
 ### Operations
@@ -145,4 +190,25 @@ The time window during which a specific engineer handles incoming tickets. Exter
 - Only GE and Lab Exercise sections have predictable, runnable outcomes in the Lab.
 - Many Feedbacks can map to one Defect (deduplication). One Feedback can produce multiple Defects.
 - A "missing information" complaint is often valid when Specifications lack detail only found in Show Solution.
-- OpenShift courses (`do` family) have ~40 min first-boot time; complaints about slow startup in early chapters are usually expected behavior.
+- do/ai-family Labs often need ~30–40 minutes on First Boot (Cluster Readiness Check / operators still coming up); complaints that match that startup pattern are usually expected behavior.
+- Git clone, TLS/SSL certificate, and application errors inside a running workbench are not First Boot — do not treat them as cluster warm-up.
+- SSH Lab Access Feedback is never a Defect. Classify it from the Feedback text: the Internal Learner is stuck on SSH Lab Access (private key, jump host, `rht_classroom.rsa`, `cloud-user`, `DOWNLOAD SSH KEY`, `ssh -J`). A ROLE URL alone is not enough — Internal Learners also report ordinary Guide and Lab issues. Those stay content, environment, or video Feedback and are investigated on ROL. SSH Lab Access Feedback is investigated on ROLE in the Lab Environment tab.
+- For every Feedback except SSH Lab Access Feedback and Resolution Follow-up, the LX Engineer is given a Jira search and a prefilled create dialog. That includes Suggestion. That is not confirmation a Defect exists. The Response still follows whether a Defect is confirmed: only then tell the Learner the issue was identified.
+- A Suggestion Response thanks the Learner, acknowledges that the idea or praise was received and will be considered, and does not ask for more information or promise that the change will be made.
+- If Feedback both reports something broken and offers a Suggestion, it is not a Suggestion. Classify and investigate the broken thing.
+- Unclear Feedback is not a Suggestion. Only text that is clearly an improvement idea or praise is a Suggestion.
+- For a Suggestion, the Defect Description is an impersonal statement of the requested change, or of the praise when there is no change. Still no Learner narration and no location in the body. Guide Text on the investigation page is used so the Description can name what that page lacks.
+- The Defect Summary problem phrase is a short failure name (`copy paste from guide mangles case in edge`). It must not contain a Course Code, Course ID, or Section (not `do380`, not `do380-4.18`, not `section 4` / `ch04s01` / `4.1`), and it is not a diagnosis or a compression of the analysis reasoning.
+- The Defect Summary location token is the Guide page slug from the investigation URL (`ch02s06`, `pr01`, `ap01`), not a reconstructed `ch`+chapter+`s`+section string.
+- The Defect Description is impersonal technical prose. It is drafted whenever a create dialog is prepared, not only when a Defect is confirmed. Location belongs in the URL on the Defect, not restated as chapter/section/course. Do not write “the Learner reports…”. If stripping location tokens from the Defect Summary problem phrase leaves it empty, the phrase is the opening of the Defect Description.
+- Deduplication search is scoped to the Course Code and a keyword from the Feedback. When the investigation page is a Section (`chNNsMM`), the search is also scoped to that Section. Preface and appendix pages (`pr01`, `ap01`) do not narrow the search — the Capture URL is often not the Issue Section.
+- A suggested correction is written onto the Defect as a workaround only when a Defect is confirmed. An unconfirmed draft has a Description, not a fix.
+- Course ID, Version, and Platform come from the Capture URL and do not change.
+- Guide and Lab investigation use the Issue Section. A Learner "N.M" (or equivalent wording) means chapter N section M (`chNNsMM`, zero-padded). If the text does not name a Section, or names more than one with no clear primary, use the Capture URL page.
+- Issue Section is inferred from the original description plus Learner Follow-up text, not from the Feedback Title. A Follow-up that names a Section is the Issue Section (it answers "which Section?").
+- Inference runs only when that text looks like it names a Section; an LLM then returns the Issue Section or no change. Course ID stays frozen.
+- When the Issue Section differs from the Capture URL page, Chapter, Section, and the investigation URL path are updated to that Section on the same Course ID.
+- If the inferred Issue Section page does not load, investigation falls back to the Capture URL page.
+- A Resolution Follow-up gets a brief Response: thank the Learner, confirm we are glad it is resolved, invite them to reach out if anything else comes up. Do not recap their diagnosis, re-explain the cause, or give unsolicited advice. This is not explain-expected behaviour.
+- Whether a Learner Follow-up is a Resolution Follow-up is judged from the latest Learner Follow-up, not from earlier ones. An older "it is fixed" does not override a newer report that the problem is back.
+- A latest Learner Follow-up that both resolves the original report and raises a new problem is not a Resolution Follow-up; investigate the remaining claim.
