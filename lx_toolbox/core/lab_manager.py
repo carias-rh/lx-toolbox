@@ -156,6 +156,13 @@ class LabManager:
         else:
             raise ValueError(f"Unknown environment for credentials: {environment}")
 
+    def get_login_username(self, environment: str):
+        """Username for SSO email prefill in prelogin (never password or auth helper)."""
+        creds = self._get_credentials(environment)
+        if isinstance(creds, tuple):
+            return creds[0]
+        return creds
+
     def login(self, environment: str):
         """
         Login to the specified environment.

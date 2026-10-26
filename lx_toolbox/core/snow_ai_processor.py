@@ -2497,8 +2497,6 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             self.config.get_lab_base_url(environment)
             or "https://rol.redhat.com/rol/app/courses/"
         )
-        username = self.lab_mgr._get_credentials(environment)
-
         # Step 1 — first SNOW load
         self.driver.get(self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL)
         self.driver.get(self.DEFAULT_SNOW_FEEDBACK_QUEUE_URL)
@@ -2515,6 +2513,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             rol_base_url + "rh124-10.0/pages/pr01"
         )
 
+        username = self.lab_mgr.get_login_username(environment)
 
         # ── Phase 2: login round-robin — SNOW → ROL → Jira.
         try:
@@ -2530,23 +2529,24 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # go_to_url + accept_trustarc + username-field-timeout sequence.
         self.driver.switch_to.window(self.login_tab_handles['rol'])
 
+        rol_avatar = (By.XPATH,
+            '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')
         try:
-            avatar = WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((By.XPATH,
-                '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]')))
+            WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(rol_avatar))
             self.logger("ROL session already active")
-        except:
+            self._rol_logged_in = True
+        except Exception:
             try:
-                if username:
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(
-                        (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
-                    )).send_keys(f"{username}@redhat.com")
-                    WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(
-                        (By.XPATH, '//*[@id="login-show-step2"]'))).click()
-                #WebDriverWait(self.driver, 5).until(
-                #    EC.presence_of_element_located((By.XPATH,
-                #        '/html/body/div[1]/div[1]/header/div[2]/div/nav[2]/button[4]'))
-                #)
-                self.logger("ROL session already active")
+                if not username:
+                    raise RuntimeError("No username configured")
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(
+                    (By.XPATH, "/html/body/div[1]/main/div/div/div[1]/div[2]/div[2]/div/section[1]/form/div[1]/input")
+                )).send_keys(f"{username}@redhat.com")
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(
+                    (By.XPATH, '//*[@id="login-show-step2"]'))).click()
+                WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable(rol_avatar)
+                )
                 self._rol_logged_in = True
             except Exception:
                 try:
