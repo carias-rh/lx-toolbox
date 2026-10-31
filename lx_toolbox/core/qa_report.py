@@ -26,6 +26,8 @@ from datetime import datetime
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from ..utils.terminal_ocr import parse_terminal_timing_from_screenshot
+
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 W = f"{{{W_NS}}}"
@@ -52,6 +54,7 @@ _SCREENSHOT_PHASES = (
     ("lab grade", "grade_screenshot"),
     ("lab finish", "finish_screenshot"),
 )
+_SCRIPT_TIME_PHASES = ("start", "grade", "finish")
 
 
 _DEFECT_TOKEN = re.compile(
@@ -358,9 +361,69 @@ class QAReport:
 
     def save(self):
         """Persist current state: write JSON, regenerate .adoc and .csv."""
+        self.refresh_script_times_from_screenshots()
         self._save_json()
         self.generate_asciidoc()
         self.generate_csv()
+
+    def apply_script_time_from_screenshot(
+        self, ex: ExerciseResult, phase: str, screenshot_path: str
+    ) -> bool:
+        """Set this phase's Lab Script time from the screenshot ``time real`` line.
+
+        Never uses wall-clock (button-wait) time. Returns True when ``real``
+        was parsed. On failure the stored duration is cleared so a wait time
+        cannot leak into the report.
+        """
+        parsed = parse_terminal_timing_from_screenshot(screenshot_path)
+        setattr(ex, f"{phase}_screenshot", screenshot_path)
+        if parsed and parsed.started_at:
+            setattr(ex, f"{phase}_started_at", parsed.started_at)
+        else:
+            setattr(ex, f"{phase}_started_at", "")
+        if parsed and parsed.real_seconds is not None:
+            setattr(ex, f"{phase}_duration_secs", parsed.real_seconds)
+            setattr(ex, f"{phase}_duration_source", "ocr")
+            return True
+        setattr(ex, f"{phase}_duration_secs", 0.0)
+        setattr(ex, f"{phase}_duration_source", "")
+        return False
+
+    def refresh_script_times_from_screenshots(self, *, force: bool = False) -> int:
+        """Fill Lab Script times from screenshot ``time real`` when missing.
+
+        Phases already sourced from OCR are skipped unless ``force`` is true.
+        Returns how many phases were updated.
+        """
+        jobs: list[tuple[ExerciseResult, str, str]] = []
+        for ex in self.exercises:
+            for phase in _SCRIPT_TIME_PHASES:
+                source_attr = f"{phase}_duration_source"
+                if not force and getattr(ex, source_attr) == "ocr":
+                    continue
+                path = getattr(ex, f"{phase}_screenshot")
+                if not path or not os.path.isfile(path):
+                    continue
+                jobs.append((ex, phase, path))
+        if not jobs:
+            return 0
+
+        def _ocr(job: tuple[ExerciseResult, str, str]):
+            exercise, phase, path = job
+            return exercise, phase, parse_terminal_timing_from_screenshot(path)
+
+        updated = 0
+        workers = min(8, len(jobs))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for ex, phase, parsed in pool.map(_ocr, jobs):
+                if not parsed or parsed.real_seconds is None:
+                    continue
+                setattr(ex, f"{phase}_duration_secs", parsed.real_seconds)
+                setattr(ex, f"{phase}_duration_source", "ocr")
+                if parsed.started_at:
+                    setattr(ex, f"{phase}_started_at", parsed.started_at)
+                updated += 1
+        return updated
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -617,6 +680,9 @@ class QAReport:
         """
         if output_path is None:
             output_path = str(self.report_dir / f"qa_report_{self.course_id}.adoc")
+
+        if self.refresh_script_times_from_screenshots():
+            self._save_json()
 
         urls = [url for _, url in self._all_defects()]
         content = self.render_asciidoc(defect_details=fetch_jira_defect_details(urls))

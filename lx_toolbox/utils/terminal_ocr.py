@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -96,7 +97,7 @@ def parse_terminal_timing_from_screenshot(path: str | Path) -> ParsedTerminalTim
 
     tesseract_path = _get_tesseract_path()
     if not tesseract_path:
-        LOGGER.debug("Skipping terminal OCR because tesseract is not installed.")
+        _warn_missing_tesseract()
         return None
 
     # The full frame is first. Its last `real` line is the lab command; cropped
@@ -139,7 +140,8 @@ def _normalize_ocr_text(text: str) -> str:
             continue
         line = line.replace(",", ".")
         line = re.sub(r"\s+", " ", line)
-        timing_prefix = _TIMING_PREFIX_RE.match(line)
+        timing_line = re.sub(r"^[^A-Za-z]+", "", line)
+        timing_prefix = _TIMING_PREFIX_RE.match(timing_line) or _TIMING_PREFIX_RE.match(line)
         if timing_prefix:
             prefix_raw = timing_prefix.group(1).lower()
             if prefix_raw.startswith("rea"):
@@ -191,6 +193,8 @@ def _normalize_duration_fragment(value: str) -> str:
 
 def _normalize_timing_line_body(body: str) -> str:
     normalized = _translate_ocr_digits(body.replace(",", "."))
+    # Slashed 5 is often capital S; keep lowercase s as the seconds unit.
+    normalized = normalized.replace("S", "5")
     # "1" is sometimes read as l, I, or | inside the duration.
     normalized = re.sub(r"(?<=\d)[lI|](?=\d|\s*\.)", "1", normalized)
     normalized = re.sub(r"(?<=m)[lI|](?=\d|\s*\.)", "1", normalized)
@@ -203,8 +207,10 @@ def _normalize_timing_line_body(body: str) -> str:
     normalized = re.sub(r"(?<=\d)\s+(?=\d{3}s\b)", ".", normalized, flags=re.IGNORECASE)
     # "m7.261s" lost its leading zero.
     normalized = re.sub(r"(?<!\d)m(?=\d)", "0m", normalized, flags=re.IGNORECASE)
+    # Window chrome after the duration: "0m3.4915     I"
+    normalized = re.sub(r"\s+[^0-9ms.]+.*$", "", normalized, flags=re.IGNORECASE)
     if "s" not in normalized.lower():
-        normalized = re.sub(r"(\.\d{3})5$", r"\1s", normalized)
+        normalized = re.sub(r"(\.\d{3})5\s*$", r"\1s", normalized)
     # "42.721s5" — the extra 5 is a second guess at the trailing s.
     normalized = re.sub(r"(s)5\b", r"\1", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"(s).*$", r"\1", normalized, flags=re.IGNORECASE)
@@ -227,7 +233,9 @@ def _iter_candidate_regions(image: Image.Image) -> list[Image.Image]:
 def _preprocess_image(image: Image.Image) -> Image.Image:
     processed = image.convert("L")
     processed = ImageOps.autocontrast(processed)
-    processed = processed.resize((processed.width * 2, processed.height * 2))
+    # Hi-DPI console captures are already sharp; doubling them can time out.
+    if processed.width < 1600:
+        processed = processed.resize((processed.width * 2, processed.height * 2))
     processed = processed.filter(ImageFilter.SHARPEN)
     return processed.point(lambda pixel: 255 if pixel > 160 else 0)
 
@@ -265,5 +273,24 @@ def _run_tesseract(image: Image.Image, tesseract_path: str) -> str:
 
 
 @lru_cache(maxsize=1)
+def _warn_missing_tesseract() -> None:
+    LOGGER.warning(
+        "tesseract is not installed; Lab Script times cannot be read from "
+        "screenshots. Install the tesseract package."
+    )
+
+
+@lru_cache(maxsize=1)
 def _get_tesseract_path() -> str:
-    return shutil.which("tesseract") or ""
+    found = shutil.which("tesseract") or ""
+    if found:
+        return found
+    extra = [
+        Path.home() / ".local" / "bin" / "tesseract",
+        Path("/usr/bin/tesseract"),
+        Path("/usr/local/bin/tesseract"),
+    ]
+    for candidate in extra:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return ""

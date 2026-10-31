@@ -1,5 +1,6 @@
 """Unit tests for QA Report generation, Defect URL parsing, and DOCX tints."""
 
+import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from lx_toolbox.core.qa_report import (
     parse_defect_refs,
     section_short,
 )
+from lx_toolbox.utils.terminal_ocr import ParsedTerminalTiming
 
 
 def _report(tmp_path: Path, **kwargs) -> QAReport:
@@ -223,6 +225,163 @@ class TestRenderAsciidoc:
         text = Path(csv_path).read_text(encoding="utf-8")
         assert "Defects" in text.splitlines()[0]
         assert "https://issues.redhat.com/browse/PTL-99" in text
+
+
+class TestApplyScriptTime:
+    def test_records_ocr_real_and_ignores_any_prior_wait(self, tmp_path, monkeypatch):
+        report = _report(tmp_path)
+        start = _touch_shot(report, "ch01s11", "start")
+        ex = ExerciseResult(
+            chapter_section="ch01s11",
+            title="Section 1.11: Lab: Plan and Deploy Red Hat Satellite",
+            start_duration_secs=5488.376,
+            start_duration_source="manual",
+        )
+        report.add_exercise(ex)
+        monkeypatch.setattr(
+            "lx_toolbox.core.qa_report.parse_terminal_timing_from_screenshot",
+            lambda path: ParsedTerminalTiming(real_seconds=20.65),
+        )
+        assert report.apply_script_time_from_screenshot(ex, "start", start) is True
+        assert ex.start_duration_secs == 20.65
+        assert ex.start_duration_source == "ocr"
+
+    def test_clears_duration_when_screenshot_has_no_real_line(self, tmp_path, monkeypatch):
+        report = _report(tmp_path)
+        start = _touch_shot(report, "ch01s11", "start")
+        ex = ExerciseResult(
+            chapter_section="ch01s11",
+            title="Section 1.11: Lab: Plan and Deploy Red Hat Satellite",
+            start_duration_secs=5488.376,
+            start_duration_source="manual",
+        )
+        monkeypatch.setattr(
+            "lx_toolbox.core.qa_report.parse_terminal_timing_from_screenshot",
+            lambda path: None,
+        )
+        assert report.apply_script_time_from_screenshot(ex, "start", start) is False
+        assert ex.start_duration_secs == 0.0
+        assert ex.start_duration_source != "manual"
+
+
+class TestRefreshScriptTimes:
+    def test_screenshot_real_replaces_wall_clock(self, tmp_path, monkeypatch):
+        report = _report(tmp_path, course_id="rh403-6.18")
+        start = _touch_shot(report, "ch01s11", "start")
+        grade = _touch_shot(report, "ch01s11", "grade")
+        finish = _touch_shot(report, "ch01s11", "finish")
+        report.add_exercise(ExerciseResult(
+            chapter_section="ch01s11",
+            title="Section 1.11: Lab: Plan and Deploy Red Hat Satellite",
+            grade_result="PASS",
+            start_screenshot=start,
+            grade_screenshot=grade,
+            finish_screenshot=finish,
+            start_duration_secs=5488.376,
+            grade_duration_secs=755.575,
+            finish_duration_secs=179.929,
+            start_duration_source="manual",
+            grade_duration_source="manual",
+            finish_duration_source="manual",
+        ))
+
+        def fake_parse(path):
+            path = str(path)
+            if path.endswith("_start.png"):
+                return ParsedTerminalTiming(real_seconds=20.65)
+            if path.endswith("_grade.png"):
+                return ParsedTerminalTiming(real_seconds=12.35)
+            if path.endswith("_finish.png"):
+                return ParsedTerminalTiming(real_seconds=2.59)
+            return None
+
+        monkeypatch.setattr(
+            "lx_toolbox.core.qa_report.parse_terminal_timing_from_screenshot",
+            fake_parse,
+        )
+        updated = report.refresh_script_times_from_screenshots()
+        assert updated == 3
+        ex = report.exercises[0]
+        assert ex.start_duration_secs == 20.65
+        assert ex.grade_duration_secs == 12.35
+        assert ex.finish_duration_secs == 2.59
+        assert ex.start_duration_source == "ocr"
+
+        adoc = report.render_asciidoc()
+        assert "91m 28s" not in adoc
+        assert "12m 35s" not in adoc
+        assert "| 20s " in adoc
+        assert "| 12s " in adoc
+        assert "| 2s" in adoc
+
+    def test_keeps_wall_clock_when_ocr_finds_nothing(self, tmp_path, monkeypatch):
+        report = _report(tmp_path)
+        start = _touch_shot(report, "ch01s04", "start")
+        report.add_exercise(ExerciseResult(
+            chapter_section="ch01s04",
+            title="Section 1.4: Guided Exercise: X",
+            start_screenshot=start,
+            start_duration_secs=237.5,
+            start_duration_source="manual",
+        ))
+        monkeypatch.setattr(
+            "lx_toolbox.core.qa_report.parse_terminal_timing_from_screenshot",
+            lambda path: None,
+        )
+        assert report.refresh_script_times_from_screenshots() == 0
+        assert report.exercises[0].start_duration_secs == 237.5
+        assert report.exercises[0].start_duration_source == "manual"
+
+    def test_skips_phases_already_read_from_ocr(self, tmp_path, monkeypatch):
+        report = _report(tmp_path)
+        start = _touch_shot(report, "ch01s04", "start")
+        report.add_exercise(ExerciseResult(
+            chapter_section="ch01s04",
+            title="Section 1.4: Guided Exercise: X",
+            start_screenshot=start,
+            start_duration_secs=16.0,
+            start_duration_source="ocr",
+        ))
+        calls = []
+
+        def fake_parse(path):
+            calls.append(path)
+            return ParsedTerminalTiming(real_seconds=99.0)
+
+        monkeypatch.setattr(
+            "lx_toolbox.core.qa_report.parse_terminal_timing_from_screenshot",
+            fake_parse,
+        )
+        assert report.refresh_script_times_from_screenshots() == 0
+        assert calls == []
+        assert report.exercises[0].start_duration_secs == 16.0
+
+    def test_save_writes_ocr_times_into_json_and_adoc(self, tmp_path, monkeypatch):
+        report = _report(tmp_path, course_id="rh403-6.18")
+        start = _touch_shot(report, "ch01s11", "start")
+        report.add_exercise(ExerciseResult(
+            chapter_section="ch01s11",
+            title="Section 1.11: Lab: Plan and Deploy Red Hat Satellite",
+            grade_result="PASS",
+            start_screenshot=start,
+            start_duration_secs=5488.376,
+            start_duration_source="manual",
+        ))
+        monkeypatch.setattr(
+            "lx_toolbox.core.qa_report.parse_terminal_timing_from_screenshot",
+            lambda path: ParsedTerminalTiming(real_seconds=20.65),
+        )
+        monkeypatch.setattr(
+            "lx_toolbox.core.qa_report.fetch_jira_defect_details",
+            lambda urls: {},
+        )
+        report.save()
+        data = json.loads((tmp_path / "qa_data.json").read_text(encoding="utf-8"))
+        assert data["exercises"][0]["start_duration_secs"] == 20.65
+        assert data["exercises"][0]["start_duration_source"] == "ocr"
+        adoc = (tmp_path / "qa_report_rh403-6.18.adoc").read_text(encoding="utf-8")
+        assert "91m 28s" not in adoc
+        assert "20s" in adoc
 
 
 class TestDefectDisplay:

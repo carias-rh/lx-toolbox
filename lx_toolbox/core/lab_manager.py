@@ -15,7 +15,6 @@ from .base_selenium_driver import BaseSeleniumDriver
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger, reset_step_counter
 from ..utils.keyboard_handler import KeyboardHandler, print_status, clear_status_line
-from ..utils.terminal_ocr import parse_terminal_timing_from_screenshot
 
 
 class QAQuitException(Exception):
@@ -1122,32 +1121,21 @@ class LabManager:
             except Exception:
                 pass
 
-    def _apply_terminal_timing_from_screenshot(self, exercise, phase: str, screenshot_path: str, fallback_duration: float):
-        """Prefer the shell's `time real` output when OCR can parse the screenshot."""
-        duration_attr = f"{phase}_duration_secs"
-        source_attr = f"{phase}_duration_source"
-        started_at_attr = f"{phase}_started_at"
+    def _record_script_time(self, exercise, phase: str, screenshot_path: str, wait_message: str):
+        """Screenshot the console and set Lab Script time from ``time real`` only.
 
-        setattr(exercise, duration_attr, fallback_duration)
-        setattr(exercise, source_attr, "manual")
-        setattr(exercise, started_at_attr, "")
-
-        parsed_timing = parse_terminal_timing_from_screenshot(screenshot_path)
-        if not parsed_timing:
-            return
-
-        if parsed_timing.started_at:
-            setattr(exercise, started_at_attr, parsed_timing.started_at)
-
-        if parsed_timing.real_seconds is not None:
-            setattr(exercise, duration_attr, parsed_timing.real_seconds)
-            setattr(exercise, source_attr, "ocr")
-            logging.getLogger(__name__).debug(
-                "Parsed %s duration %.3fs from screenshot %s",
-                phase,
-                parsed_timing.real_seconds,
-                screenshot_path,
-            )
+        Re-prompts and re-screenshots until OCR can read the ``real`` line.
+        Never records the wait until Enter.
+        """
+        while True:
+            self._screenshot_monitor_console(screenshot_path)
+            if self._qa_report.apply_script_time_from_screenshot(
+                exercise, phase, screenshot_path
+            ):
+                return
+            print("  Could not read Lab Script time from the screenshot.")
+            print("  Wait until `time` has printed the real / user / sys lines.")
+            self._prompt_user_to_continue(wait_message)
 
     def open_workstation_console(self, course_id: str, tune_workstation: bool = False):
         """
@@ -2206,18 +2194,16 @@ class LabManager:
             time.sleep(0.5)
             command = "cd; date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
-            t0 = time.time()  # Start timing when the script begins running
             self._prompt_user_to_continue("when the start script has finished.")
-            duration = time.time() - t0
 
             # Screenshot + report
             if self._qa_report and self._current_exercise_section:
                 path = self._qa_report.screenshot_path(self._current_exercise_section, "start")
-                self._screenshot_monitor_console(path)
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
-                    ex.start_screenshot = path
-                    self._apply_terminal_timing_from_screenshot(ex, "start", path, duration)
+                    self._record_script_time(
+                        ex, "start", path, "when the start script has finished."
+                    )
                 self._qa_report.save()
             return True
             
@@ -2225,18 +2211,16 @@ class LabManager:
         if re.match(r"lab .*grade", command):
             command = "cd; date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
-            t0 = time.time()  # Start timing when the script begins running
             self._prompt_user_to_continue("when the grade script has finished.")
-            duration = time.time() - t0
 
             # Screenshot + report
             if self._qa_report and self._current_exercise_section:
                 path = self._qa_report.screenshot_path(self._current_exercise_section, "grade")
-                self._screenshot_monitor_console(path)
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
-                    ex.grade_screenshot = path
-                    self._apply_terminal_timing_from_screenshot(ex, "grade", path, duration)
+                    self._record_script_time(
+                        ex, "grade", path, "when the grade script has finished."
+                    )
                     self._qa_report.save()
 
             # Defects first; QA Result is independent of whether any were filed
@@ -2262,18 +2246,16 @@ class LabManager:
         if re.match(r"lab .*finish", command):
             command = "cd; date; time " + command
             self.introduce_command_to_console(command, auto_enter=True)
-            t0 = time.time()  # Start timing when the script begins running
             self._prompt_user_to_continue("when the finish script has completed.")
-            duration = time.time() - t0
 
             # Screenshot + report
             if self._qa_report and self._current_exercise_section:
                 path = self._qa_report.screenshot_path(self._current_exercise_section, "finish")
-                self._screenshot_monitor_console(path)
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
-                    ex.finish_screenshot = path
-                    self._apply_terminal_timing_from_screenshot(ex, "finish", path, duration)
+                    self._record_script_time(
+                        ex, "finish", path, "when the finish script has completed."
+                    )
 
                     # Guided Exercises have no grade script — prompt here
                     if not ex.grade_result:
