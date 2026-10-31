@@ -174,8 +174,13 @@ _Avoid_: Staging
 **QA Run**:
 An execution of the QA automation against a Course ID, running through all exercises and recording results.
 
+**QA Result**:
+PASS or FAIL for one Guided Exercise or Lab Exercise in a QA Run. Independent of whether a Defect was filed.
+_Avoid_: grade, grade result, exercise result
+
 **QA Report**:
-The artifact produced by a QA Run: pass/fail data, screenshots, AsciiDoc/CSV reports.
+The write-up of a QA Run: per-Section QA Results, Lab Script screenshots, and any Defects filed during the run.
+_Avoid_: QA doc, test report
 
 **Auto-Assign**:
 A service (deployed on OpenShift) that dispatches incoming ServiceNow tickets to engineers across teams (LX, TTS, CX) based on team configuration and shift schedules.
@@ -188,6 +193,7 @@ The time window during which a specific engineer handles incoming tickets. Exter
 - Guide Text is the source of truth; video content that disagrees is a Defect in the video.
 - Theory Section commands are examples — complaints about them failing in the Lab are Learner confusion, not Defects.
 - Only GE and Lab Exercise sections have predictable, runnable outcomes in the Lab.
+- A Defect filed during a QA Run does not change that Section's QA Result. A FAIL does not require a Defect. A PASS may still list Defects.
 - Many Feedbacks can map to one Defect (deduplication). One Feedback can produce multiple Defects.
 - A "missing information" complaint is often valid when Specifications lack detail only found in Show Solution.
 - do/ai-family Labs often need ~30–40 minutes on First Boot (Cluster Readiness Check / operators still coming up); complaints that match that startup pattern are usually expected behavior.

@@ -63,6 +63,23 @@ if [[ ! -f "$ADOC_FILE" ]]; then
     exit 1
 fi
 
+style_docx() {
+    local output="$1"
+    local py=""
+    if [[ -x "${TOOLBOX_DIR}/.venv/bin/python3" ]]; then
+        py="${TOOLBOX_DIR}/.venv/bin/python3"
+    elif [[ -x "${TOOLBOX_DIR}/venv/bin/python3" ]]; then
+        py="${TOOLBOX_DIR}/venv/bin/python3"
+    else
+        py="$(command -v python3 || true)"
+    fi
+    if [[ -z "$py" ]]; then
+        echo "Warning: python3 not found; PASS/FAIL row tints were not applied." >&2
+        return 0
+    fi
+    PYTHONPATH="${TOOLBOX_DIR}:${PYTHONPATH}" "$py" -m lx_toolbox.core.qa_report style-docx "$output"
+}
+
 case "$FORMAT" in
     docx)
         OUTPUT="${REPORT_DIR}/qa_report_${COURSE}.docx"
@@ -70,6 +87,7 @@ case "$FORMAT" in
         cd "$REPORT_DIR"
         asciidoctor -b docbook "qa_report_${COURSE}.adoc" -o - | \
             pandoc -f docbook -t docx -o "qa_report_${COURSE}.docx"
+        style_docx "$OUTPUT"
         echo "Done: $OUTPUT"
         echo ""
         echo "Upload to Google Drive and open with Google Docs to edit."

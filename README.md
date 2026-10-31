@@ -249,9 +249,11 @@ This layout enables quick context switching and manual review before submitting 
 The QA automation generates reports incrementally as you work through exercises. Reports are saved to `qa_reports/<environment>/<course_id>/` and include:
 
 - **`qa_data.json`**: Source of truth, loaded automatically on subsequent runs
-- **`qa_report_<course>.adoc`**: AsciiDoc report with summary table, per-exercise details, and embedded screenshots
-- **`qa_results_<course>.csv`**: CSV matching the Google Sheets tracking format
-- **`screenshots/`**: Console screenshots for each lab start/grade/finish
+- **`qa_report_<course>.adoc`**: AsciiDoc report with a Summary jump table (links to each Section), PASS/FAIL row tint, per-exercise timings, boxed screenshots, and any Defects filed during the run
+- **`qa_results_<course>.csv`**: CSV matching the Google Sheets tracking format, plus a Defects column
+- **`screenshots/`**: Console screenshots for each `lab start` / mid-exercise / `lab grade` / `lab finish`
+
+During a QA Run the prompt asks for Defect URLs (Jira URL or `PTL-12345`, empty if none) **before** PASS/FAIL. A Defect does not change the QA Result.
 
 Reports persist across runs. If you stop midway and resume later, previous results are preserved. Re-running an exercise overwrites its old data.
 
@@ -260,7 +262,8 @@ Reports persist across runs. If you stop midway and resume later, previous resul
 Use the `qa-report` wrapper to convert the AsciiDoc report for sharing:
 
 ```bash
-# Convert to DOCX (upload to Google Drive → open as Google Doc)
+# Convert to DOCX (upload to Google Drive → open as Google Doc).
+# PASS/FAIL cells are tinted after conversion so colours survive the import.
 qa-report do280-4.14                   # defaults to factory environment
 
 # Specify environment

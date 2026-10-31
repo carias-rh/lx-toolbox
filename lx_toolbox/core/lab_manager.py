@@ -2164,6 +2164,30 @@ class LabManager:
         else:
             input(f"Press Enter to continue {custom_message}\n")
 
+    def _qa_input(self, prompt: str) -> str:
+        """Read a line from the engineer, pausing the keyboard handler if needed."""
+        if self._keyboard_handler:
+            with self._keyboard_handler.pause():
+                return input(prompt)
+        return input(prompt)
+
+    def _prompt_defect_urls(self) -> list[str]:
+        """Ask for Defect URLs/keys before recording the QA Result. Empty is none."""
+        from .qa_report import defect_key, parse_defect_refs
+
+        print("")
+        raw = self._qa_input("Defect URLs (empty if none): ")
+        urls = parse_defect_refs(raw)
+        if urls:
+            keys = ", ".join(defect_key(url) for url in urls)
+            print(f"  Recorded {len(urls)} Defect(s): {keys}")
+        return urls
+
+    def _prompt_qa_result(self, prompt: str) -> str:
+        """Ask PASS/FAIL. Empty or anything other than F* is PASS."""
+        raw = self._qa_input(prompt).strip().lower()
+        return "FAIL" if raw.startswith("f") else "PASS"
+
     def _handle_special_command(self, command: str) -> bool:
         """
         Handles special commands that require specific treatment.
@@ -2213,14 +2237,19 @@ class LabManager:
                 if ex:
                     ex.grade_screenshot = path
                     self._apply_terminal_timing_from_screenshot(ex, "grade", path, duration)
+                    self._qa_report.save()
 
-            # Prompt for PASS/FAIL (default: PASS)
-            if self._keyboard_handler:
-                with self._keyboard_handler.pause():
-                    grade_input = input("Grade result? [P]ass / [F]ail (default: Pass): ").strip().lower()
-            else:
-                grade_input = input("Grade result? [P]ass / [F]ail (default: Pass): ").strip().lower()
-            grade_result = "FAIL" if grade_input.startswith("f") else "PASS"
+            # Defects first; QA Result is independent of whether any were filed
+            if self._qa_report:
+                defect_urls = self._prompt_defect_urls()
+                ex = self._qa_report.get_exercise(self._current_exercise_section)
+                if ex:
+                    ex.defects = defect_urls
+                    self._qa_report.save()
+
+            grade_result = self._prompt_qa_result(
+                "Grade result? [P]ass / [F]ail (default: Pass): "
+            )
             if self._qa_report and self._current_exercise_section:
                 ex = self._qa_report.get_exercise(self._current_exercise_section)
                 if ex:
@@ -2246,14 +2275,13 @@ class LabManager:
                     ex.finish_screenshot = path
                     self._apply_terminal_timing_from_screenshot(ex, "finish", path, duration)
 
-                    # Guided Exercises have no grade script — prompt for PASS/FAIL here
+                    # Guided Exercises have no grade script — prompt here
                     if not ex.grade_result:
-                        if self._keyboard_handler:
-                            with self._keyboard_handler.pause():
-                                grade_input = input("Exercise result? [P]ass / [F]ail (default: Pass): ").strip().lower()
-                        else:
-                            grade_input = input("Exercise result? [P]ass / [F]ail (default: Pass): ").strip().lower()
-                        ex.grade_result = "FAIL" if grade_input.startswith("f") else "PASS"
+                        ex.defects = self._prompt_defect_urls()
+                        self._qa_report.save()
+                        ex.grade_result = self._prompt_qa_result(
+                            "Exercise result? [P]ass / [F]ail (default: Pass): "
+                        )
                         print(f"  Recorded: {ex.grade_result}")
 
                 self._qa_report.save()
