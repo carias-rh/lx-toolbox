@@ -26,13 +26,20 @@ class BaseSeleniumDriver:
             options = webdriver.FirefoxOptions()
             if self.is_headless:
                 options.add_argument("-headless") # Corrected from set_headless()
+                options.add_argument("--width=1600")
+                options.add_argument("--height=1200")
             self.driver = webdriver.Firefox(options=options)
             # Install the Copy On Select Firefox extension if present.
             # Adapted from playbook: driver.install_addon(os.path.expanduser('{{ playbook_dir }}/../copy_on_select-1.0-an+fx.xpi'), temporary=True)
             copy_on_select_xpi_path = os.path.expanduser(os.path.join(os.path.dirname(__file__), "../../copy_on_select-1.0-an+fx.xpi"))
             if os.path.exists(copy_on_select_xpi_path):
                 self.driver.install_addon(copy_on_select_xpi_path, temporary=True)
-            self.driver.maximize_window()
+            try:
+                self.driver.set_window_size(1600, 1200)
+            except Exception:
+                pass
+            if not self.is_headless:
+                self.driver.maximize_window()
         else:
             raise ValueError(f"Unsupported browser: {self.browser_name}. Choose 'firefox' or 'chrome'.")
         

@@ -52,6 +52,30 @@ class LabManager:
         '[contains(text(), "Creat") or contains(text(), "Delet")'
         ' or contains(text(), "Start") or contains(text(), "Stop")]'
     )
+
+    # ROL catalog still labels the format "Lesson" but the checkbox id is module_checkbox.
+    _CATALOG_FORMAT_CHECKBOX_IDS = {
+        "lesson": "module_checkbox",
+        "module": "module_checkbox",
+        "course": "course_checkbox",
+    }
+    _CATALOG_DELIVERY_FORMATS_XPATH = (
+        '//button[contains(normalize-space(.), "Delivery formats")]'
+    )
+    _CATALOG_SHOW_FILTERS_XPATH = (
+        '//button[@aria-label="Show filters" or normalize-space()="Filter"]'
+    )
+    _CATALOG_PAGE_INPUT_XPATH = (
+        '//nav[contains(@class, "pagination")]//input[@aria-label="Current page"]'
+    )
+    _CATALOG_CARD_XPATH = (
+        '//div[contains(concat(" ", normalize-space(@class), " "), " pf-v5-c-card ")'
+        ' and (contains(concat(" ", normalize-space(@class), " "), " offering-card-builder ")'
+        ' or contains(concat(" ", normalize-space(@class), " "), " offering-card "))]'
+    )
+    _CATALOG_CONTINUE_XPATH = (
+        './/*[starts-with(@data-analytics-id, "offering-card-action-button-")]'
+    )
     
     def __init__(self, config: ConfigManager, browser_name: str = None, is_headless: bool = None):
         self.config = config
@@ -2671,6 +2695,26 @@ class LabManager:
 
         return course_id, "unknown"
 
+    @staticmethod
+    def catalog_format_checkbox_id(delivery_format: str) -> str:
+        """Map a catalog Delivery formats label to the filter checkbox id."""
+        key = (delivery_format or "").strip().lower()
+        return LabManager._CATALOG_FORMAT_CHECKBOX_IDS.get(
+            key, f"{key.replace(' ', '_')}_checkbox"
+        )
+
+    @staticmethod
+    def versioned_id_from_offering_href(href: str | None) -> str | None:
+        """Parse a versioned catalog id from an offering Continue/View href."""
+        if not href:
+            return None
+        for segment in ("/courses/", "/labs/", "/app/"):
+            if segment in href:
+                vid = href.split(segment)[-1].split("/")[0].split("?")[0].lower()
+                if "-" in vid:
+                    return vid
+        return None
+
     def go_to_catalog(self, environment: str):
         """Navigate to the ROL catalog page."""
         self.logger("Navigating to course catalog...")
@@ -2679,6 +2723,32 @@ class LabManager:
         self.selenium_driver.go_to_url(catalog_url)
         time.sleep(2)
 
+    def _ensure_catalog_filters_visible(self, catalog_wait: WebDriverWait):
+        """Open the mobile Filter drawer when the sidebar is collapsed."""
+        try:
+            btn = self.driver.find_element(By.XPATH, self._CATALOG_DELIVERY_FORMATS_XPATH)
+            if btn.is_displayed():
+                return
+        except NoSuchElementException:
+            pass
+        try:
+            filter_btn = catalog_wait.until(EC.element_to_be_clickable(
+                (By.XPATH, self._CATALOG_SHOW_FILTERS_XPATH)
+            ))
+            self.driver.execute_script("arguments[0].click();", filter_btn)
+            time.sleep(0.5)
+        except TimeoutException:
+            pass
+
+    def _expand_delivery_formats(self, catalog_wait: WebDriverWait):
+        """Expand the Delivery formats accordion so format checkboxes are in the DOM."""
+        btn = catalog_wait.until(EC.presence_of_element_located(
+            (By.XPATH, self._CATALOG_DELIVERY_FORMATS_XPATH)
+        ))
+        if (btn.get_attribute("aria-expanded") or "").lower() != "true":
+            self.driver.execute_script("arguments[0].click();", btn)
+            time.sleep(0.5)
+
     def filter_by_format(self, delivery_format: str):
         """
         Filter the catalog to show only items of the given delivery format.
@@ -2686,25 +2756,26 @@ class LabManager:
         """
         self.logger(f"Filtering catalog by '{delivery_format}' delivery format...")
         catalog_wait = WebDriverWait(self.driver, 20)
+        checkbox_id = self.catalog_format_checkbox_id(delivery_format)
         try:
-            delivery_formats_btn = catalog_wait.until(EC.element_to_be_clickable(
-                (By.XPATH, '//button[contains(text(), "Delivery formats")]')
-            ))
-            delivery_formats_btn.click()
-            time.sleep(0.5)
+            self._ensure_catalog_filters_visible(catalog_wait)
+            self._expand_delivery_formats(catalog_wait)
 
-            # Try by convention id first, then fall back to finding the input
-            # that sits alongside a label containing the format text.
             checkbox_xpath = (
-                f'//input[@id="{delivery_format.lower()}_checkbox"]'
+                f'//input[@id="{checkbox_id}"]'
+                f' | //div[contains(@class, "nav__link")'
+                f' and .//span[normalize-space()="{delivery_format}"]]'
+                f'//input[@type="checkbox"]'
                 f' | //label[contains(@class, "check__label")'
-                f' and normalize-space(text())="{delivery_format}"]'
+                f' and normalize-space(.)="{delivery_format}"]'
                 f'/..//input[@type="checkbox"]'
             )
-            checkbox = catalog_wait.until(EC.element_to_be_clickable((By.XPATH, checkbox_xpath)))
+            checkbox = catalog_wait.until(
+                EC.presence_of_element_located((By.XPATH, checkbox_xpath))
+            )
 
             if not checkbox.is_selected():
-                checkbox.click()
+                self.driver.execute_script("arguments[0].click();", checkbox)
                 time.sleep(1)
 
             self.logger(f"Filter applied: Showing {delivery_format.lower()}s only")
@@ -2722,16 +2793,13 @@ class LabManager:
         Returns a list of dicts with 'id' (versioned when known, e.g. 'do336-4.18'),
         'sku' (bare, e.g. 'do336'), 'title', and 'url'.
 
-        Versioned IDs are resolved via version_cache (built from courses-list.txt).
-        Courses absent from the cache get a bare SKU as id; update_courses_list
-        handles those with a separate click-and-navigate pass.
+        Versioned IDs come from the Continue/View href when present, then from
+        version_cache (built from courses-list.txt). Remaining bare SKUs are
+        resolved by update_courses_list via a click-and-navigate pass.
         """
         courses = []
 
-        cards = self.driver.find_elements(
-            By.XPATH,
-            '//div[contains(@class, "pf-v5-c-card") and contains(@class, "offering-card")]'
-        )
+        cards = self.driver.find_elements(By.XPATH, self._CATALOG_CARD_XPATH)
 
         for card in cards:
             try:
@@ -2750,14 +2818,23 @@ class LabManager:
                 except:
                     title = sku
 
-                versioned_id = version_cache.get(sku, sku) if version_cache else sku
+                href = ""
+                try:
+                    continue_elem = card.find_element(By.XPATH, self._CATALOG_CONTINUE_XPATH)
+                    href = continue_elem.get_attribute("href") or ""
+                except NoSuchElementException:
+                    pass
+
+                versioned_id = self.versioned_id_from_offering_href(href)
+                if not versioned_id:
+                    versioned_id = version_cache.get(sku, sku) if version_cache else sku
 
                 if not any(c['sku'] == sku for c in courses):
                     courses.append({
                         'id': versioned_id,
                         'sku': sku,
                         'title': title,
-                        'url': f"/rol/app/courses/{versioned_id}"
+                        'url': href or f"/rol/app/courses/{versioned_id}"
                     })
             except Exception as e:
                 logging.debug(f"Error processing course card: {e}")
@@ -2773,8 +2850,7 @@ class LabManager:
         try:
             # PF5: <input aria-label="Current page" max="N"> inside pagination nav
             page_inputs = self.driver.find_elements(
-                By.XPATH,
-                '//nav[contains(@class, "pagination")]//input[@aria-label="Current page"]'
+                By.XPATH, self._CATALOG_PAGE_INPUT_XPATH
             )
             if page_inputs:
                 max_pages = page_inputs[0].get_attribute('max')
@@ -2802,8 +2878,7 @@ class LabManager:
         """
         try:
             page_input = self.driver.find_element(
-                By.XPATH,
-                '//nav[contains(@class, "pagination")]//input[@aria-label="Current page"]'
+                By.XPATH, self._CATALOG_PAGE_INPUT_XPATH
             )
 
             self.driver.execute_script("arguments[0].value = '';", page_input)
@@ -2852,9 +2927,12 @@ class LabManager:
 
         try:
             time.sleep(2)
-            WebDriverWait(self.driver, 30).until(EC.presence_of_element_located(
-                (By.XPATH, '//nav[contains(@class, "pagination")]//input[@aria-label="Current page"]')
-            ))
+            WebDriverWait(self.driver, 30).until(
+                EC.any_of(
+                    EC.presence_of_element_located((By.XPATH, self._CATALOG_PAGE_INPUT_XPATH)),
+                    EC.presence_of_element_located((By.XPATH, self._CATALOG_CARD_XPATH)),
+                )
+            )
 
             total_pages = self._get_total_pages()
             self.logger(f"  Found {total_pages} page(s) of courses")
@@ -3027,8 +3105,15 @@ class LabManager:
                     try:
                         btn = self.driver.find_element(
                             By.XPATH,
-                            f'//button[@data-analytics-id="offering-card-action-button-{sku}"]'
+                            f'//*[@data-analytics-id="offering-card-action-button-{sku}"]'
                         )
+                        href = btn.get_attribute("href") or ""
+                        vid = self.versioned_id_from_offering_href(href)
+                        if vid:
+                            resolved[sku] = vid
+                            unknown_skus.discard(sku)
+                            self.logger(f"  Resolved {sku} → {vid}")
+                            continue
                         self.driver.execute_script("arguments[0].click();", btn)
                         time.sleep(3)
                         current_url = self.driver.current_url
@@ -3043,10 +3128,16 @@ class LabManager:
                                     self.logger(f"  Resolved {sku} → {vid}")
                                 break
                         self.driver.back()
-                        WebDriverWait(self.driver, 20).until(EC.presence_of_element_located(
-                            (By.XPATH, '//nav[contains(@class, "pagination")]'
-                                       '//input[@aria-label="Current page"]')
-                        ))
+                        WebDriverWait(self.driver, 20).until(
+                            EC.any_of(
+                                EC.presence_of_element_located(
+                                    (By.XPATH, self._CATALOG_PAGE_INPUT_XPATH)
+                                ),
+                                EC.presence_of_element_located(
+                                    (By.XPATH, self._CATALOG_CARD_XPATH)
+                                ),
+                            )
+                        )
                         time.sleep(1)
                         if page_num > 1:
                             self._go_to_page(page_num)
@@ -3145,6 +3236,14 @@ class LabManager:
             )
 
         unique_entries = sorted(set(all_entries))
+
+        if not unique_entries:
+            self.logger(
+                "Catalog scrape returned no entries; leaving existing courses-list.txt unchanged."
+            )
+            raise RuntimeError(
+                "Catalog scrape returned no courses; refusing to overwrite courses-list.txt"
+            )
 
         output_path = Path(output_path)
         output_path.write_text("\n".join(unique_entries) + "\n")
