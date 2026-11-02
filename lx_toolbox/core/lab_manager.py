@@ -2704,6 +2704,16 @@ class LabManager:
         )
 
     @staticmethod
+    def is_lesson_sku(sku: str) -> bool:
+        """True when the SKU is a Lesson (trailing L after the digits: rh0006l).
+
+        Course families such as cl110 / tl250 also contain the letter L, but
+        they end in digits and are not lessons.
+        """
+        name = (sku or "").strip().lower().split("-")[0]
+        return bool(re.match(r"^[a-z]+\d+l$", name))
+
+    @staticmethod
     def versioned_id_from_offering_href(href: str | None) -> str | None:
         """Parse a versioned catalog id from an offering Continue/View href."""
         if not href:
@@ -3069,7 +3079,6 @@ class LabManager:
 
         Returns a list of versioned entry strings (e.g. ['do336-4.18', 'do336-4.14']).
         """
-        self.logger(f"\n{'─' * 40}")
         self.logger(f"Scraping {delivery_format}s from catalog…")
 
         self.go_to_catalog(environment)
@@ -3081,8 +3090,19 @@ class LabManager:
             self.logger(f"No {delivery_format.lower()}s found in catalog.")
             return []
 
+        catalog_items = [
+            item for item in catalog_items
+            if not self.is_lesson_sku(item.get("sku", item["id"]))
+        ]
+        if not catalog_items:
+            self.logger("No courses found after skipping lessons.")
+            return []
+
         # Discovery pass for items with no versioned ID in the cache
-        unknown_skus = {c['sku'] for c in catalog_items if '-' not in c['id']}
+        unknown_skus = {
+            c['sku'] for c in catalog_items
+            if '-' not in c['id'] and not self.is_lesson_sku(c.get('sku', c['id']))
+        }
         if unknown_skus:
             self.logger(f"Resolving versioned URLs for {len(unknown_skus)} "
                         f"{delivery_format.lower()}(s) via Continue button…")
@@ -3168,6 +3188,11 @@ class LabManager:
                 failed.append(sku)
                 continue
 
+            if self.is_lesson_sku(sku) or self.is_lesson_sku(item_id):
+                self.logger(f"  [{idx + 1}/{len(catalog_items)}] {item_id} – "
+                             "lesson; skipping version lookup")
+                continue
+
             item_name, _ = self._parse_course_id(item_id)
             self.logger(f"  [{idx + 1}/{len(catalog_items)}] {item_id} – "
                         "fetching versions…")
@@ -3197,11 +3222,12 @@ class LabManager:
     def update_courses_list(self, environment: str, output_path: Optional[Path] = None) -> Path:
         """
         Scrape the ROL catalog to build a complete courses-list.txt with all
-        courses and lessons and their available versions.
+        courses and their available versions.
 
         Steps:
             1. Build a version cache from the existing courses-list.txt.
-            2. Scrape Courses, then Lessons (filter → collect → discover → versions).
+            2. Scrape Courses (filter → collect → discover → versions).
+               Lessons (SKU trailing L) are not scraped; they have no version dropdown.
             3. Write sorted unique entries to *output_path*.
 
         Returns the Path that was written.
@@ -3230,10 +3256,9 @@ class LabManager:
             self.logger(f"Loaded {len(version_cache)} known entry/entries from cache.")
 
         all_entries: list[str] = []
-        for fmt in ('Course', 'Lesson'):
-            all_entries.extend(
-                self._scrape_catalog_format(fmt, environment, version_cache)
-            )
+        all_entries.extend(
+            self._scrape_catalog_format('Course', environment, version_cache)
+        )
 
         unique_entries = sorted(set(all_entries))
 
@@ -3248,9 +3273,7 @@ class LabManager:
         output_path = Path(output_path)
         output_path.write_text("\n".join(unique_entries) + "\n")
 
-        self.logger(f"\n{'=' * 60}")
         self.logger(f"Wrote {len(unique_entries)} entries to {output_path}")
-        self.logger("=" * 60)
 
         return output_path
 

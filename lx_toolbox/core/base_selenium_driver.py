@@ -162,6 +162,7 @@ class BaseSeleniumDriver:
                     )
                 except Exception:
                     pass
+        time.sleep(2)
 
     def wait_for_element_clickable(self, by: By, value: str, timeout: int = 5):
         return WebDriverWait(self.driver, timeout).until(EC.element_to_be_clickable((by, value)))
