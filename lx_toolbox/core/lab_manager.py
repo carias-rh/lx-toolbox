@@ -2786,8 +2786,19 @@ class LabManager:
 
             if not checkbox.is_selected():
                 self.driver.execute_script("arguments[0].click();", checkbox)
-                time.sleep(1)
 
+            others = self.driver.find_elements(
+                By.XPATH,
+                '//input[contains(@data-analytics-id, "deliveryFormats")]',
+            )
+            for other in others:
+                other_id = other.get_attribute("id") or ""
+                if other_id == checkbox_id:
+                    continue
+                if other.is_selected():
+                    self.driver.execute_script("arguments[0].click();", other)
+
+            time.sleep(1)
             self.logger(f"Filter applied: Showing {delivery_format.lower()}s only")
 
         except TimeoutException:
@@ -3090,13 +3101,11 @@ class LabManager:
             self.logger(f"No {delivery_format.lower()}s found in catalog.")
             return []
 
-        catalog_items = [
-            item for item in catalog_items
-            if not self.is_lesson_sku(item.get("sku", item["id"]))
-        ]
-        if not catalog_items:
-            self.logger("No courses found after skipping lessons.")
-            return []
+        # Lessons expose sku-version on the Continue/View href; do not open each item.
+        if delivery_format.lower() == "lesson":
+            entries = [item["id"] for item in catalog_items if "-" in item["id"]]
+            self.logger(f"Collected {len(entries)} lesson(s) from catalog URLs.")
+            return entries
 
         # Discovery pass for items with no versioned ID in the cache
         unknown_skus = {
@@ -3189,8 +3198,9 @@ class LabManager:
                 continue
 
             if self.is_lesson_sku(sku) or self.is_lesson_sku(item_id):
+                entries.append(item_id)
                 self.logger(f"  [{idx + 1}/{len(catalog_items)}] {item_id} – "
-                             "lesson; skipping version lookup")
+                             "lesson; using catalog URL")
                 continue
 
             item_name, _ = self._parse_course_id(item_id)
@@ -3222,13 +3232,13 @@ class LabManager:
     def update_courses_list(self, environment: str, output_path: Optional[Path] = None) -> Path:
         """
         Scrape the ROL catalog to build a complete courses-list.txt with all
-        courses and their available versions.
+        courses and lessons.
 
         Steps:
             1. Build a version cache from the existing courses-list.txt.
-            2. Scrape Courses (filter → collect → discover → versions).
-               Lessons (SKU trailing L) are not scraped; they have no version dropdown.
-            3. Write sorted unique entries to *output_path*.
+            2. Scrape Lessons first (only the Lesson checkbox; Continue/View hrefs).
+            3. Scrape Courses (only the Course checkbox; settings versions).
+            4. Write sorted unique entries to *output_path*.
 
         Returns the Path that was written.
         """
@@ -3248,7 +3258,7 @@ class LabManager:
                 line = line.strip()
                 if not line:
                     continue
-                m = re.match(r'^([a-zA-Z]+\d+)-(\d+\.\d+.*)$', line)
+                m = re.match(r'^([a-zA-Z]+\d+[a-zA-Z]*)-(\d+\.\d+.*)$', line)
                 if m:
                     sku = m.group(1).lower()
                     if sku not in version_cache:
@@ -3256,9 +3266,10 @@ class LabManager:
             self.logger(f"Loaded {len(version_cache)} known entry/entries from cache.")
 
         all_entries: list[str] = []
-        all_entries.extend(
-            self._scrape_catalog_format('Course', environment, version_cache)
-        )
+        for fmt in ('Lesson', 'Course'):
+            all_entries.extend(
+                self._scrape_catalog_format(fmt, environment, version_cache)
+            )
 
         unique_entries = sorted(set(all_entries))
 
