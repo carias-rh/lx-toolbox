@@ -180,17 +180,18 @@ class ServiceNowAutoAssign:
                 self.config.get("T2", "ACKNOWLEDGMENT_TEMPLATE")
                 or "Hi {customer_name},\n\nThanks for submitting your feedback to the Learner Experience Team.\n\nWe are reviewing your message and will get back to you as soon as possible.\n\nBest Regards,\n{assignee_name}\n{team_name}"
             ),
-            auto_resolve_reporters=[
-                "Forrest Taylor", "Susan Lauber", "Jordi Sola Alaball", "Zachary Gutterman",
-                "Abhishek Kumar", "Nicol Castillo", "Satdal Maity", "Neha Singh",
-                "Benjamin Chardi Marco", "Yuvaraj Balaraju", "Patrick Gomez", "Vidyashree G",
-                "Ricardo Taniguchi", "Abdul Patel", "Tianting Shi", "Steven Bonneville",
-                "Pablo Solar Vilarino", "Wasim Raja", "Chetan Tiwary", "Ricardo Da Costa",
-                "Samik Sanyal", "Jingyu Wang", "Vikas Singh", "Shashi Singh",
-                "Jaime Yague", "Ashley D'Andrea", "Carlos Arias", "Andres Hernandez",
-                "Ed Parenti", "Antonio Mari Romero", "Mohammed Tahmeed", "David O'Brien",
-                "Yashashvi Singh",
-            ],
+            auto_resolve_reporters=[],
+#            auto_resolve_reporters=[
+#                "Forrest Taylor", "Susan Lauber", "Jordi Sola Alaball", "Zachary Gutterman",
+#                "Abhishek Kumar", "Nicol Castillo", "Satdal Maity", "Neha Singh",
+#                "Benjamin Chardi Marco", "Yuvaraj Balaraju", "Patrick Gomez", "Vidyashree G",
+#                "Ricardo Taniguchi", "Abdul Patel", "Tianting Shi", "Steven Bonneville",
+#                "Pablo Solar Vilarino", "Wasim Raja", "Chetan Tiwary", "Ricardo Da Costa",
+#                "Samik Sanyal", "Jingyu Wang", "Vikas Singh", "Shashi Singh",
+#                "Jaime Yague", "Ashley D'Andrea", "Carlos Arias", "Andres Hernandez",
+#                "Ed Parenti", "Antonio Mari Romero", "Mohammed Tahmeed", "David O'Brien",
+#                "Yashashvi Singh",
+#            ],
         )
 
         _gls_engagement_ack = (
