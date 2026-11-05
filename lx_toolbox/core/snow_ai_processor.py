@@ -707,9 +707,10 @@ class SnowAIProcessor:
     _MODE_CONFIRM_DEFECT: str = "confirm_defect"
 
     _DEFECT_DESCRIPTION_INSTRUCTION: str = (
-        "one impersonal English sentence plus the literal failure evidence copied as the Learner wrote it "
-        "(instruction step, command, observed error, filenames, resource names, identifiers; "
-        "for video, the timestamp and the mismatched wording). "
+        "impersonal English prose. Inside the sentences, keep the instruction step, the command, "
+        "the observed error, filenames, resource names, and identifiers exactly as the Learner wrote them. "
+        "For a video, keep the timestamp and the mismatched wording inside the sentences. "
+        "Do not append a list of terms. Do not add an Evidence heading. "
         "No Learner narration, course code, course ID, chapter, section, duration, opinions, attempted fix, "
         "other people, contact details, or the Learner's machine. "
         "Do not invent an error string. Always generate."
@@ -2779,65 +2780,19 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # Return focus to ServiceNow tab.
         self.driver.switch_to.window(self.base_window_handle)
 
-    @staticmethod
-    def _failure_evidence_spans(wording: str) -> list[str]:
-        """Recognizable failure evidence.
-
-        Commands in backticks, then CamelCase errors, all-capitals identifiers,
-        instruction steps, video timestamps, and filenames.
-        A bare backtick value is not evidence.
-        """
-        spans: list[str] = []
-
-        def add(span: str) -> None:
-            span = span.strip().strip("`")
-            if span and span not in spans:
-                spans.append(span)
-
-        for match in re.finditer(r"`([^`]+)`", wording or ""):
-            span = match.group(1).strip()
-            if " " in span:
-                add(span)
-        for match in re.finditer(r"\b[A-Z][a-z]+(?:[A-Z][A-Za-z0-9]+)+\b", wording or ""):
-            add(match.group(0))
-        for match in re.finditer(r"\b[A-Z]{3,}\b", wording or ""):
-            add(match.group(0))
-        for match in re.finditer(r"\b(?:step|paso)\s+\d+(?:\.\d+)?\b", wording or "", re.IGNORECASE):
-            add(match.group(0))
-        for match in re.finditer(r"\b\d{1,2}:\d{2}\b", wording or ""):
-            prefix = (wording or "")[max(0, match.start() - 16):match.start()]
-            if re.search(r"(?:for|durante|wait|espera|esperé|after|tras)\s+$", prefix, re.IGNORECASE):
-                continue
-            add(match.group(0))
-        for match in re.finditer(r"\b[\w.-]+\b", wording or ""):
-            if SnowAIProcessor._is_filename(match.group(0)):
-                add(match.group(0))
-        return spans
-
     @classmethod
     def _defect_description_wording_block(cls, snow_info: dict | None) -> str:
         """Prompt block: evidence is copied from raw Learner wording."""
         wording = cls.issue_section_inference_text(snow_info or {})
         return (
-            "Write the Defect Description sentence in English. "
-            "Copy its evidence only from this Learner wording, not from a summary or a translation. "
+            "Write the Defect Description as English prose. "
+            "When this Learner wording names an instruction step, a command, an error, a filename, "
+            "an identifier, or a video timestamp, use those words inside the sentences. "
+            "Do not append a list of terms and do not add an Evidence heading. "
+            "Use this wording, not a summary or a translation. "
             "Do not add a command that appears only in the Guide.\n"
             f"<learner_wording>\n{wording}\n</learner_wording>\n"
         )
-
-    @staticmethod
-    def compose_defect_description(snow_info: dict, draft: str) -> str:
-        """Defect Description: the drafted sentence plus omitted failure evidence."""
-        wording = SnowAIProcessor.issue_section_inference_text(snow_info or {})
-        sentence = (draft or "").strip()
-        chosen: list[str] = []
-        for span in SnowAIProcessor._failure_evidence_spans(wording):
-            if span in sentence or any(span in earlier for earlier in chosen):
-                continue
-            chosen.append(span)
-        parts = [sentence] if sentence else []
-        parts.extend(chosen)
-        return "\n".join(parts)
 
     _SEARCH_BARE_NOUNS = frozenset({
         "pod", "image", "container", "operator", "deployment", "service", "namespace",
@@ -3030,10 +2985,8 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # Section Title rows plus an "Issue description" heading.
         # Values are written through the editor document. execCommand insertText
         # splits those rows into a third column.
-        # The Defect Description is the model's sentence plus evidence copied from
-        # the Learner's own wording. It is not the translated Feedback.
-        # A Suggestion keeps the requested-change sentence, with the old fallback
-        # only when that sentence is missing.
+        # The Defect Description is the model's prose. A Suggestion falls back to
+        # the translated Feedback only when that prose is missing.
         is_suggestion = (
             bool(classification.get("is_suggestion_ticket"))
             or analysis.get("reply_mode") == "acknowledge_suggestion"
@@ -3043,7 +2996,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 "translated_student_feedback", snow_info.get("Description", "")
             )
         else:
-            translated = self.compose_defect_description(snow_info, jira_desc)
+            translated = jira_desc
 
         # Description starts as a read-only renderer; click it so ProseMirror
         # mounts. Then wait for the Bug template's <td> cells. Avoid caching
