@@ -1510,28 +1510,40 @@ Instructions:
     _CHAPTER_SECTION_WORDS_RE = re.compile(
         r"chapter\s+(\d{1,2})\s*,?\s*section\s+(\d{1,2})", re.IGNORECASE
     )
+    _CHAPTER_S_SECTION_RE = re.compile(
+        r"chapter\s*(\d{1,2})\s+s\s*(\d{1,2})", re.IGNORECASE
+    )
+    _SECTION_NM_RE = re.compile(
+        r"\bsection\s+(\d{1,2})\s*[.\s]\s*(\d{1,2})\b", re.IGNORECASE
+    )
     _EXERCISE_NM_RE = re.compile(
         r"(?:演習|exercise|guided exercise|\bge\b|\blab\b)\s*(\d{1,2})\s*[.\s]\s*(\d{1,2})",
         re.IGNORECASE,
     )
-    _BARE_NM_RE = re.compile(r"\b(\d{1,2})\.(\d{1,2})\b")
+    _INSTRUCTION_STEP_RE = re.compile(r"\bstep\s+\d+(?:\.\d+)?\b", re.IGNORECASE)
+
+    @classmethod
+    def _text_has_section_location_signal(cls, raw: str) -> bool:
+        return bool(
+            cls._SECTION_SLUG_RE.search(raw)
+            or cls._CHAPTER_SECTION_WORDS_RE.search(raw)
+            or cls._CHAPTER_S_SECTION_RE.search(raw)
+            or cls._SECTION_NM_RE.search(raw)
+            or cls._EXERCISE_NM_RE.search(raw)
+        )
 
     @classmethod
     def text_names_a_section(cls, text: str, course_version: str = "") -> bool:
-        """Heuristic: does this Learner text look like it names a Section?"""
+        """Heuristic: does this Learner text look like it names a Section?
+
+        Bare ``N.M`` (e.g. ``3.4``) is treated as an Instruction step unless the
+        text explicitly names a chapter, section, exercise, or ``chNNsMM`` slug.
+        """
         raw = text or ""
-        if cls._SECTION_SLUG_RE.search(raw):
+        if cls._text_has_section_location_signal(raw):
             return True
-        if cls._CHAPTER_SECTION_WORDS_RE.search(raw):
-            return True
-        if cls._EXERCISE_NM_RE.search(raw):
-            return True
-        version = (course_version or "").strip()
-        for match in cls._BARE_NM_RE.finditer(raw):
-            token = f"{match.group(1)}.{match.group(2)}"
-            if version and token == version:
-                continue
-            return True
+        if cls._INSTRUCTION_STEP_RE.search(raw):
+            return False
         return False
 
     @classmethod
@@ -1615,19 +1627,21 @@ Instructions:
 
     def _resolve_issue_section(self, snow_info: dict) -> dict:
         """If Learner text names a Section, ask the LLM and update snow_info."""
-        text = self.issue_section_inference_text(snow_info)
         version = str(snow_info.get("Version") or "")
+        capture_url = snow_info.get("URL") or ""
+        text = self.issue_section_inference_text(snow_info)
         if not self.text_names_a_section(text, course_version=version):
             return snow_info
         course_id = (
             f"{str(snow_info.get('Course') or '').lower()}-{version}".strip("-")
         )
-        capture_url = snow_info.get("URL") or ""
         self.logger("Inferring Issue Section from Feedback text")
         prompt = f"""You infer which course Section a Learner is complaining about.
 
 Course ID (frozen — do not change it): {course_id}
 Capture URL (page where they opened the Feedback form): {capture_url}
+
+Compare the Learner text to the Capture URL page slug. When the text explicitly names a chapter and section, that named Section is the Issue Section even if it differs from the Capture URL.
 
 Learner text (original description, then any Learner Follow-ups).
 A Follow-up that names a Section is the Issue Section:
@@ -1635,7 +1649,8 @@ A Follow-up that names a Section is the Issue Section:
 
 Rules:
 - Return the Issue Section as chapter and section numbers (chapter 8 section 8 is 8 and 8).
-- "N.M", "chapter N section M", "chNNsMM", "Exercise N.M", "演習N.M" all mean chapter N section M.
+- "chapter N section M", "chapter N s M", "section N.M", "chNNsMM", "Exercise N.M", and "演習N.M" mean chapter N section M.
+- Bare "N.M" without chapter/section/exercise wording is an Instruction step number, not a Section — return unchanged.
 - If a Follow-up names a Section, use that, not the original description.
 - If the text does not clearly name one Section, or names two with no primary, return unchanged.
 - Do not invent a different course.
@@ -2603,6 +2618,66 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             )
             return capture_slug
 
+    @classmethod
+    def _inferred_page_differs_from_capture(cls, snow_info: dict) -> bool:
+        capture = snow_info.get("CaptureURL") or ""
+        if not capture:
+            return False
+        current_slug = cls.page_slug_from_url(snow_info.get("URL") or "")
+        capture_slug = cls.page_slug_from_url(capture)
+        return bool(capture_slug and current_slug and current_slug != capture_slug)
+
+    @classmethod
+    def _content_analysis_needs_capture_page(cls, analysis: dict, guide_text: str, snow_info: dict) -> bool:
+        """True when Guide Text on the inferred page does not contain the reported issue."""
+        if not cls._inferred_page_differs_from_capture(snow_info):
+            return False
+        if not (guide_text or "").strip():
+            return False
+        excerpt = str(analysis.get("excerpt") or "").strip()
+        if excerpt:
+            return False
+        mode = analysis.get("reply_mode") or ""
+        if analysis.get("is_valid_issue") or mode == cls._MODE_CONFIRM_DEFECT:
+            return True
+        return mode in ("teach", "ask_more")
+
+    def _reanalyze_content_on_capture_page(
+        self,
+        snow_info: dict,
+        course_id: str,
+        chapter_section: str,
+        environment: str,
+        analysis_input: str,
+        guide_text: str,
+        analysis: dict,
+    ) -> tuple[str, str, dict]:
+        if not self._content_analysis_needs_capture_page(analysis, guide_text, snow_info):
+            return chapter_section, guide_text, analysis
+        capture_slug = self.page_slug_from_url(snow_info.get("CaptureURL") or "")
+        if not capture_slug:
+            return chapter_section, guide_text, analysis
+        self.logger(
+            f"Guide Text did not match inferred Issue Section; "
+            f"re-opening Capture URL page {capture_slug}"
+        )
+        self.restore_capture_location(snow_info)
+        chapter_section = self._goto_investigation_page(
+            snow_info, course_id, capture_slug, environment
+        )
+        try:
+            self.lab_mgr.select_lab_environment_tab("course")
+        except Exception:
+            pass
+        try:
+            guide_text = self.fetch_guide_text_from_website()
+            self.logger(f"Re-fetched guide text length: {len(guide_text)}")
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed re-fetching guide text on Capture URL: {e}")
+            return chapter_section, guide_text, analysis
+        analysis = self.analyze_content_issue(analysis_input, guide_text, snow_info)
+        return chapter_section, guide_text, analysis
+
     def start_lab_for_course(self, course_id: str, chapter_section: str = "pr01", environment: str = "rol"):
         self.lab_mgr.go_to_course(course_id=course_id, chapter_section=chapter_section, environment=environment)
         primary_status, secondary_status = self.lab_mgr.check_lab_status()
@@ -3229,6 +3304,15 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                             logging.getLogger(__name__).warning(f"Failed fetching guide text: {e}")
 
                         analysis = self.analyze_content_issue(analysis_input, guide_text, snow_info)
+                        chapter_section, guide_text, analysis = self._reanalyze_content_on_capture_page(
+                            snow_info,
+                            course_id,
+                            chapter_section,
+                            environment,
+                            analysis_input,
+                            guide_text,
+                            analysis,
+                        )
 
                     elif is_environment_issue:
                         analysis = self.analyze_environment_issue(analysis_input, snow_info)
