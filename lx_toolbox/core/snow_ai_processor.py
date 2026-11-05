@@ -14,7 +14,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
 
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger, reset_step_counter
@@ -489,26 +488,161 @@ class SnowAIProcessor:
         safe = escape(text, quote=True)
         return f'<a href="{safe}">{safe}</a>'
 
+    def _edit_jira_description(self, action: str, payload: dict) -> str:
+        """Change the open Description document in place.
+
+        The Bug template is a two-column table (header, value). Writing through
+        the browser caret splits a row into a third column. The editor view
+        replaces the value paragraph, or the paragraph under a heading, in place.
+        """
+        result = self.driver.execute_script(
+            r"""
+            var action = arguments[0];
+            var payload = arguments[1] || {};
+            var selector = arguments[2];
+
+            function editorEl() {
+                return document.querySelector(selector);
+            }
+            function getView() {
+                var ed = editorEl();
+                if (!ed) return null;
+                var keys = Object.keys(ed);
+                var fiberKey = null;
+                for (var i = 0; i < keys.length; i++) {
+                    if (keys[i].indexOf('__reactFiber') === 0) { fiberKey = keys[i]; break; }
+                }
+                if (!fiberKey) return null;
+                var fiber = ed[fiberKey];
+                while (fiber) {
+                    var view = fiber.memoizedProps && fiber.memoizedProps.editorView;
+                    if (view && view.state && view.dispatch) return view;
+                    fiber = fiber.return;
+                }
+                return null;
+            }
+            function inlineContent(view, text, href) {
+                var schema = view.state.schema;
+                var marks = [];
+                if (href && schema.marks.link) marks.push(schema.marks.link.create({href: href}));
+                var parts = String(text).split('\n');
+                var nodes = [];
+                for (var i = 0; i < parts.length; i++) {
+                    if (i > 0 && schema.nodes.hardBreak) nodes.push(schema.nodes.hardBreak.create());
+                    if (parts[i]) nodes.push(schema.text(parts[i], marks));
+                }
+                if (!nodes.length) return null;
+                return view.state.doc.content.constructor.from(nodes);
+            }
+            function replaceRange(view, range, text, href) {
+                var content = text ? inlineContent(view, text, href) : null;
+                var tr = view.state.tr;
+                if (range.from < range.to) {
+                    tr = content ? tr.replaceWith(range.from, range.to, content) : tr.delete(range.from, range.to);
+                } else if (content) {
+                    tr = tr.insert(range.from, content);
+                } else {
+                    return;
+                }
+                view.dispatch(tr);
+            }
+            function valueRange(state, rowIndex) {
+                var found = null;
+                state.doc.descendants(function (node, pos) {
+                    if (found) return false;
+                    if (node.type.name !== 'table') return;
+                    var offset = pos + 1;
+                    for (var i = 0; i < node.childCount; i++) {
+                        var row = node.child(i);
+                        if (i === rowIndex) {
+                            var cellPos = offset + 1;
+                            for (var c = 0; c < row.childCount; c++) {
+                                var cell = row.child(c);
+                                if (cell.type.name === 'tableCell') {
+                                    var para = cell.firstChild;
+                                    if (!para || para.type.name !== 'paragraph') return false;
+                                    var paraPos = cellPos + 1;
+                                    found = {from: paraPos + 1, to: paraPos + para.nodeSize - 1};
+                                    return false;
+                                }
+                                cellPos += cell.nodeSize;
+                            }
+                        }
+                        offset += row.nodeSize;
+                    }
+                    return false;
+                });
+                return found;
+            }
+            function fillCell(rowIndex, text, href) {
+                var view = getView();
+                if (!view) return 'no-view';
+                var range = valueRange(view.state, rowIndex);
+                if (!range) return 'no-cell';
+                replaceRange(view, range, text, href);
+                return 'ok';
+            }
+            function fillAfter(heading, text) {
+                var view = getView();
+                if (!view) return 'no-view';
+                var target = null;
+                var seen = false;
+                var wanted = String(heading || '').toLowerCase();
+                view.state.doc.descendants(function (node, pos) {
+                    if (target) return false;
+                    if (node.type.name !== 'paragraph') return;
+                    var label = node.textContent.replace(/^\s+|\s+$/g, '').toLowerCase();
+                    if (!seen && wanted && label.indexOf(wanted) === 0) { seen = true; return; }
+                    if (seen) {
+                        target = {from: pos + 1, to: pos + node.nodeSize - 1};
+                        return false;
+                    }
+                });
+                if (!target) return 'no-heading';
+                replaceRange(view, target, text, null);
+                return 'ok';
+            }
+
+            if (action === 'cell') return fillCell(payload.row, payload.text || '', payload.href || null);
+            if (action === 'section') return fillAfter(payload.heading, payload.text || '');
+            return 'bad-action';
+            """,
+            action,
+            payload,
+            JiraHandler.DESCRIPTION_EDITOR_CSS,
+        )
+        return result or "no-editor"
+
     @staticmethod
     def _jira_description_editor_selector() -> str:
-        """Return a selector for the main Description editor in Jira create.
-
-        Jira currently renders several ProseMirror editors in the create dialog
-        with the same DOM id, so the Description field must be targeted by its
-        aria-label instead of by raw id.
-        """
-        return 'div[contenteditable="true"][aria-label^="Description area"]'
+        """Return a selector for the main Description editor in Jira create."""
+        return JiraHandler.DESCRIPTION_EDITOR_CSS
 
     @staticmethod
     def _jira_create_dialog_state(driver) -> str | None:
         """Return whether Jira create is ready or blocked on authentication."""
-        if driver.find_elements(By.ID, 'summary-field'):
-            return "ready"
-        for dialog in driver.find_elements(By.XPATH, '//div[@role="dialog"]'):
-            text = (getattr(dialog, "text", "") or "").lower()
-            if "not authorized" in text or "please log in" in text:
-                return "unauthorized"
-        return None
+        return JiraHandler.create_dialog_state(driver)
+
+    @staticmethod
+    def _jira_prefill_failure_detail(exc: BaseException) -> str:
+        """Step-named failure text without the geckodriver stacktrace."""
+        text = str(exc).strip()
+        if "Stacktrace:" in text:
+            text = text.split("Stacktrace:", 1)[0].strip()
+        if text.startswith("Jira prefill failed during"):
+            return text
+        formatted = JiraHandler.format_webdriver_error(exc)
+        return formatted or type(exc).__name__
+
+    def _jira_prefill_step(self, name: str, fn):
+        logging.getLogger(__name__).info(f"Jira prefill: {name}")
+        try:
+            return fn()
+        except Exception as e:
+            raise RuntimeError(
+                f"Jira prefill failed during {name}: "
+                f"{self._jira_prefill_failure_detail(e)}"
+            ) from e
 
     @staticmethod
     def _strip_location_from_title(title: str, course_code: str = "") -> str:
@@ -571,6 +705,15 @@ class SnowAIProcessor:
     # Canonical reply-mode value for a confirmed Defect.  Used wherever the
     # codebase needs to compare or assign this mode to avoid magic strings.
     _MODE_CONFIRM_DEFECT: str = "confirm_defect"
+
+    _DEFECT_DESCRIPTION_INSTRUCTION: str = (
+        "one impersonal English sentence plus the literal failure evidence copied as the Learner wrote it "
+        "(instruction step, command, observed error, filenames, resource names, identifiers; "
+        "for video, the timestamp and the mismatched wording). "
+        "No Learner narration, course code, course ID, chapter, section, duration, opinions, attempted fix, "
+        "other people, contact details, or the Learner's machine. "
+        "Do not invent an error string. Always generate."
+    )
 
     _CONTENT_MODE_ALIASES: dict = {
         "confirm": "confirm_defect",
@@ -1777,7 +1920,7 @@ For example:
             "\n        \"suggested_correction\": \"If the issue is valid, indicate what words, lines, or commands that should be changed in the guide_text to fix the issue. If the issue is valid but there is not enough information it could be possible that a deeper investigation within the lab environment is required. Do not include any explanations or markdown formatting outside the JSON object.\"," +
             "\n        \"summary\": \"a short/medium summary of the 'analysis' field\"," +
             "\n        \"reply_mode\": \"one of: confirm_defect (real defect found), teach (learner confusion — explain the concept), ask_more (not enough info), lab_pending (lab still initialising), explain_expected (expected behaviour), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up), acknowledge_suggestion (improvement idea or praise — not a defect report)\"," +
-            "\n        \"jira_description\": \"impersonal technical problem statement — no raw learner wording, no PII, no suggested fix, no course code, no section, no chapter references. Always generate, even when reply_mode is not confirm_defect.\"," +
+            "\n        \"jira_description\": \"" + self._DEFECT_DESCRIPTION_INSTRUCTION + "\"," +
             "\n        \"jira_title\": \"short failure name — words separated by spaces only, no underscores, dashes, or special chars, all lowercase. Must NOT contain a course code (e.g. do380, rh124), course ID (e.g. do380-4.18), or section identifier (e.g. ch02s06, 4.1, section 4).\"\n        }"
         )
 
@@ -1788,6 +1931,8 @@ For example:
         <student_feedback>
         {user_issue}
         </student_feedback>
+
+        {self._defect_description_wording_block(snow_info)}
 
         {guide_text_prompt}
 
@@ -1816,7 +1961,14 @@ For example:
 
     def analyze_environment_issue(self, user_issue: str, snow_info: dict | None = None) -> dict:
         self.logger("Analyzing environment issue using LLM")
-        json_example = '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", "is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", "summary": "a short summary of your analysis", "reply_mode": "one of: confirm_defect, explain_expected, ask_more, lab_pending, acknowledge_resolved", "jira_description": "impersonal technical problem statement — no raw learner wording, no PII, no course code, no section, no chapter references. Always generate.", "jira_title": "short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers."}'
+        json_example = (
+            '{"analysis": "think in this value step by step, describe what the student is trying to communicate in it\'s feedback, and provide the steps needed to debug the issue knowing that the lab is composed of multiple RHEL virtual machines.", '
+            '"is_valid_issue": true, "suggested_correction": "a brief suggestion for correction if applicable; otherwise an empty string", '
+            '"summary": "a short summary of your analysis", '
+            '"reply_mode": "one of: confirm_defect, explain_expected, ask_more, lab_pending, acknowledge_resolved", '
+            '"jira_description": "' + self._DEFECT_DESCRIPTION_INSTRUCTION + '", '
+            '"jira_title": "short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers."}'
+        )
         prompt_text = f"""
         You are an expert in Red Hat Training lab environments.
         {self._build_operational_context("environment", snow_info)}
@@ -1825,6 +1977,8 @@ For example:
         <student_feedback>
         {user_issue}
         </student_feedback>
+
+        {self._defect_description_wording_block(snow_info)}
 
         Return your analysis in exactly the following JSON format without any extra text:
         {json_example}
@@ -1855,7 +2009,14 @@ For example:
         
         video_context = "The video player IS available on the page, so videos should be accessible." if video_available else "The video player button is NOT available on the page, which typically means videos for this course version are still being produced."
         
-        json_example = '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, "video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", "summary": "short summary of the issue", "reply_mode": "one of: confirm_defect (real video defect), ask_more (not enough info), explain_expected (videos not yet produced), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up), acknowledge_suggestion (please add a video or praise — not a defect report)", "jira_description": "impersonal technical problem statement — no raw learner wording, no PII, no course code, no section, no chapter references. Always generate.", "jira_title": "short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers."}'
+        json_example = (
+            '{"analysis": "detailed analysis of the video issue", "is_valid_issue": true, "needs_jira": true, '
+            '"video_issue_type": "content_mismatch", "suggested_correction": "description of what needs to be fixed", '
+            '"summary": "short summary of the issue", '
+            '"reply_mode": "one of: confirm_defect (real video defect), ask_more (not enough info), explain_expected (videos not yet produced), acknowledge_resolved (latest Learner Follow-up is a Resolution Follow-up), acknowledge_suggestion (please add a video or praise — not a defect report)", '
+            '"jira_description": "' + self._DEFECT_DESCRIPTION_INSTRUCTION + '", '
+            '"jira_title": "short failure name — words separated by spaces only, no underscores or special chars, all lowercase. No course code, course ID, or section identifiers."}'
+        )
         
         prompt_text = f"""
         You are an expert in Red Hat Training video content issues.
@@ -1866,6 +2027,8 @@ For example:
         <student_feedback>
         {user_issue}
         </student_feedback>
+
+        {self._defect_description_wording_block(snow_info)}
         
         Video availability status: {video_context}
         
@@ -2476,6 +2639,34 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             raise RuntimeError(f"No new browser tab appeared for {url}")
         return new_handles[-1]
 
+    def _open_new_tab(self) -> str:
+        """Open a tab, switch to it, and return its handle.
+
+        Firefox often leaves ``current_window_handle`` on the previous tab
+        after ``new_window('tab')``. Identifying the new handle and switching
+        to it keeps the Jira create form off the JQL search tab.
+        """
+        before = set(self.driver.window_handles)
+        self.driver.switch_to.new_window("tab")
+        WebDriverWait(self.driver, 5).until(
+            lambda d: len(set(d.window_handles) - before) >= 1
+        )
+        new_handles = [h for h in self.driver.window_handles if h not in before]
+        if not new_handles:
+            raise RuntimeError("No new browser tab appeared")
+        handle = new_handles[-1]
+        if self.driver.current_window_handle != handle:
+            self.driver.switch_to.window(handle)
+        return handle
+
+    def _focus_jira_create_tab(self) -> None:
+        handle = getattr(self, "_jira_create_handle", None)
+        if not handle or handle not in getattr(self.driver, "window_handles", []):
+            return
+        if self.driver.current_window_handle != handle:
+            logging.getLogger(__name__).info("Switching to the Jira create tab")
+            self.driver.switch_to.window(handle)
+
     def prelogin_all(self, environment: str = "rol"):
         # ── Phase 1: parallel tab loading.
         #
@@ -2588,6 +2779,127 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         # Return focus to ServiceNow tab.
         self.driver.switch_to.window(self.base_window_handle)
 
+    @staticmethod
+    def _failure_evidence_spans(wording: str) -> list[str]:
+        """Recognizable failure evidence.
+
+        Commands in backticks, then CamelCase errors, all-capitals identifiers,
+        instruction steps, video timestamps, and filenames.
+        A bare backtick value is not evidence.
+        """
+        spans: list[str] = []
+
+        def add(span: str) -> None:
+            span = span.strip().strip("`")
+            if span and span not in spans:
+                spans.append(span)
+
+        for match in re.finditer(r"`([^`]+)`", wording or ""):
+            span = match.group(1).strip()
+            if " " in span:
+                add(span)
+        for match in re.finditer(r"\b[A-Z][a-z]+(?:[A-Z][A-Za-z0-9]+)+\b", wording or ""):
+            add(match.group(0))
+        for match in re.finditer(r"\b[A-Z]{3,}\b", wording or ""):
+            add(match.group(0))
+        for match in re.finditer(r"\b(?:step|paso)\s+\d+(?:\.\d+)?\b", wording or "", re.IGNORECASE):
+            add(match.group(0))
+        for match in re.finditer(r"\b\d{1,2}:\d{2}\b", wording or ""):
+            prefix = (wording or "")[max(0, match.start() - 16):match.start()]
+            if re.search(r"(?:for|durante|wait|espera|esperé|after|tras)\s+$", prefix, re.IGNORECASE):
+                continue
+            add(match.group(0))
+        for match in re.finditer(r"\b[\w.-]+\b", wording or ""):
+            if SnowAIProcessor._is_filename(match.group(0)):
+                add(match.group(0))
+        return spans
+
+    @classmethod
+    def _defect_description_wording_block(cls, snow_info: dict | None) -> str:
+        """Prompt block: evidence is copied from raw Learner wording."""
+        wording = cls.issue_section_inference_text(snow_info or {})
+        return (
+            "Write the Defect Description sentence in English. "
+            "Copy its evidence only from this Learner wording, not from a summary or a translation. "
+            "Do not add a command that appears only in the Guide.\n"
+            f"<learner_wording>\n{wording}\n</learner_wording>\n"
+        )
+
+    @staticmethod
+    def compose_defect_description(snow_info: dict, draft: str) -> str:
+        """Defect Description: the drafted sentence plus omitted failure evidence."""
+        wording = SnowAIProcessor.issue_section_inference_text(snow_info or {})
+        sentence = (draft or "").strip()
+        chosen: list[str] = []
+        for span in SnowAIProcessor._failure_evidence_spans(wording):
+            if span in sentence or any(span in earlier for earlier in chosen):
+                continue
+            chosen.append(span)
+        parts = [sentence] if sentence else []
+        parts.extend(chosen)
+        return "\n".join(parts)
+
+    _SEARCH_BARE_NOUNS = frozenset({
+        "pod", "image", "container", "operator", "deployment", "service", "namespace",
+    })
+    _SEARCH_CONCEPTS = frozenset({
+        "iptables", "cgroups", "inotify", "selinux", "sigterm", "sigint",
+    })
+    _SEARCH_API_KINDS = frozenset({
+        "persistentvolumeclaim", "persistentvolume", "configmap", "secret",
+        "statefulset", "daemonset", "replicaset", "ingress", "route",
+        "buildconfig", "imagestream", "serviceaccount", "networkpolicy",
+        "storageclass", "horizontalpodautoscaler", "cronjob", "job",
+        "customresourcedefinition", "rolebinding", "clusterrole",
+    })
+
+    @staticmethod
+    def _is_filename(token: str) -> bool:
+        name = (token or "").split("/")[-1]
+        return bool(re.fullmatch(
+            r"(?:Containerfile|Dockerfile|Makefile|[\w.-]+\.(?:ya?ml|sh|py|json|xml|conf|cfg|service|txt))",
+            name,
+            re.IGNORECASE,
+        ))
+
+    @classmethod
+    def _search_term_rank(cls, token: str) -> int | None:
+        """Lower rank is more specific. None means the token cannot be a Search Term."""
+        lowered = token.lower()
+        if cls._is_filename(token):
+            return 0
+        if "/" in token and "." in token:
+            return 1
+        if lowered in cls._SEARCH_API_KINDS:
+            return 3
+        if lowered in cls._SEARCH_BARE_NOUNS:
+            return None
+        if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", token) and lowered not in cls._SEARCH_CONCEPTS:
+            return 2
+        return 4
+
+    @classmethod
+    def _select_search_term(cls, keyword: str) -> str:
+        """Pick one Search Term from the extractor's candidate.
+
+        Course Code, Course ID, and Section slug tokens are removed. What remains
+        is ranked filename, image reference, named resource, API kind, then concept.
+        Empty means the JQL has no text term.
+        """
+        tokens = (keyword or "").replace('"', "").replace("'", "").split()
+        location = re.compile(
+            r"^(?:[A-Za-z]{2}\d{3}|[A-Za-z]{2}\d{3}-\d+\.\d+|ch\d+s\d+)$",
+            re.IGNORECASE,
+        )
+        ranked = [
+            (cls._search_term_rank(token), token)
+            for token in tokens
+            if not location.match(token) and cls._search_term_rank(token) is not None
+        ]
+        if not ranked:
+            return ""
+        return min(ranked, key=lambda item: item[0])[1]
+
     def extract_jira_keyword(self, snow_info: dict) -> str:
         prompt = (
             "You are an expert technical keyword extractor for course exercise feedback. "
@@ -2604,7 +2916,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             "NEVER return a bare Kubernetes/container infrastructure noun without a qualifying name: "
             "'pod', 'image', 'container', 'operator', 'deployment', 'service', 'namespace' alone are too generic. "
             "NEVER return a course code or course ID (e.g. 'DO188', 'rh124') or a section identifier (e.g. 'ch01s02'), nor general course words such as lab, comprehensive review, guided exercise, etc. — those are already in the search query.\n\n"
-            f"<feedback>\n{snow_info.get('Description', '')}\n</feedback>\n\n"
+            f"<feedback>\n{self.issue_section_inference_text(snow_info)}\n</feedback>\n\n"
             'Output JSON: {"keyword": "<value>"} or {"keyword": null}\n'
             f"{self._json_output_rules()}"
         )
@@ -2620,7 +2932,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             component_clause = 'component in (RH134, RH199, RH124)'
         else:
             component_clause = f'component = "{course}"'
-        term = (keyword or course).replace('"', '').replace("'", "")
+        term = self._select_search_term(keyword)
 
         # Only narrow by page when the investigation page is a real Section (chNNsMM).
         # Preface (pr01) and appendix (ap01) pages are Capture URL noise — searching
@@ -2631,10 +2943,11 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         else:
             location_clause = ""
 
+        text_clause = f'AND text ~ "{term}" ' if term else ""
         jql = (
             f"project = PTL AND resolution = Unresolved "
             f"{location_clause}"
-            f"AND {component_clause} AND text ~ \"{term}\" "
+            f"AND {component_clause} {text_clause}"
             f"ORDER BY priority DESC, updated DESC"
         )
         return f"https://redhat.atlassian.net/issues/?jql={quote(jql)}"
@@ -2645,13 +2958,15 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         log = logging.getLogger(__name__)
         for attempt in range(1, 3):
             try:
+                self._focus_jira_create_tab()
                 self._prefill_jira_attempt(snow_info, analysis, classification, _url)
                 return
             except Exception as e:
-                detail = str(e).strip() or type(e).__name__
+                detail = self._jira_prefill_failure_detail(e)
                 log.warning(f"Jira prefill attempt {attempt}/2 failed: {detail}")
                 if attempt < 2:
                     log.info("Reloading Jira and retrying prefill…")
+                    self._focus_jira_create_tab()
                     try:
                         discard = self.driver.find_elements(
                             By.XPATH, '//button[@aria-label="Discard changes"]'
@@ -2668,101 +2983,34 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
 
     def _prefill_jira_attempt(self, snow_info: dict, analysis: dict, classification: dict, url: str):
         log = logging.getLogger(__name__)
-        def _open_create_dialog():
-            create_btn = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH,
-                    '//button[text()="Create"] | '
-                    '//button[contains(@data-testid, "create-button")]'
-                ))
-            )
-            try:
-                create_btn.click()
-            except Exception:
-                self.driver.execute_script("arguments[0].click();", create_btn)
-
-        def _wait_for_create_dialog(timeout_seconds: int) -> str:
-            try:
-                state = WebDriverWait(self.driver, timeout_seconds).until(
-                    lambda d: self._jira_create_dialog_state(d)
-                )
-                return str(state)
-            except TimeoutException as e:
-                dialogs = []
-                for dialog in self.driver.find_elements(By.XPATH, '//div[@role="dialog"]'):
-                    text = " ".join(((dialog.text or "").split()))
-                    if text:
-                        dialogs.append(text[:160])
-                detail = ", ".join(dialogs) if dialogs else "no dialogs visible"
-                raise RuntimeError(
-                    f"Timed out waiting for Jira create dialog after {timeout_seconds}s "
-                    f"(url={self.driver.current_url}, state={detail})"
-                ) from e
-
         def _open_and_wait_for_create_dialog() -> str:
-            _open_create_dialog()
-            try:
-                return _wait_for_create_dialog(8)
-            except RuntimeError:
-                log.info("Jira create dialog did not open after first click; retrying Create once")
-                _open_create_dialog()
-                return _wait_for_create_dialog(24)
+            # Four clicks, each allowed 25s. A cookie banner is dismissed and
+            # Create is clicked again without waiting out the full interval.
+            # Zoom is applied only after the dialog is open: at 0.8 the nav
+            # click often misses and the next click aborts the dialog that
+            # was still loading.
+            return self.jira_handler.open_create_until_state(timeout=25, attempts=4)
 
         self.driver.get(url)
-        self.driver.execute_script("document.body.style.zoom = '0.8'")
-        state = _open_and_wait_for_create_dialog()
+        state = self._jira_prefill_step(
+            "open create dialog", _open_and_wait_for_create_dialog
+        )
         if state == "unauthorized":
             log.info("Jira create dialog requires login; retrying after Jira login")
             self.jira_handler._logged_in = False
             self.login_jira()
             self.driver.get(url)
-            self.driver.execute_script("document.body.style.zoom = '0.8'")
-            state = _open_and_wait_for_create_dialog()
+            state = self._jira_prefill_step(
+                "open create dialog after login", _open_and_wait_for_create_dialog
+            )
             if state == "unauthorized":
                 raise RuntimeError("Jira create dialog still requires login after re-authentication")
 
+        self.driver.execute_script("document.body.style.zoom = '0.8'")
         log.info("Jira create dialog loaded")
 
-        # Change Work type to "Bug" if not already set.
-        # Use contains(., "Bug") instead of text()="Bug" — Jira renders the
-        # label text inside a child <span>, so text()= never matches.
-        already_bug = False
-        try:
-            WebDriverWait(self.driver, 5).until(
-                EC.presence_of_element_located((By.XPATH,
-                    '//div[@data-testid="issue-field-select-base.ui.format-option-label.c-label"]'
-                    '[contains(., "Bug")]'
-                ))
-            )
-            already_bug = True
-            log.info("Work type already set to Bug")
-        except Exception:
-            pass
+        self._jira_prefill_step("set work type to Bug", self.jira_handler.set_work_type_bug)
 
-        if not already_bug:
-            try:
-                work_type_input = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH,
-                        '//input[starts-with(@id, "type-picker-")]'
-                    ))
-                )
-                self.driver.execute_script("arguments[0].focus(); arguments[0].click();", work_type_input)
-                time.sleep(0.5)
-                work_type_input.send_keys("Bug")
-                time.sleep(1)
-                work_type_input.send_keys(Keys.RETURN)
-                # The form re-renders after a type change; wait for the summary
-                # field to become interactable (not just present) before proceeding.
-                # Using element_to_be_clickable avoids ElementNotInteractableException
-                # during the transition — this was the root cause of double-crash.
-                WebDriverWait(self.driver, 20).until(
-                    EC.element_to_be_clickable((By.XPATH, '//input[@id="summary-field"]'))
-                )
-                log.info("Work type changed to Bug, form re-render complete")
-            except Exception as e:
-                log.warning(f"Could not set Work type to Bug: {e}")
-
-        # Fill in Summary — uses element_to_be_clickable to guard against a
-        # still-rendering form when Bug type was just changed.
         # Format: '{Course Code}: {page slug} - {short failure name} - {Feedback id}'
         # Page slug comes from the investigation URL. Problem phrase strips any
         # location tokens the LLM may have slipped in; falls back to the first
@@ -2773,242 +3021,131 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
             analysis.get("jira_title") or "",
             jira_desc,
         )
-        summary_field = WebDriverWait(self.driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, '//input[@id="summary-field"]'))
+        self._jira_prefill_step(
+            "fill Summary", lambda: self.jira_handler.fill_summary(summary_value)
         )
-        summary_field.send_keys(summary_value)
 
         # Fill the ProseMirror description editor.
         # The "Create Bug" template pre-fills a table with URL / Reporter RHNID /
         # Section Title rows plus an "Issue description" heading.
-        # We use JS insertText for instant paste (send_keys types char-by-char).
-        # Use the LLM-cleaned impersonal description (ADR-0003: always drafted).
-        # Fall back to translated feedback only when the description is missing.
-        translated = jira_desc or classification.get("translated_student_feedback", snow_info.get("Description", ""))
+        # Values are written through the editor document. execCommand insertText
+        # splits those rows into a third column.
+        # The Defect Description is the model's sentence plus evidence copied from
+        # the Learner's own wording. It is not the translated Feedback.
+        # A Suggestion keeps the requested-change sentence, with the old fallback
+        # only when that sentence is missing.
+        is_suggestion = (
+            bool(classification.get("is_suggestion_ticket"))
+            or analysis.get("reply_mode") == "acknowledge_suggestion"
+        )
+        if is_suggestion:
+            translated = jira_desc or classification.get(
+                "translated_student_feedback", snow_info.get("Description", "")
+            )
+        else:
+            translated = self.compose_defect_description(snow_info, jira_desc)
 
-        # Wait for the editor to be present, then wait for the Bug template's
-        # <td> cells to render.  We intentionally avoid caching the element
-        # reference — Jira's React can re-render the editor DOM after the
-        # template loads, turning any cached ref stale immediately.
-        WebDriverWait(self.driver, 10).until(
-            EC.presence_of_element_located((By.ID, 'ak-editor-textarea'))
+        # Description starts as a read-only renderer; click it so ProseMirror
+        # mounts. Then wait for the Bug template's <td> cells. Avoid caching
+        # the editor node — Jira's React can re-render it immediately.
+        self._jira_prefill_step(
+            "activate Description editor",
+            self.jira_handler.activate_description_editor,
         )
         try:
             WebDriverWait(self.driver, 10).until(
-                lambda d: d.find_elements(By.CSS_SELECTOR, '#ak-editor-textarea td')
+                lambda d: d.find_elements(
+                    By.CSS_SELECTOR, JiraHandler.DESCRIPTION_EDITOR_CSS + " td"
+                )
             )
         except Exception:
             pass
 
-        def _insert_text_in_editor(text):
-            """Insert text at current cursor position using execCommand (instant, not char-by-char)."""
-            self.driver.execute_script(
-                "document.execCommand('insertText', false, arguments[0]);", text
-            )
+        def _fill_description_table():
+            """Fill the value column of the Bug template table.
 
-        def _insert_hyperlink_in_editor(cell_el, url):
-            """Insert a Capture URL as a real hyperlink in the ProseMirror cell.
-
-            insertHTML of <a> is the primary path. ProseMirror often strips that
-            to plain text, so createLink on the inserted URL is the fallback that
-            still leaves a clickable mark.
+            Each row is a header cell (URL, Reporter RHNID, Section Title) and
+            one value cell. The value paragraph is replaced in the editor
+            document so the row stays two columns.
             """
-            html = self._jira_editor_link_html(url)
-            if not html:
-                _insert_text_in_editor(url)
-                return
-            self.driver.execute_script(
-                """
-                var cell = arguments[0];
-                var url = arguments[1];
-                var html = arguments[2];
-                if (!cell || !url) return;
-
-                function cellHasLink() {
-                    return !!(cell.querySelector && cell.querySelector('a[href]'));
-                }
-
-                function linkifyUrlText() {
-                    var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null);
-                    var node;
-                    while ((node = walker.nextNode())) {
-                        var text = node.textContent || '';
-                        var idx = text.indexOf(url);
-                        if (idx === -1) continue;
-                        var range = document.createRange();
-                        range.setStart(node, idx);
-                        range.setEnd(node, idx + url.length);
-                        var sel = window.getSelection();
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                        document.execCommand('createLink', false, url);
-                        sel.collapseToEnd();
-                        return cellHasLink();
-                    }
-                    return false;
-                }
-
-                document.execCommand('insertHTML', false, html);
-                if (cellHasLink()) return;
-                if (linkifyUrlText()) return;
-                document.execCommand('insertText', false, url);
-                linkifyUrlText();
-                """,
-                cell_el,
-                url,
-                html,
+            url = (snow_info.get("URL", "") or "").strip()
+            href = url if url.lower().startswith(("http://", "https://")) else ""
+            cells = (
+                (0, url, href),
+                (1, (snow_info.get("RHNID", "") or "").strip(), ""),
+                (2, (snow_info.get("Title", "") or "").strip(), ""),
             )
+            for row, text, link in cells:
+                if not text:
+                    continue
+                result = self._edit_jira_description(
+                    "cell", {"row": row, "text": text, "href": link}
+                )
+                if result != "ok":
+                    raise RuntimeError(
+                        f"could not fill description table row {row} ({result})"
+                    )
 
-        def _focus_table_cell(cell):
-            """Place the caret at the start of a template table value cell."""
-            inner_p = cell.find_elements(By.TAG_NAME, 'p')
-            target = inner_p[0] if inner_p else cell
-            self.driver.execute_script(
-                "var el = arguments[0]; el.focus ? el.focus() : el.click();"
-                "var range = document.createRange(); range.selectNodeContents(el);"
-                "var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);"
-                "sel.collapseToStart();",
-                target
-            )
-            time.sleep(0.2)
-
-        # Click the <p> inside each <td> value cell to ensure cursor placement.
-        # Empty cells have a tiny <p> with &nbsp; that's hard to click on the
-        # <td> itself, so we target the inner paragraph.
-        # Always fetch table_cells fresh here (no cached editor ref = no stale ref).
-        table_cells = self.driver.find_elements(By.CSS_SELECTOR, '#ak-editor-textarea td')
-        if table_cells:
-            capture_url_cell, *plain_cells = table_cells
-            _focus_table_cell(capture_url_cell)
-            _insert_hyperlink_in_editor(capture_url_cell, snow_info.get("URL", ""))
-            for cell, value in zip(plain_cells, (
-                snow_info.get("RHNID", ""),
-                snow_info.get("Title", ""),
-            )):
-                _focus_table_cell(cell)
-                _insert_text_in_editor(value)
-        else:
-            # No table — click the editor by locating it fresh, then type inline.
-            editor = self.driver.find_element(By.ID, 'ak-editor-textarea')
-            ActionChains(self.driver).click(editor).perform()
-            time.sleep(0.3)
+        self._jira_prefill_step("fill Description table", _fill_description_table)
 
         # The template already has bold headings: "Issue description",
         # "Steps to reproduce:", "Workaround:", "Expected result:" with
-        # empty paragraphs below each. We click into those empty <p> elements
-        # and insert just the content.
-        # _fill_section finds the editor via document.getElementById inside JS
-        # so it is never affected by a stale Python element reference.
+        # an empty paragraph below each filled heading. The body is written
+        # into that paragraph in the editor document. A DOM insertText here
+        # splits the table into a third column.
         def _fill_section(heading_text, content):
-            """Find the empty <p> after a bold heading and insert content there."""
+            """Write content into the paragraph under a template heading."""
             if not content or not content.strip():
                 return
-            self.driver.execute_script("""
-                var editor = document.getElementById('ak-editor-textarea');
-                var heading = arguments[0];
-                var text = arguments[1];
-                if (!editor) return;
-                var paragraphs = editor.querySelectorAll('p');
-                for (var i = 0; i < paragraphs.length; i++) {
-                    var strong = paragraphs[i].querySelector('strong');
-                    if (strong && strong.textContent.trim().toLowerCase().startsWith(heading.toLowerCase())) {
-                        // Found the heading -- target the next <p> sibling
-                        var next = paragraphs[i].nextElementSibling;
-                        if (next && next.tagName === 'P') {
-                            var range = document.createRange();
-                            range.selectNodeContents(next);
-                            var sel = window.getSelection();
-                            sel.removeAllRanges();
-                            sel.addRange(range);
-                            sel.collapseToStart();
-                            document.execCommand('insertText', false, text);
-                            return;
-                        }
-                    }
-                }
-            """, heading_text, content)
-            time.sleep(0.2)
+            result = self._edit_jira_description(
+                "section", {"heading": heading_text, "text": content}
+            )
+            if result == "no-view":
+                raise RuntimeError(
+                    "editor did not mount "
+                    f"({JiraHandler.DESCRIPTION_EDITOR_CSS})"
+                )
 
-        _fill_section("Issue description", translated)
+        self._jira_prefill_step(
+            "fill Description template",
+            lambda: _fill_section("Issue description", translated),
+        )
 
         # Workaround only when a Defect is confirmed — a suggested fix is not
         # honest until the engineer decides to actually file (ADR-0003).
         if analysis.get("reply_mode") == self._MODE_CONFIRM_DEFECT:
-            _fill_section("Workaround", self._normalize_suggested_correction(
-                analysis.get('suggested_correction', '')))
-
-        # Priority tab -> set priority to Minor
-        try:
-            time.sleep(1)
-            priority_field = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH,
-                    '//input[contains(@id, "priority")]'
-                ))
+            self._jira_prefill_step(
+                "fill Workaround",
+                lambda: _fill_section(
+                    "Workaround",
+                    self._normalize_suggested_correction(
+                        analysis.get("suggested_correction", "")
+                    ),
+                ),
             )
-            self.driver.execute_script("arguments[0].focus(); arguments[0].click();", priority_field)
-            time.sleep(0.5)
-            priority_field.send_keys("Minor")
-            time.sleep(1)
-            priority_field.send_keys(Keys.RETURN)
-        except Exception as e:
-            log.warning(f"Failed to set Priority: {e}")
 
-        # Components combobox
-        try:
-            components_field = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH,
-                    '//input[@id="components-field"]'
-                ))
+        # Remaining fields are collapsed until clicked. Fill description first
+        # so clicking them does not unmount the editor mid-insert.
+        self._jira_prefill_step(
+            "set Priority", lambda: self.jira_handler.set_priority("Minor")
+        )
+        self._jira_prefill_step(
+            "set Component",
+            lambda: self.jira_handler.set_component(snow_info.get("Course", "")),
+        )
+        if classification.get("is_video_issue_ticket", False):
+            self._jira_prefill_step(
+                "set Component Video Content",
+                lambda: self.jira_handler.set_component("Video Content"),
             )
-            self.driver.execute_script("arguments[0].focus(); arguments[0].click();", components_field)
-            time.sleep(0.5)
-            components_field.send_keys(snow_info.get("Course", ""))
-            time.sleep(1)
-            try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@role="option"]'))
-                ).click()
-            except Exception:
-                components_field.send_keys(Keys.RETURN)
-
-            if classification.get("is_video_issue_ticket", False):
-                time.sleep(0.5)
-                components_field = self.driver.find_element(By.XPATH, '//input[@id="components-field"]')
-                self.driver.execute_script("arguments[0].focus(); arguments[0].click();", components_field)
-                components_field.send_keys("Video Content")
-                time.sleep(1)
-                try:
-                    WebDriverWait(self.driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, '//*[@role="option"]'))
-                    ).click()
-                except Exception:
-                    components_field.send_keys(Keys.RETURN)
-        except Exception as e:
-            log.warning(f"Failed to set Component: {e}")
-
-        # Chapter number
-        try:
-            chapter_field = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH,
-                    '//input[@id="customfield_10709-field"]'
-                ))
-            )
-            chapter_field.send_keys(f"{snow_info.get('Chapter', '')}")
-        except Exception as e:
-            log.warning(f"Failed to set Chapter: {e}")
-
-        # Affects versions combobox
-        try:
-            version_field = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH,
-                    '//input[@id="versions-field"]'
-                ))
-            )
-            self.driver.execute_script("arguments[0].focus(); arguments[0].click();", version_field)
-            time.sleep(0.5)
-            version_field.send_keys(snow_info.get("Course", ""))
-        except Exception as e:
-            log.warning(f"Failed to set Affects versions: {e}")
+        self._jira_prefill_step(
+            "set Chapter",
+            lambda: self.jira_handler.set_chapter(snow_info.get("Chapter", "")),
+        )
+        self._jira_prefill_step(
+            "set Affects versions",
+            lambda: self.jira_handler.set_affects_version(snow_info.get("Course", "")),
+        )
 
 
     def _click_tab_by_text(self, tab_text: str):
@@ -3191,8 +3328,7 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                 else:
                     # Tab 3: Jira search of similar tickets
                     self.driver.switch_to.window(ticket_window)
-                    self.driver.switch_to.new_window('tab')
-                    tab_jira_search = self.driver.current_window_handle
+                    tab_jira_search = self._open_new_tab()
                     try:
                         self.driver.switch_to.window(tab_jira_search)
                         self.logger("Opening Jira search tab")
@@ -3202,10 +3338,12 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
                     except Exception as e:
                         logging.getLogger(__name__).warning(f"Jira search setup failed for {snow_id}: {e}")
 
-                    # Tab 4: Jira prefilled new ticket
+                    # Tab 4: Jira prefilled new ticket. Open it from the ticket
+                    # window, then switch by the new handle. Firefox can leave
+                    # the driver on the JQL tab after new_window('tab').
                     self.driver.switch_to.window(ticket_window)
-                    self.driver.switch_to.new_window('tab')
-                    tab_jira_create = self.driver.current_window_handle
+                    tab_jira_create = self._open_new_tab()
+                    self._jira_create_handle = tab_jira_create
                     try:
                         self.driver.switch_to.window(tab_jira_create)
                         self.logger("Opening Jira create dialog")

@@ -44,8 +44,12 @@ The title of a Defect. A scannable prefix (Course Code, Guide page slug, Feedbac
 _Avoid_: Jira title, bug title
 
 **Defect Description**:
-The technical problem statement on a Defect, written impersonally. Drafted whenever a create dialog is prepared, including before a Defect is confirmed. It does not locate the issue and does not narrate the Learner.
+The impersonal failure statement on a Defect, together with the literal evidence of that failure. Drafted whenever a create dialog is prepared, including before a Defect is confirmed. It names neither the Course nor the Section, and it does not narrate the Learner.
 _Avoid_: Jira description, issue description (the Jira template heading)
+
+**Search Term**:
+The single most specific token in the Learner's own wording that distinguishes this report from other reports in the same course. Never a Course Code, Course ID, or Section slug.
+_Avoid_: Keyword, SKU
 
 **Response**:
 A reply sent to a Learner through ServiceNow. Can close the Feedback, request clarification (Pending Customer), acknowledge that investigation is underway, briefly acknowledge a Resolution Follow-up, or thank a Suggestion.
@@ -117,6 +121,10 @@ A complex Lab Exercise spanning multiple topics, forming the entire final chapte
 **Instructions**:
 Step-by-step directions within a GE or Lab Exercise that the Learner follows. Prescriptive.
 _Avoid_: Steps, tasks
+
+**Instruction step**:
+A numbered direction inside Instructions or Specifications. Distinct from a Section.
+_Avoid_: Step, location
 
 **Specifications**:
 Goal-oriented requirements within a Comprehensive Review. The Learner determines the steps themselves.
@@ -203,11 +211,13 @@ The time window during which a specific engineer handles incoming tickets. Exter
 - A Suggestion Response thanks the Learner, acknowledges that the idea or praise was received and will be considered, and does not ask for more information or promise that the change will be made.
 - If Feedback both reports something broken and offers a Suggestion, it is not a Suggestion. Classify and investigate the broken thing.
 - Unclear Feedback is not a Suggestion. Only text that is clearly an improvement idea or praise is a Suggestion.
-- For a Suggestion, the Defect Description is an impersonal statement of the requested change, or of the praise when there is no change. Still no Learner narration and no location in the body. Guide Text on the investigation page is used so the Description can name what that page lacks.
+- For a Suggestion, the Defect Description is an impersonal statement of the requested change, or of the praise when there is no change. Still no Learner narration and no Course or Section in the body. Guide Text on the investigation page is used so the Description can name what that page lacks.
 - The Defect Summary problem phrase is a short failure name (`copy paste from guide mangles case in edge`). It must not contain a Course Code, Course ID, or Section (not `do380`, not `do380-4.18`, not `section 4` / `ch04s01` / `4.1`), and it is not a diagnosis or a compression of the analysis reasoning.
 - The Defect Summary location token is the Guide page slug from the investigation URL (`ch02s06`, `pr01`, `ap01`), not a reconstructed `ch`+chapter+`s`+section string.
-- The Defect Description is impersonal technical prose. It is drafted whenever a create dialog is prepared, not only when a Defect is confirmed. Location belongs in the URL on the Defect, not restated as chapter/section/course. Do not write “the Learner reports…”. If stripping location tokens from the Defect Summary problem phrase leaves it empty, the phrase is the opening of the Defect Description.
-- Deduplication search is scoped to the Course Code and a keyword from the Feedback. When the investigation page is a Section (`chNNsMM`), the search is also scoped to that Section. Preface and appendix pages (`pr01`, `ap01`) do not narrow the search — the Capture URL is often not the Issue Section.
+- The Defect Description pairs one impersonal English sentence with the literal evidence of the failure, copied as the Learner wrote it. For a Lab or Guide failure that evidence is the Instruction step, the command, the observed error text, filenames, resource names, and identifiers. For a video failure it is the timestamp and the wording that does not match. This shape applies to content, environment, and video Feedback. It is drafted whenever a create dialog is prepared, not only when a Defect is confirmed. Do not write “the Learner reports…”. If stripping location tokens from the Defect Summary problem phrase leaves it empty, the phrase is the opening of the Defect Description.
+- The Defect Description leaves out duration, opinions, the Learner's attempted fix, other people, contact details, the Learner's own machine, Course Code, Course ID, chapter, and Section. Those location tokens stay on the Defect Summary and the URL. An error the Learner only paraphrased is not replaced by an invented error string. A command that appears only in the Guide is not added. The attempted fix is a workaround only when a Defect is confirmed.
+- Evidence is taken from the original description and the raw Learner Follow-ups. It is not taken from a summary of those Follow-ups, from the English translation, or from a Response. A span of that evidence missing from the drafted sentence is added to the Defect Description. The Feedback is not copied whole. Spans added on their own are an Instruction step, a filename, a command, a CamelCase error, an all-capitals identifier, or a video timestamp. An ordinary word is kept only when the draft includes it and it appears in the Learner's wording. A bare value, a contact detail, a Course Code, a Course ID, or a Section slug is not added.
+- Deduplication search is scoped to the Course Code as the component, and to a Search Term when one exists. The Search Term is taken from the same Learner wording as the evidence. A Course Code, Course ID, or Section slug is never the Search Term; if a candidate contains one, that token is removed. When several useful tokens remain, the Search Term is the most specific: a filename, then an image reference, then a named resource, then an API kind, then a technical concept. When nothing useful remains, the search has no text term. When the investigation page is a Section (`chNNsMM`), the search is also scoped to that Section. Preface and appendix pages (`pr01`, `ap01`) do not narrow the search — the Capture URL is often not the Issue Section.
 - A suggested correction is written onto the Defect as a workaround only when a Defect is confirmed. An unconfirmed draft has a Description, not a fix.
 - Course ID, Version, and Platform come from the Capture URL and do not change.
 - Guide and Lab investigation use the Issue Section. A Learner "N.M" (or equivalent wording) means chapter N section M (`chNNsMM`, zero-padded). If the text does not name a Section, or names more than one with no clear primary, use the Capture URL page.

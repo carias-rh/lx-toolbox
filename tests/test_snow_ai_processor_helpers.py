@@ -809,6 +809,22 @@ class TestJiraEditorLinkHtml:
         assert self._html("mdunnett") == ""
 
 
+class TestJiraDescriptionEdit:
+    """Description values are written into the editor document.
+
+    A DOM range plus execCommand insertText splits the Bug template's
+    two-column rows. The edit must target the tableCell paragraph.
+    """
+
+    def test_edit_targets_value_cells_and_does_not_use_exec_command(self):
+        import inspect
+
+        source = inspect.getsource(SnowAIProcessor._edit_jira_description)
+        assert "tableCell" in source
+        assert "editorView" in source
+        assert "execCommand" not in source
+
+
 class TestStripLocationFromTitle:
     """_strip_location_from_title removes course code / course ID / section tokens."""
 
@@ -885,6 +901,242 @@ class TestBuildDefectSummary:
         result = self._summary(snow, "some issue")
         assert result == "DO380: some issue - RHT0000001"
         assert ": -" not in result
+
+
+class TestBuildJiraSearchUrlSearchTerm:
+    """build_jira_search_url never uses a Course Code as the JQL text term."""
+
+    def _jql(self, snow, keyword):
+        from urllib.parse import unquote
+        proc = SnowAIProcessor.__new__(SnowAIProcessor)
+        url = proc.build_jira_search_url(snow, keyword)
+        return unquote(url.split("?jql=", 1)[1])
+
+    def test_course_code_keyword_omits_text_clause(self):
+        snow = {
+            "Course": "DO280",
+            "URL": "https://rol.redhat.com/rol/app/courses/do280-4.14/pages/ch03s04",
+        }
+        jql = self._jql(snow, "DO280")
+        assert "text ~" not in jql
+        assert 'component = "DO280"' in jql
+        assert "description ~ ch03s04" in jql
+
+    def test_compound_keyword_keeps_the_filename(self):
+        snow = {
+            "Course": "DO280",
+            "URL": "https://rol.redhat.com/rol/app/courses/do280-4.14/pages/ch03s04",
+        }
+        jql = self._jql(snow, "DO280 deploy.yaml ImagePullBackOff")
+        assert 'text ~ "deploy.yaml"' in jql
+        assert "ImagePullBackOff" not in jql
+
+    def test_course_id_keyword_omits_text_clause(self):
+        snow = {
+            "Course": "DO280",
+            "URL": "https://rol.redhat.com/rol/app/courses/do280-4.14/pages/ch03s04",
+        }
+        jql = self._jql(snow, "do280-4.14")
+        assert "text ~" not in jql
+
+    def test_section_slug_keyword_omits_text_clause(self):
+        snow = {
+            "Course": "DO280",
+            "URL": "https://rol.redhat.com/rol/app/courses/do280-4.14/pages/ch03s04",
+        }
+        jql = self._jql(snow, "ch03s04")
+        assert "text ~" not in jql
+        assert "description ~ ch03s04" in jql
+
+    def test_image_reference_outranks_an_error_token(self):
+        snow = {
+            "Course": "DO280",
+            "URL": "https://rol.redhat.com/rol/app/courses/do280-4.14/pages/ch03s04",
+        }
+        jql = self._jql(snow, "registry.redhat.io/ubi9/nodejs-18 ImagePullBackOff")
+        assert 'text ~ "registry.redhat.io/ubi9/nodejs-18"' in jql
+        assert "ImagePullBackOff" not in jql
+
+    def test_named_resource_outranks_an_error_token(self):
+        snow = {
+            "Course": "DO280",
+            "URL": "https://rol.redhat.com/rol/app/courses/do280-4.14/pages/ch03s04",
+        }
+        jql = self._jql(snow, "frontend ImagePullBackOff")
+        assert 'text ~ "frontend"' in jql
+        assert "ImagePullBackOff" not in jql
+
+    def test_api_kind_outranks_an_all_caps_concept(self):
+        snow = {
+            "Course": "DO180",
+            "URL": "https://rol.redhat.com/rol/app/courses/do180-4.12/pages/ch01s02",
+        }
+        jql = self._jql(snow, "PersistentVolumeClaim SIGTERM")
+        assert 'text ~ "PersistentVolumeClaim"' in jql
+        assert "SIGTERM" not in jql
+
+    def test_single_error_token_is_the_text_term(self):
+        snow = {
+            "Course": "DO280",
+            "URL": "https://rol.redhat.com/rol/app/courses/do280-4.14/pages/ch03s04",
+        }
+        jql = self._jql(snow, "ImagePullBackOff")
+        assert 'text ~ "ImagePullBackOff"' in jql
+
+    def test_empty_keyword_omits_text_clause(self):
+        snow = {
+            "Course": "RH124",
+            "URL": "https://rol.redhat.com/rol/app/courses/rh124-9.3/pages/ap01",
+        }
+        jql = self._jql(snow, "")
+        assert "text ~" not in jql
+        assert 'component = "RH124"' in jql
+
+    def test_filename_outranks_an_image_reference(self):
+        snow = {
+            "Course": "DO280",
+            "URL": "https://rol.redhat.com/rol/app/courses/do280-4.14/pages/pr01",
+        }
+        jql = self._jql(snow, "registry.redhat.io/ubi9/nodejs-18 deploy.yaml")
+        assert 'text ~ "deploy.yaml"' in jql
+        assert "registry.redhat.io" not in jql
+        assert "description ~" not in jql
+
+    def test_api_kind_outranks_a_lowercase_concept(self):
+        snow = {
+            "Course": "DO180",
+            "URL": "https://rol.redhat.com/rol/app/courses/do180-4.12/pages/ch01s02",
+        }
+        jql = self._jql(snow, "iptables PersistentVolumeClaim")
+        assert 'text ~ "PersistentVolumeClaim"' in jql
+        assert "iptables" not in jql
+
+    def test_bare_noun_is_not_the_text_term(self):
+        snow = {
+            "Course": "DO280",
+            "URL": "https://rol.redhat.com/rol/app/courses/do280-4.14/pages/ch03s04",
+        }
+        jql = self._jql(snow, "pod frontend")
+        assert 'text ~ "frontend"' in jql
+        assert "pod" not in jql.split("text ~", 1)[-1]
+        assert "text ~" not in self._jql(snow, "pod")
+
+    def test_a_path_is_not_an_image_reference(self):
+        snow = {
+            "Course": "DO180",
+            "URL": "https://rol.redhat.com/rol/app/courses/do180-4.12/pages/ch01s02",
+        }
+        jql = self._jql(snow, "docs/overview PersistentVolumeClaim")
+        assert 'text ~ "PersistentVolumeClaim"' in jql
+        assert "docs/overview" not in jql
+
+
+class TestComposeDefectDescription:
+    """compose_defect_description is the Issue description text."""
+
+    def _compose(self, snow, draft):
+        return SnowAIProcessor.compose_defect_description(snow, draft)
+
+    def test_omitted_command_is_appended_and_bare_value_is_not(self):
+        snow = {
+            "Description": (
+                "En el step 4 ejecuté `oc apply -f deploy.yaml` y falló. "
+                "Cambié IMAGE a `ubi9` y funcionó."
+            ),
+        }
+        draft = "Applying a manifest leaves a deployment unable to pull its image."
+        result = self._compose(snow, draft)
+        assert result.startswith(draft)
+        assert "oc apply -f deploy.yaml" in result
+        assert "ubi9" not in result
+
+    def test_omitted_error_and_identifier_are_appended(self):
+        snow = {
+            "Description": (
+                "El Deployment se queda en ImagePullBackOff. "
+                "La variable IMAGE está vacía. ada@redhat.com Curso DO280."
+            ),
+        }
+        draft = "A deployment cannot pull its image."
+        result = self._compose(snow, draft)
+        assert "ImagePullBackOff" in result
+        assert "IMAGE" in result
+        assert "ada@redhat.com" not in result
+        assert "DO280" not in result
+
+    def test_omitted_instruction_step_and_filename_are_appended(self):
+        snow = {"Description": "En el step 4.2 el archivo deploy.yaml no existe."}
+        draft = "A file referenced by the exercise is missing."
+        result = self._compose(snow, draft)
+        assert "step 4.2" in result
+        assert "deploy.yaml" in result
+
+    def test_omitted_video_timestamp_is_appended(self):
+        snow = {"Description": "At 1:24 the video says pod instead of Deployment."}
+        draft = "The video wording does not match the guide."
+        result = self._compose(snow, draft)
+        assert "1:24" in result
+
+    def test_evidence_comes_from_raw_learner_follow_ups(self):
+        snow = {
+            "Description": "El lab no arranca.",
+            "Description_en": "The lab is down. See secret-file.yaml.",
+            "customer_updates_summary": "The learner mentioned hidden-notes.yaml.",
+            "customer_updates": [
+                {"role": "agent", "text": "Please run `oc get pods` and paste the output."},
+                {"role": "response", "text": "Try `lab finish deploy`."},
+                {"role": "customer", "text": "En el step 4, `oc apply -f deploy.yaml` da ImagePullBackOff."},
+            ],
+        }
+        draft = "A deployment cannot pull its image."
+        result = self._compose(snow, draft)
+        assert "oc apply -f deploy.yaml" in result
+        assert "step 4" in result
+        assert "ImagePullBackOff" in result
+        assert "oc get pods" not in result
+        assert "lab finish deploy" not in result
+        assert "secret-file.yaml" not in result
+        assert "hidden-notes.yaml" not in result
+
+    def test_ordinary_word_is_not_added_when_the_draft_omits_it(self):
+        snow = {"Description": "El Deployment frontend se queda mal."}
+        draft = "A deployment does not become ready."
+        result = self._compose(snow, draft)
+        assert "frontend" not in result
+
+    def test_evidence_already_in_the_draft_is_not_repeated(self):
+        snow = {"Description": "ImagePullBackOff on step 4."}
+        draft = "The rollout stops with ImagePullBackOff."
+        result = self._compose(snow, draft)
+        assert result.count("ImagePullBackOff") == 1
+        assert "step 4" in result
+
+    def test_spanish_instruction_step_is_appended(self):
+        snow = {"Description": "En el paso 4 el archivo no aparece."}
+        draft = "A file referenced by the exercise is missing."
+        result = self._compose(snow, draft)
+        assert "paso 4" in result
+
+    def test_a_duration_is_not_appended_as_a_timestamp(self):
+        snow = {"Description": "Esperé for 5:00 y el video en 1:24 dice pod."}
+        draft = "The video wording does not match the guide."
+        result = self._compose(snow, draft)
+        assert "1:24" in result
+        assert "5:00" not in result
+
+    def test_containerfile_is_appended(self):
+        snow = {"Description": "El Containerfile usa una base distinta."}
+        draft = "The image build instructions disagree with the guide."
+        result = self._compose(snow, draft)
+        assert "Containerfile" in result
+
+    def test_empty_draft_is_only_the_evidence_spans(self):
+        snow = {"Description": "Llevo días atascado. En el step 4, `oc apply -f deploy.yaml` da ImagePullBackOff."}
+        result = self._compose(snow, "")
+        assert "Llevo" not in result
+        assert "oc apply -f deploy.yaml" in result
+        assert "ImagePullBackOff" in result
+        assert "step 4" in result
 
 
 class TestBuildJiraSearchUrlLocationClause:
