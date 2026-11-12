@@ -9,6 +9,7 @@ Prompts for manual authentication when credentials are not available.
 import os
 import time
 import logging
+from typing import Callable
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -18,6 +19,41 @@ from selenium.common.exceptions import TimeoutException
 
 from ..utils.config_manager import ConfigManager
 from ..utils.helpers import step_logger
+from .affects_version import (
+    filter_released_affects_version_options,
+    pick_affects_version_with_llm,
+)
+
+
+_SCrape_AFFECTS_VERSION_OPTIONS_JS = """
+const options = [];
+for (const el of document.querySelectorAll('[role="option"]')) {
+    if (!el.offsetParent && el.getBoundingClientRect().height === 0) continue;
+    const text = (el.textContent || '').trim();
+    if (!text) continue;
+    let group = '';
+    let node = el.parentElement;
+    while (node) {
+        const role = node.getAttribute('role');
+        if (role === 'group') {
+            const labelled = node.getAttribute('aria-labelledby');
+            if (labelled) {
+                const labelEl = document.getElementById(labelled);
+                group = (labelEl && labelEl.textContent || '').trim();
+            }
+            if (!group) {
+                const pres = node.querySelector('[role="presentation"]');
+                group = (pres && pres.textContent || node.textContent || '').trim().split('\\n')[0];
+            }
+            break;
+        }
+        if (role === 'listbox') break;
+        node = node.parentElement;
+    }
+    options.push({ text, group });
+}
+return options;
+"""
 
 
 class JiraHandler:
@@ -631,6 +667,96 @@ class JiraHandler:
             self._fill_combobox("components-container", "components-field", component)
         except Exception as e:
             logging.getLogger(__name__).debug(f"Failed to set component: {e}")
+
+    def _open_affects_versions_field(self, course_code: str):
+        """Expand Affects versions and filter the list with the Course Code."""
+        field = self.expand_field("versions-container", "versions-field")
+        self.driver.execute_script("arguments[0].focus(); arguments[0].click();", field)
+        time.sleep(0.2)
+        field.send_keys(Keys.CONTROL, "a")
+        field.send_keys(Keys.DELETE)
+        query = course_code.strip().upper()
+        if query:
+            field.send_keys(query)
+        time.sleep(0.8)
+        try:
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, '[role="option"]'))
+            )
+        except TimeoutException:
+            pass
+        return field
+
+    def collect_released_affects_version_options(self, course_code: str) -> list[str]:
+        """Return Released Affects version labels visible after filtering by Course Code."""
+        if not course_code:
+            return []
+        self._open_affects_versions_field(course_code)
+        raw = self.driver.execute_script(_SCrape_AFFECTS_VERSION_OPTIONS_JS) or []
+        return filter_released_affects_version_options(raw, course_code)
+
+    def _select_affects_version_option(self, exact_label: str, course_code: str) -> None:
+        field = self._open_affects_versions_field(course_code)
+        clicked = self.driver.execute_script(
+            """
+            const target = arguments[0];
+            for (const el of document.querySelectorAll('[role="option"]')) {
+                if ((el.textContent || '').trim() === target) {
+                    el.click();
+                    return true;
+                }
+            }
+            return false;
+            """,
+            exact_label,
+        )
+        if not clicked:
+            raise RuntimeError(
+                f'Affects version option not found in dropdown: "{exact_label}"'
+            )
+        try:
+            field.send_keys(Keys.ESCAPE)
+        except Exception:
+            pass
+
+    def set_affects_version_with_llm(
+        self,
+        course_code: str,
+        ask_llm: Callable[[str], str],
+        *,
+        mode: str = "latest_released",
+        platform_version: str | None = None,
+    ) -> None:
+        """Pick a Released Affects version via LLM from the live dropdown options."""
+        if not course_code:
+            return
+        log = logging.getLogger(__name__)
+        try:
+            released = self.collect_released_affects_version_options(course_code)
+            if not released:
+                log.debug(
+                    "No released Affects version options for course %s; leaving field blank",
+                    course_code,
+                )
+                return
+            chosen = pick_affects_version_with_llm(
+                ask_llm,
+                mode,
+                course_code,
+                released,
+                platform_version=platform_version,
+            )
+            if not chosen:
+                log.debug(
+                    "Could not choose Affects version for %s from %d option(s); leaving blank",
+                    course_code,
+                    len(released),
+                )
+                return
+            self._select_affects_version_option(chosen, course_code)
+            log.debug("Set Affects version to %r for %s", chosen, course_code)
+        except Exception as e:
+            log.debug("Failed to set Affects versions for %s: %s", course_code, e)
 
     def set_affects_version(self, version_text: str) -> None:
         if not version_text:

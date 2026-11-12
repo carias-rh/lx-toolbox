@@ -475,6 +475,26 @@ class TestTextNamesASection:
             course_version="4.18",
         ) is False
 
+    def test_bare_n_m_is_not_a_section(self):
+        assert SnowAIProcessor.text_names_a_section(
+            "On step 6.2 the msg: Hello World syntax is wrong."
+        ) is False
+
+    def test_section_n_m_is_a_section(self):
+        assert SnowAIProcessor.text_names_a_section(
+            "The bug is in section 6.2 of the course."
+        ) is True
+
+    def test_chapter_s_notation(self):
+        assert SnowAIProcessor.text_names_a_section(
+            "Course DO288, Chapter3 S04, the video does not match."
+        ) is True
+
+    def test_instruction_step_alone_is_not_a_section(self):
+        assert SnowAIProcessor.text_names_a_section(
+            "In step 3 the command fails with permission denied."
+        ) is False
+
 
 class TestParseIssueSection:
     def test_zero_pads_chapter_and_section(self):
@@ -562,6 +582,79 @@ class TestApplyIssueSection:
         assert result["URL"].endswith("/pages/pr01")
         assert result["Chapter"] == ""
         assert result["Section"] == ""
+
+
+class TestCaptureSectionInferenceGate:
+    def test_concrete_capture_skips_inference_without_section_wording(self):
+        proc = SnowAIProcessor.__new__(SnowAIProcessor)
+        proc.logger = lambda msg: None
+        proc.ask_llm = lambda prompt: '{"chapter": "6", "section": "2"}'
+        info = {
+            "URL": "https://rol.redhat.com/rol/app/courses/au294-2.6/pages/ch01s04",
+            "Course": "AU294",
+            "Version": "2.6",
+            "Description": (
+                'msg: Hello World should be quoted as msg: "Hello World" '
+                "or only the first word appears in the terminal."
+            ),
+            "customer_updates": [],
+        }
+        result = proc._resolve_issue_section(info)
+        assert result["URL"].endswith("/pages/ch01s04")
+        assert "CaptureURL" not in result
+
+    def test_concrete_capture_runs_inference_when_chapter_section_named(self):
+        proc = SnowAIProcessor.__new__(SnowAIProcessor)
+        proc.logger = lambda msg: None
+        proc.ask_llm = lambda prompt: '{"chapter": "3", "section": "4"}'
+        info = {
+            "URL": "https://rol.redhat.com/rol/app/courses/do288-4.18/pages/ch03s05",
+            "Course": "DO288",
+            "Version": "4.18",
+            "Description": (
+                "Course DO288, Chapter3 S04, the video does not match the lab instruction."
+            ),
+            "customer_updates": [],
+        }
+        result = proc._resolve_issue_section(info)
+        assert result["URL"].endswith("/pages/ch03s04")
+        assert result["CaptureURL"].endswith("/pages/ch03s05")
+
+    def test_preface_capture_still_infers_from_description(self):
+        proc = SnowAIProcessor.__new__(SnowAIProcessor)
+        proc.logger = lambda msg: None
+        proc.ask_llm = lambda prompt: '{"chapter": "8", "section": "8"}'
+        info = {
+            "URL": "https://rol.redhat.com/rol/app/courses/do316-4.18/pages/pr01",
+            "Course": "DO316",
+            "Version": "4.18",
+            "Description": "In Exercise 8.8, velero restore create fails.",
+            "customer_updates": [],
+        }
+        result = proc._resolve_issue_section(info)
+        assert result["URL"].endswith("/pages/ch08s08")
+
+
+class TestContentAnalysisCaptureFallback:
+    def test_needs_capture_when_excerpt_empty_and_urls_differ(self):
+        snow = {
+            "URL": "https://rol.redhat.com/rol/app/courses/au294-2.6/pages/ch06s02",
+            "CaptureURL": "https://rol.redhat.com/rol/app/courses/au294-2.6/pages/ch01s04",
+        }
+        analysis = {"excerpt": "", "is_valid_issue": True, "reply_mode": "confirm_defect"}
+        assert SnowAIProcessor._content_analysis_needs_capture_page(
+            analysis, "some guide text", snow
+        )
+
+    def test_skips_when_excerpt_present(self):
+        snow = {
+            "URL": "https://rol.redhat.com/rol/app/courses/au294-2.6/pages/ch06s02",
+            "CaptureURL": "https://rol.redhat.com/rol/app/courses/au294-2.6/pages/ch01s04",
+        }
+        analysis = {"excerpt": "msg: Hello World", "is_valid_issue": True}
+        assert not SnowAIProcessor._content_analysis_needs_capture_page(
+            analysis, "guide", snow
+        )
 
 
 # ---------------------------------------------------------------------------

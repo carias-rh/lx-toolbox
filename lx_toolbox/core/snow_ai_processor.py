@@ -64,25 +64,7 @@ class SnowAIProcessor:
             self._snow_api = None
             _log.info("SNOW API credentials not found — using browser scraping")
 
-        # LLM provider configuration (matches j2 script semantics)
-        self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
-        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
-        #self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "laguna-xs-2.1:latest")
-        self.OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
-        self.OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "600"))
-        self.OLLAMA_MAX_NUM_CTX = int(os.environ.get("OLLAMA_MAX_NUM_CTX", "32768"))
-
-        # OpenAI-compatible provider (e.g. granite-4.1-8b via Red Hat STC AI)
-        self.OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "ibm-granite/granite-4.1-8b")
-        self.OPENAI_BASE_URL = os.environ.get(
-            "OPENAI_BASE_URL",
-            "https://granite-4-1-8b--apicast-production.apps.int.stc.ai.prod.us-east-1.aws.paas.redhat.com/v1",
-        ).rstrip("/")
-        # USER_KEY is preferred: OPENAI_API_KEY is shadowed by the real OpenAI key in the shell env
-        # and load_dotenv will not override an already-set env var.
-        self.OPENAI_API_KEY = os.environ.get("USER_KEY", os.environ.get("OPENAI_API_KEY", ""))
-        self.OPENAI_TIMEOUT_SECONDS = int(os.environ.get("OPENAI_TIMEOUT_SECONDS", "600"))
-        self.OPENAI_MAX_TOKENS = int(os.environ.get("OPENAI_MAX_TOKENS", "4096"))
+        self._init_llm_from_env()
 
         self.SIGNATURE_NAME = os.environ.get("SIGNATURE_NAME", "Carlos Arias")
 
@@ -436,6 +418,30 @@ class SnowAIProcessor:
             response[:1000],
         )
         return response
+
+    def _init_llm_from_env(self) -> None:
+        """Load LLM provider settings from environment (matches j2 script semantics)."""
+        self.LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "ministral-3:8b")
+        self.OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+        self.OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "600"))
+        self.OLLAMA_MAX_NUM_CTX = int(os.environ.get("OLLAMA_MAX_NUM_CTX", "32768"))
+
+        self.OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "ibm-granite/granite-4.1-8b")
+        self.OPENAI_BASE_URL = os.environ.get(
+            "OPENAI_BASE_URL",
+            "https://granite-4-1-8b--apicast-production.apps.int.stc.ai.prod.us-east-1.aws.paas.redhat.com/v1",
+        ).rstrip("/")
+        self.OPENAI_API_KEY = os.environ.get("USER_KEY", os.environ.get("OPENAI_API_KEY", ""))
+        self.OPENAI_TIMEOUT_SECONDS = int(os.environ.get("OPENAI_TIMEOUT_SECONDS", "600"))
+        self.OPENAI_MAX_TOKENS = int(os.environ.get("OPENAI_MAX_TOKENS", "4096"))
+
+    @classmethod
+    def ask_llm_standalone(cls, prompt: str, plain_text: bool = False) -> str:
+        """Call the configured LLM without constructing a full processor / browser."""
+        inst = cls.__new__(cls)
+        inst._init_llm_from_env()
+        return inst.ask_llm(prompt, plain_text=plain_text)
 
     def ask_llm(self, prompt: str, plain_text: bool = False) -> str:
         """Ask the LLM a question and return the response using some LLM provider such as ollama.
@@ -3172,7 +3178,11 @@ Never use asterisks for bold formatting (e.g. **word**). Use plain text only.
         )
         self._jira_prefill_step(
             "set Affects versions",
-            lambda: self.jira_handler.set_affects_version(snow_info.get("Course", "")),
+            lambda: self.jira_handler.set_affects_version_with_llm(
+                snow_info.get("Course", ""),
+                self.ask_llm,
+                mode="latest_released",
+            ),
         )
 
 
