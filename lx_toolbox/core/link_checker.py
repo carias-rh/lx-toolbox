@@ -17,6 +17,7 @@ import requests
 import subprocess
 import shutil
 from dataclasses import dataclass, field
+from html import escape
 from typing import Optional
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +48,7 @@ except ImportError:
 
 from .lab_manager import LabManager
 from .jira_handler import JiraHandler
+from .affects_version import standalone_ask_llm
 from ..utils.config_manager import ConfigManager
 
 
@@ -64,6 +66,7 @@ class LinkCheckResult:
     error_message: Optional[str] = None
     response_time_ms: Optional[float] = None
     screenshot_path: Optional[str] = None
+    is_infrastructure_error: bool = False
 
 
 @dataclass
@@ -94,6 +97,161 @@ class CourseCheckReport:
     environment: str = "rol"  # Lab environment used (rol, rol_stage, china)
     pdf_file: str = ""  # Path to generated PDF report for this course
     json_file: str = ""  # Path to generated JSON report for this course
+
+
+LINKCHECKER_IMAGE = "ghcr.io/linkchecker/linkchecker:latest"
+
+_HTTP_STATUS_DESCRIPTIONS = {
+    200: "OK",
+    201: "Created",
+    204: "No Content",
+    301: "Moved Permanently",
+    302: "Found (Redirect)",
+    304: "Not Modified",
+    400: "Bad Request",
+    401: "Unauthorized",
+    403: "Forbidden",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    408: "Request Timeout",
+    500: "Internal Server Error",
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+    504: "Gateway Timeout",
+}
+
+_LINKCHECKER_INFRA_MARKERS = (
+    "insufficient uids or gids",
+    "user namespace",
+    "could not find image",
+    "no such image",
+    "unable to find image",
+    "cannot connect to the docker",
+    "permission denied",
+    "short-name resolution",
+)
+
+
+@dataclass
+class LinkcheckerParse:
+    """Parsed output from a single linkchecker container run."""
+    is_valid: bool
+    status_code: Optional[int] = None
+    error_message: Optional[str] = None
+    is_infrastructure_error: bool = False
+
+
+def build_linkchecker_cmd(runtime: str, url: str) -> list[str]:
+    """Build a podman/docker command to check one URL.
+
+    Do not pass ``-u hostUid:hostGid``. Corporate IPA/LDAP UIDs (e.g. 4200765)
+    sit outside rootless podman's subuid range, and the image VOLUME /mnt then
+    fails with "potentially insufficient UIDs or GIDs available in user namespace".
+    """
+    return [
+        runtime, "run", "--rm",
+        LINKCHECKER_IMAGE,
+        "-r", "0",
+        "--check-extern",
+        "-o", "text",
+        url,
+    ]
+
+
+def parse_linkchecker_output(output: str) -> LinkcheckerParse:
+    """Parse linkchecker text output, distinguishing URL failures from runtime errors."""
+    text = output or ""
+    lower = text.lower()
+    if any(marker in lower for marker in _LINKCHECKER_INFRA_MARKERS):
+        return LinkcheckerParse(
+            is_valid=False,
+            error_message=text.strip()[:200],
+            is_infrastructure_error=True,
+        )
+
+    result_match = re.search(r"Result\s+(Valid|Error):\s*(.+?)(?:\n|$)", text)
+    if result_match:
+        validity = result_match.group(1)
+        status_text = result_match.group(2).strip()
+        is_valid = validity == "Valid"
+        status_code = None
+        status_code_match = re.match(r"(\d{3})\s*", status_text)
+        if status_code_match:
+            status_code = int(status_code_match.group(1))
+        else:
+            code_match = re.search(r"\b(\d{3})\b", status_text)
+            if code_match:
+                status_code = int(code_match.group(1))
+        return LinkcheckerParse(
+            is_valid=is_valid,
+            status_code=status_code,
+            error_message=None if is_valid else status_text,
+        )
+
+    if "0 errors found" in text and "1 link" in text:
+        return LinkcheckerParse(is_valid=True, status_code=200)
+
+    if "errors found" in text:
+        error_count = re.search(r"(\d+)\s+errors?\s+found", text)
+        return LinkcheckerParse(
+            is_valid=False,
+            error_message=(
+                f"Linkchecker found {error_count.group(1) if error_count else 'unknown'} error(s)"
+            ),
+        )
+
+    return LinkcheckerParse(
+        is_valid=False,
+        error_message=f"Could not parse linkchecker output: {text[:200]}",
+    )
+
+
+def http_status_description(status_code: Optional[int]) -> str:
+    """Human-readable description for an HTTP status code."""
+    if status_code is None:
+        return "No Response"
+    return _HTTP_STATUS_DESCRIPTIONS.get(status_code, f"HTTP {status_code}")
+
+
+def classify_loaded_page(
+    title: str,
+    current_url: str,
+    page_source: str,
+    nav_status: Optional[int] = None,
+) -> tuple[Optional[int], bool, Optional[str]]:
+    """Classify a page the browser already loaded.
+
+    docs.redhat.com (and similar WAFs) return 403 to Python ``requests`` while
+    a real browser session loads the documentation. Prefer the navigation
+    status from the loaded tab; fall back to title/body heuristics.
+    """
+    title_l = (title or "").lower()
+    url_l = (current_url or "").lower()
+    source_head = (page_source or "")[:2000].lower()
+
+    def _login_redirect() -> bool:
+        return (
+            "login" in url_l
+            and "access.redhat.com" not in url_l
+            and "docs.redhat.com" not in url_l
+        )
+
+    if nav_status is not None:
+        if nav_status < 400:
+            if _login_redirect():
+                return (401, False, "Unauthorized")
+            return (nav_status, True, None)
+        return (nav_status, False, http_status_description(nav_status))
+
+    if "403" in title_l or "forbidden" in title_l or "access denied" in title_l:
+        return (403, False, "Forbidden")
+    if "404" in title_l or "not found" in title_l:
+        return (404, False, "Not Found")
+    if "access denied" in source_head or "403 forbidden" in source_head:
+        return (403, False, "Forbidden")
+    if _login_redirect():
+        return (401, False, "Unauthorized")
+    return (200, True, None)
 
 
 class LinkChecker(LabManager):
@@ -157,6 +315,7 @@ class LinkChecker(LabManager):
         
         self.current_screenshots_dir: Optional[Path] = None
         self._access_redhat_logged_in = False
+        self._linkchecker_ok: Optional[bool] = None
         
         # Parallel screenshot futures (section-level parallelism)
         self._screenshot_futures: list = []
@@ -175,32 +334,16 @@ class LinkChecker(LabManager):
             Tuple of (status_code, is_valid)
         """
         try:
-            # Store current URL to return to
-            original_url = self.driver.current_url
-            
-            # Navigate to the URL
             self.driver.get(url)
             time.sleep(2)  # Wait for page to load
             
-            # Check for common error indicators
-            page_source = self.driver.page_source.lower()
-            page_title = self.driver.title.lower() if self.driver.title else ""
-            current_url = self.driver.current_url.lower()
-            
-            # Check for 403 Forbidden
-            if '403' in page_title or 'forbidden' in page_title or 'access denied' in page_source[:1000]:
-                return (403, False)
-            
-            # Check for 404 Not Found
-            if '404' in page_title or 'not found' in page_title:
-                return (404, False)
-            
-            # Check for login redirects (session expired)
-            if 'login' in current_url and 'access.redhat.com' not in current_url:
-                return (401, False)
-            
-            # If we got here without errors, assume success
-            return (200, True)
+            status, is_valid, _error = classify_loaded_page(
+                title=self.driver.title or "",
+                current_url=self.driver.current_url or url,
+                page_source=self.driver.page_source or "",
+                nav_status=self._nav_status_from_driver(self.driver),
+            )
+            return (status or (200 if is_valid else 0), is_valid)
             
         except Exception as e:
             logging.getLogger(__name__).debug(f"Browser validation error for {url}: {e}")
@@ -423,29 +566,7 @@ class LinkChecker(LabManager):
     
     def _get_http_status_description(self, status_code: Optional[int]) -> str:
         """Get a human-readable description for an HTTP status code."""
-        if status_code is None:
-            return "No Response"
-        
-        descriptions = {
-            200: "OK",
-            201: "Created",
-            204: "No Content",
-            301: "Moved Permanently",
-            302: "Found (Redirect)",
-            304: "Not Modified",
-            400: "Bad Request",
-            401: "Unauthorized",
-            403: "Forbidden",
-            404: "Not Found",
-            405: "Method Not Allowed",
-            408: "Request Timeout",
-            500: "Internal Server Error",
-            502: "Bad Gateway",
-            503: "Service Unavailable",
-            504: "Gateway Timeout",
-        }
-        
-        return descriptions.get(status_code, f"HTTP {status_code}")
+        return http_status_description(status_code)
     
     def _validate_link(self, url: str, source_page: str, source_section: str, 
                        link_text: str, chapter: str = "", section_number: str = "",
@@ -527,6 +648,31 @@ class LinkChecker(LabManager):
         if shutil.which('docker'):
             return 'docker'
         return None
+
+    def _linkchecker_is_usable(self) -> bool:
+        """Probe the linkchecker image once; cache the result for this run."""
+        if self._linkchecker_ok is not None:
+            return self._linkchecker_ok
+        runtime = self._get_container_runtime()
+        if not runtime:
+            self._linkchecker_ok = False
+            return False
+        try:
+            proc = subprocess.run(
+                [runtime, "run", "--rm", LINKCHECKER_IMAGE, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            self._linkchecker_ok = proc.returncode == 0
+            if not self._linkchecker_ok:
+                err = (proc.stderr or proc.stdout or "")[:200]
+                print(f"⚠ linkchecker container is not usable: {err}")
+        except Exception as e:
+            print(f"⚠ linkchecker container probe failed: {e}")
+            self._linkchecker_ok = False
+        return self._linkchecker_ok
     
     def _validate_link_with_linkchecker(self, url: str, source_page: str, source_section: str,
                                         link_text: str, chapter: str = "", section_number: str = "") -> LinkCheckResult:
@@ -549,28 +695,12 @@ class LinkChecker(LabManager):
         if not container_runtime:
             result.is_valid = False
             result.error_message = "Container runtime (podman/docker) not available"
+            result.is_infrastructure_error = True
             return result
         
         try:
             start_time = time.time()
-            
-            # Get current user ID and group ID for container execution
-            uid = os.getuid()
-            gid = os.getgid()
-            
-            # Run linkchecker container
-            # -r 0: no recursion (only check the URL itself)
-            # --check-extern: check external URLs
-            # -o text: use text output format (more reliable than SQL for single URLs)
-            cmd = [
-                container_runtime, 'run', '--rm',
-                '-u', f'{uid}:{gid}',
-                'ghcr.io/linkchecker/linkchecker:latest',
-                '-r', '0',  # No recursion
-                '--check-extern',  # Check external URLs
-                '-o', 'text',  # Text output format (SQL doesn't output clean 200 OK results)
-                url
-            ]
+            cmd = build_linkchecker_cmd(container_runtime, url)
             
             process = subprocess.run(
                 cmd,
@@ -581,73 +711,24 @@ class LinkChecker(LabManager):
             )
             
             result.response_time_ms = (time.time() - start_time) * 1000
-            
-            # Parse text output
-            # Example output:
-            # URL        `https://example.com'
-            # Real URL   https://example.com
-            # Check time 0.176 seconds
-            # Result     Valid: 200 OK
-            # or
-            # Result     Error: 404 Not Found
-            output = process.stdout + process.stderr
-            
-            # Extract Result line - this is the key field
-            # Format: "Result     Valid: 200 OK" or "Result     Error: 404 Not Found"
-            result_match = re.search(r'Result\s+(Valid|Error):\s*(.+?)(?:\n|$)', output)
-            
-            if result_match:
-                validity = result_match.group(1)
-                status_text = result_match.group(2).strip()
-                
-                result.is_valid = (validity == 'Valid')
-                
-                # Extract status code from status text (e.g., "200 OK" -> 200)
-                status_code_match = re.match(r'(\d{3})\s*', status_text)
-                if status_code_match:
-                    result.status_code = int(status_code_match.group(1))
-                else:
-                    # Try to find any 3-digit code in the status text
-                    code_match = re.search(r'\b(\d{3})\b', status_text)
-                    if code_match:
-                        result.status_code = int(code_match.group(1))
-                
-                if not result.is_valid:
-                    result.error_message = status_text
-                    
-                # Check for warnings (e.g., redirects)
-                warning_match = re.search(r'Warning\s+(.+?)(?:\n\n|\Z)', output, re.DOTALL)
-                if warning_match:
-                    warning_text = warning_match.group(1).strip()
-                    if result.is_valid:
-                        result.error_message = warning_text[:150]
-                    else:
-                        result.error_message = f"{status_text} ({warning_text[:100]})"
-            else:
-                # Check for common error patterns
-                if '0 errors found' in output and '1 link' in output:
-                    # Success case - linkchecker found no errors
-                    result.is_valid = True
-                    result.status_code = 200
-                elif 'errors found' in output:
-                    # Error case
-                    result.is_valid = False
-                    error_count = re.search(r'(\d+)\s+errors?\s+found', output)
-                    result.error_message = f"Linkchecker found {error_count.group(1) if error_count else 'unknown'} error(s)"
-                else:
-                    # Couldn't parse output
-                    result.is_valid = False
-                    result.error_message = f"Could not parse linkchecker output: {output[:200]}"
+            parsed = parse_linkchecker_output((process.stdout or "") + (process.stderr or ""))
+            result.is_valid = parsed.is_valid
+            result.status_code = parsed.status_code
+            result.error_message = parsed.error_message
+            result.is_infrastructure_error = parsed.is_infrastructure_error
                     
         except subprocess.TimeoutExpired:
             result.is_valid = False
             result.error_message = "Linkchecker timeout (30s)"
+            result.is_infrastructure_error = True
         except FileNotFoundError:
             result.is_valid = False
             result.error_message = "Container runtime not found"
+            result.is_infrastructure_error = True
         except Exception as e:
             result.is_valid = False
             result.error_message = f"Linkchecker error: {str(e)[:200]}"
+            result.is_infrastructure_error = True
         
         # Special handling for access.redhat.com 403 errors (session may have expired)
         if not result.is_valid and result.status_code == 403 and self._is_access_redhat_url(url):
@@ -706,6 +787,51 @@ class LinkChecker(LabManager):
                     return None
         
         return None
+
+    def _nav_status_from_driver(self, driver) -> Optional[int]:
+        """Read PerformanceNavigationTiming.responseStatus from a loaded tab."""
+        try:
+            status = driver.execute_script(
+                "const n = performance.getEntriesByType('navigation')[0];"
+                "return (n && n.responseStatus) ? n.responseStatus : null;"
+            )
+            return int(status) if status else None
+        except Exception:
+            return None
+
+    def _result_from_loaded_tab(
+        self,
+        driver,
+        url: str,
+        source_page: str,
+        source_section: str,
+        link_text: str,
+        chapter: str = "",
+        section_number: str = "",
+    ) -> LinkCheckResult:
+        """Build a LinkCheckResult from a tab that has already navigated to url."""
+        result = LinkCheckResult(
+            url=url,
+            source_page=source_page,
+            source_section=source_section,
+            link_text=link_text,
+            chapter=chapter,
+            section_number=section_number,
+        )
+        try:
+            status, is_valid, error = classify_loaded_page(
+                title=driver.title or "",
+                current_url=driver.current_url or url,
+                page_source=driver.page_source or "",
+                nav_status=self._nav_status_from_driver(driver),
+            )
+            result.status_code = status
+            result.is_valid = is_valid
+            result.error_message = error
+        except Exception as e:
+            result.is_valid = False
+            result.error_message = str(e)[:100]
+        return result
     
     def _screenshot_section_parallel(self, links: list[dict], screenshots_dir: Path, 
                                        section_id: str) -> list[LinkCheckResult]:
@@ -780,8 +906,11 @@ class LinkChecker(LabManager):
                     try:
                         driver.switch_to.window(handle)
                         
-                        # HTTP validation
-                        result = self._validate_link_http_only(
+                        # Classify the page this tab already loaded. Python
+                        # requests get WAF 403s from docs.redhat.com even when
+                        # the browser screenshot is a real documentation page.
+                        result = self._result_from_loaded_tab(
+                            driver,
                             link['url'], link['source_page'], link['source_section'],
                             link['link_text'], link['chapter'], link['section_number']
                         )
@@ -1297,15 +1426,13 @@ class LinkChecker(LabManager):
             print("No failed links to retry.")
             return 0
         
-        # Check if linkchecker is available
-        container_runtime = self._get_container_runtime()
-        use_linkchecker = container_runtime is not None
+        use_linkchecker = self._linkchecker_is_usable()
         if use_linkchecker:
             print(f"🔗 Using linkchecker container for {total_failed} failed link(s)...")
         else:
-            print("⚠ Warning: linkchecker container not available (podman/docker not found).")
+            print("⚠ Warning: linkchecker container is not usable.")
             print("  Falling back to Selenium-based validation (slower).")
-            print("  Install podman or docker to use faster linkchecker retries.\n")
+            print("  Install podman or docker, and do not pass a host UID into the container.\n")
         
         self.logger(f"Retrying {total_failed} failed link(s) using {'linkchecker' if use_linkchecker else 'Selenium'}...")
         
@@ -1330,6 +1457,11 @@ class LinkChecker(LabManager):
                         chapter=result.chapter,
                         section_number=result.section_number
                     )
+                    if new_result.is_infrastructure_error:
+                        print(
+                            f"      ⚠ container error (keeping previous status): {result.url}"
+                        )
+                        continue
                 else:
                     # Fallback to Selenium-based validation
                     new_result = self._validate_link(
@@ -1382,8 +1514,6 @@ class LinkChecker(LabManager):
         Build a JQL query to search for existing tickets with the same broken URLs.
         This helps avoid creating duplicate tickets.
         """
-        from urllib.parse import quote
-        
         # Parse course name (component) from course_id
         course_name, version = self._parse_course_id(course_id)
         course_name_upper = course_name.upper()
@@ -1415,10 +1545,76 @@ class LinkChecker(LabManager):
         return jql
     
     def _build_broken_links_search_url(self, course_id: str, broken_urls: list[str]) -> str:
-        """Build Jira search URL to check for existing broken link tickets."""
+        """Build Jira Cloud search URL to check for existing broken link tickets."""
         from urllib.parse import quote
         jql = self._build_broken_links_jql(course_id, broken_urls)
-        return f"https://issues.redhat.com/issues/?jql={quote(jql)}"
+        return f"{JiraHandler.JIRA_BASE_URL}/issues/?jql={quote(jql)}"
+
+    def _broken_links_description_html(
+        self,
+        report: 'CourseCheckReport',
+        broken_results: list[LinkCheckResult],
+        course_name: str,
+        version: str,
+        search_url: str,
+        pdf_file: Optional[str],
+        json_file: Optional[str],
+    ) -> str:
+        """HTML description for the Jira Cloud ProseMirror editor.
+
+        Wiki markup is pasted as literal text in the modernised editor, so this
+        returns a real HTML table with hyperlinks instead.
+        """
+        config_url = self.config.get_lab_base_url(report.environment) or "https://rol.redhat.com/rol/app/courses/"
+        rol_base_url = config_url.split('/rol/')[0] if '/rol/' in config_url else config_url.rstrip('/')
+        section_url_lookup = {section.title: section.url for section in report.sections}
+
+        items = []
+        for result in broken_results:
+            status = result.status_code or "ERR"
+            error = (result.error_message or "Unknown")[:80]
+            link_text = result.link_text or "N/A"
+            url_html = (
+                f'<a href="{escape(result.url, quote=True)}">{escape(result.url)}</a>'
+            )
+            section_url = section_url_lookup.get(result.source_page, "")
+            if section_url:
+                full_url = f"{rol_base_url}{section_url}" if section_url.startswith("/") else section_url
+                section_html = (
+                    f'<a href="{escape(full_url, quote=True)}">'
+                    f"{escape(result.section_number)}</a>"
+                )
+            else:
+                section_html = escape(result.section_number)
+            items.append(
+                "<li>"
+                f"{escape(str(result.chapter))} {section_html}: {escape(link_text)}"
+                f" — {url_html} — {escape(str(status))} {escape(error)}"
+                "</li>"
+            )
+
+        generated = (
+            report.check_completed.strftime("%Y-%m-%d %H:%M:%S")
+            if report.check_completed
+            else "N/A"
+        )
+        parts = [
+            "<p><strong>"
+            f"Broken Links Report for {escape(course_name.upper())} v{escape(version)}"
+            "</strong></p>",
+            f"<p>{len(broken_results)} broken link(s):</p>",
+            "<ul>",
+            *items,
+            "</ul>",
+            "<p>Search for existing tickets: "
+            f'<a href="{escape(search_url, quote=True)}">Search JQL</a></p>',
+            f"<p><em>Report generated: {escape(generated)}</em></p>",
+        ]
+        if pdf_file:
+            parts.append(f"<p><em>PDF Report: {escape(Path(pdf_file).name)}</em></p>")
+        if json_file:
+            parts.append(f"<p><em>JSON Report: {escape(Path(json_file).name)}</em></p>")
+        return "".join(parts)
     
     def create_jira_for_broken_links(self, report: 'CourseCheckReport') -> bool:
         """
@@ -1432,17 +1628,12 @@ class LinkChecker(LabManager):
         Returns:
             True if Jira creation was initiated, False otherwise
         """
-        from urllib.parse import quote
-        from selenium.webdriver.common.keys import Keys
-        
-        # Get broken links from report
         broken_results = [r for r in report.results if not r.is_valid]
         
         if not broken_results:
             self.logger("No broken links to report for this course")
             return False
         
-        # Use report's own files
         pdf_file = report.pdf_file if report.pdf_file else None
         json_file = report.json_file if report.json_file else None
         
@@ -1451,171 +1642,40 @@ class LinkChecker(LabManager):
         
         self.logger(f"Creating Jira ticket for {len(broken_results)} broken links in {report.course_id}")
         
-        # First, open search to check for existing tickets
         search_url = self._build_broken_links_search_url(report.course_id, broken_urls)
-        
-        # Open in new window to not interfere with ongoing course link checking
+        summary = (
+            f"{course_name.upper()}-{version}: Broken Links Report - "
+            f"{len(broken_results)} broken link(s)"
+        )
+        description = self._broken_links_description_html(
+            report, broken_results, course_name, version, search_url, pdf_file, json_file
+        )
+
         self.driver.switch_to.new_window('window')
-        
-        # Navigate to Jira project
-        self.driver.get("https://issues.redhat.com/projects/PTL/issues")
-        time.sleep(5)
+        self.driver.get(JiraHandler.JIRA_PROJECTS_URL)
+        time.sleep(3)
         
         try:
-            # Click Create button
-            WebDriverWait(self.driver, 20).until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="create_link"]'))
-            ).click()
-            time.sleep(2)
-            
-            # Select Text mode for description
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[2]/button'))
-                ).click()
-            except:
-                pass
-            
-            # Fill Summary
-            summary = f"{course_name.upper()}-{version}: Broken Links Report - {len(broken_results)} broken link(s)"
-            WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="summary"]'))
-            ).send_keys(summary)
-            
-            # Build description with broken links
-            description_lines = [
-                f"*Broken Links Report for {course_name.upper()} v{version}*",
-                f"",
-                f"||Chapter||Section||Link Text||URL||Status Code||Error||",
-            ]
-            
-            # Build lookup from section title to section URL for creating hyperlinks
-            # Get base URL from config based on environment used for this report
-            # Config URLs are like https://rol.redhat.com/rol/app/courses/ - extract just the domain
-            config_url = self.config.get_lab_base_url(report.environment) or "https://rol.redhat.com/rol/app/courses/"
-            rol_base_url = config_url.split('/rol/')[0] if '/rol/' in config_url else config_url.rstrip('/')
-            section_url_lookup = {section.title: section.url for section in report.sections}
-            
-            for result in broken_results:
-                status = result.status_code or 'ERR'
-                error = (result.error_message or 'Unknown')[:50]
-                link_text = (result.link_text or 'N/A')[:30]
-                # Create hyperlink to the course section page for easy developer access
-                section_url = section_url_lookup.get(result.source_page, "")
-                if section_url:
-                    full_url = f"{rol_base_url}{section_url}" if section_url.startswith('/') else section_url
-                    section_link = f"[{result.section_number}|{full_url}]"
-                else:
-                    section_link = result.section_number
-                description_lines.append(
-                    f"|{result.chapter}|{section_link}|{link_text}|[{result.url}]|{status}|{error}|"
-                )
-            
-            description_lines.extend([
-                "",
-                "*Search for existing tickets:*",
-                f"[Search JQL|{search_url}]",
-                "",
-                f"_Report generated: {report.check_completed.strftime('%Y-%m-%d %H:%M:%S') if report.check_completed else 'N/A'}_",
-            ])
-            
-            if pdf_file:
-                description_lines.append(f"_PDF Report: {Path(pdf_file).name}_")
-            if json_file:
-                description_lines.append(f"_JSON Report: {Path(json_file).name}_")
-            
-            description = "\n".join(description_lines)
-            
-            # Fill description
-            desc_field = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, '//*[@id="description"]'))
+            self.jira_handler.open_create_dialog()
+            self.jira_handler.set_work_type_bug()
+            self.jira_handler.fill_summary(summary)
+            self.jira_handler.fill_description_html(description)
+            self.jira_handler.set_component(course_name.upper())
+            self.jira_handler.set_affects_version_with_llm(
+                course_name.upper(),
+                standalone_ask_llm,
+                mode="prefer_platform",
+                platform_version=version,
             )
-            desc_field.clear()
-            desc_field.send_keys(description)
-            
-            # Switch back to Visual mode
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="description-wiki-edit"]/nav/div/div/ul/li[1]/button'))
-                ).click()
-            except:
-                pass
-            
-            # Set Component (course)
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="components-textarea"]'))
-                ).send_keys(course_name.upper())
-            except Exception as e:
-                logging.debug(f"Failed to set component: {e}")
-            
-            
-            # Attach files (PDF and JSON reports)
+            self.jira_handler.set_priority("Minor")
+
             files_to_attach = []
             if pdf_file and os.path.exists(pdf_file):
                 files_to_attach.append(os.path.abspath(pdf_file))
             if json_file and os.path.exists(json_file):
                 files_to_attach.append(os.path.abspath(json_file))
-            
-            attached_files = []
-            for file_path in files_to_attach:
-                try:
-                    print(f"Attaching file: {file_path}")
-                    # Find the file input element - need to find it fresh each time
-                    # as Jira may recreate the element after each upload
-                    file_inputs = self.driver.find_elements(By.CSS_SELECTOR, 'input[type="file"]')
-                    if file_inputs:
-                        file_input = file_inputs[0]
-                        # Clear any existing value using JavaScript
-                        self.driver.execute_script("arguments[0].value = '';", file_input)
-                        time.sleep(0.5)
-                        # Send the file path
-                        file_input.send_keys(file_path)
-                        attached_files.append(os.path.basename(file_path))
-                        # Wait for upload to complete - check for upload progress to finish
-                        time.sleep(5)
-                        # Wait until no upload progress bars are visible
-                        try:
-                            WebDriverWait(self.driver, 30).until_not(
-                                EC.presence_of_element_located((By.CSS_SELECTOR, '.upload-progress, .uploading'))
-                            )
-                        except:
-                            pass  # Continue if no progress indicator found
-                        time.sleep(2)  # Extra buffer between uploads
-                    else:
-                        logging.debug(f"No file input found for {file_path}")
-                except Exception as e:
-                    logging.debug(f"Failed to attach file {file_path}: {e}")        
+            attached_files = self.jira_handler.attach_files(files_to_attach) if files_to_attach else []
 
-            # Set Version
-            try:
-                version_field = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="versions-textarea"]'))
-                )
-                version_field.send_keys(Keys.HOME)
-                version_field.send_keys(course_name.upper())
-            except Exception as e:
-                logging.debug(f"Failed to set version: {e}")
-
-            # Set Priority to Minor
-            try:
-                # Click Priority tab
-                WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//ul[@role="tablist"]//strong[text()="Priority"]'))
-                ).click()
-                time.sleep(0.5)
-                
-                priority_field = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, '//*[@id="priority-field"]'))
-                )
-                priority_field.send_keys(Keys.CONTROL + "a")
-                priority_field.send_keys(Keys.DELETE)
-                priority_field.send_keys("Minor")
-                priority_field.send_keys(Keys.TAB)
-            except Exception as e:
-                logging.debug(f"Failed to set priority: {e}")
-
-            
             print(f"\n  📝 Jira ticket prefilled: {summary}")
             if attached_files:
                 print(f"     📎 Attached: {', '.join(attached_files)}")
@@ -1628,7 +1688,8 @@ class LinkChecker(LabManager):
             return True
             
         except Exception as e:
-            self.logger(f"Failed to create Jira ticket: {e}")
+            detail = str(e).strip() or type(e).__name__
+            self.logger(f"Failed to create Jira ticket: {detail}")
             return False
     
     def create_jiras_for_all_broken_links(self) -> int:
