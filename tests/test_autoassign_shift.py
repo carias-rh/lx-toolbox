@@ -407,6 +407,22 @@ def _emea_groups_config():
                 "countries": ["Germany", "DE"],
             },
             {
+                "id": "emea-mena",
+                "name": "MENA, SSA & Turkey",
+                "zone_id": "emea",
+                "assignment_group_ids": ["ag-emea"],
+                "email_aliases": ["training-mena@redhat.com"],
+                "countries": ["Pakistan", "PK", "Saudi Arabia", "SA", "Egypt", "EG"],
+            },
+            {
+                "id": "emea-it-igc",
+                "name": "IT & IGC",
+                "zone_id": "emea",
+                "assignment_group_ids": ["ag-emea"],
+                "email_aliases": ["training-it@redhat.com", "training-emea@redhat.com"],
+                "countries": ["Italy", "IT", "Malta", "MT", "San Marino", "SM", "Vatican", "VA"],
+            },
+            {
                 "id": "turkiye",
                 "name": "Türkiye GLS Support",
                 "zone_id": "emea",
@@ -638,6 +654,42 @@ def test_lms_country_turkiye_diacritic_maps_to_turkiye_group():
         )
     assert result is None
     update.assert_called_once_with("sys1", {"assignment_group": "ag-turkiye"})
+
+
+def test_lms_country_pakistan_dispatches_mena_on_shift_pool():
+    sa = _emea_assigner()
+    ticket = _cx_ticket(email="learner@example.pk")
+    with patch.object(sa, "peek_shift", return_value="Rana Salman") as mock_peek, \
+         patch.object(sa, "lookup_user_details", return_value=[{"country": "PK"}]), \
+         patch.object(sa, "lookup_user_sys_id", return_value="sys-rana"), \
+         patch.object(sa, "update_ticket", return_value=True), \
+         patch("lx_toolbox.core.servicenow_autoassign.time.sleep"):
+        result = sa.process_gls_cx_ticket(
+            ticket, sa.teams[EMEA_MIXED], "Daniel Sherlock", team_key=EMEA_MIXED
+        )
+    assert result is not None
+    assignee_name, commit_config = result
+    assert assignee_name == "Rana Salman"
+    assert commit_config is sa.teams["gls-cx-emea-emea-mena"]
+    mock_peek.assert_called_once_with(sa.teams["gls-cx-emea-emea-mena"])
+
+
+def test_lms_country_italy_stays_on_it_igc_pool():
+    sa = _emea_assigner()
+    ticket = _cx_ticket(email="learner@example.it")
+    with patch.object(sa, "peek_shift", return_value="Miguel Sans Catchot") as mock_peek, \
+         patch.object(sa, "lookup_user_details", return_value=[{"country": "Italy"}]), \
+         patch.object(sa, "lookup_user_sys_id", return_value="sys-miguel"), \
+         patch.object(sa, "update_ticket", return_value=True), \
+         patch("lx_toolbox.core.servicenow_autoassign.time.sleep"):
+        result = sa.process_gls_cx_ticket(
+            ticket, sa.teams[EMEA_MIXED], "Daniel Sherlock", team_key=EMEA_MIXED
+        )
+    assert result is not None
+    assignee_name, commit_config = result
+    assert assignee_name == "Miguel Sans Catchot"
+    assert commit_config is sa.teams["gls-cx-emea-emea-it-igc"]
+    mock_peek.assert_called_once_with(sa.teams["gls-cx-emea-emea-it-igc"])
 
 
 def test_lms_country_greece_moves_to_igc_assignment_group():

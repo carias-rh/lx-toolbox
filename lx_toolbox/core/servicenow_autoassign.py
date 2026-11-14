@@ -1067,7 +1067,7 @@ class ServiceNowAutoAssign:
                             return None
                 if not matched_alias and team_key in self._country_routing_team_keys:
                     country_result = self._route_by_lms_country(ticket, team_key)
-                    if country_result == "skip":
+                    if country_result in ("skip", "moved"):
                         return None
                     if isinstance(country_result, tuple):
                         assignee_name, commit_config = country_result
@@ -1358,9 +1358,10 @@ class ServiceNowAutoAssign:
         """Map the first LMS Country to a Sub-region.
 
         Returns ``(assignee_name, commit_config)`` when the Sub-region shares
-        this Assignment Group and someone is on Shift; ``"skip"`` when the
-        Sub-region matched but nobody is on Shift (or the Ticket was moved);
-        ``None`` to fall through to the mixed On-Shift Pool.
+        this Assignment Group and someone is on Shift; ``"moved"`` after the
+        Ticket is moved to another Assignment Group; ``"skip"`` when the
+        Sub-region matched but nobody is on Shift; ``None`` to fall through
+        to the mixed On-Shift Pool.
         """
         email = (ticket.get("u_email_from_address") or "").strip()
         if not email or email.lower().endswith("@redhat.com"):
@@ -1392,7 +1393,7 @@ class ServiceNowAutoAssign:
                 )
             else:
                 logger.error(f"Failed to move ticket {ticket.get('number')} to {dest.team_name}")
-            return "skip"
+            return "moved"
 
         assignee = self.peek_shift(dest)
         if not assignee or assignee == "None":
@@ -1467,8 +1468,8 @@ class ServiceNowAutoAssign:
                         desc = ticket.get('description', '').lower()
                         is_audit = 'Audit Request received' in short_desc
                         is_alias = any(a in desc for a in self._email_alias_to_team_key)
-                        is_country_queue = team_key in self._country_routing_team_keys
-                        if not is_audit and not is_alias and not is_country_queue:
+                        country_routing = team_key in self._country_routing_team_keys
+                        if not is_audit and not is_alias and not country_routing:
                             stats["skipped"] += 1
                             continue
                     cx_result = self.process_gls_cx_ticket(ticket, team_config, assignee_name, team_key=team_key)
