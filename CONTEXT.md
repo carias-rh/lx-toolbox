@@ -191,6 +191,25 @@ _Avoid_: roster, round-robin list, on-call list
 Rotation through the On-Shift Pool, one turn per successfully assigned item. Peeking who is next does not consume a turn.
 _Avoid_: random assign, always-on-call
 
+**Assignment Group**:
+The ServiceNow group a Ticket sits in. Auto-Assign queries unassigned Tickets per Assignment Group.
+_Avoid_: using this for a Sub-region that shares GLS Customer Experience - EMEA (Iberia, France, BeNeLux, and the rest of that mixed queue)
+
+**Zone**:
+A GLS CX geography: APAC, EMEA, LATAM, or NA. A Zone has one or more Assignment Groups.
+
+**Sub-region**:
+A named On-Shift Pool inside a Zone (Iberia, France, Türkiye GLS Support, …). Most EMEA Sub-regions share the GLS Customer Experience - EMEA Assignment Group; Türkiye GLS Support and IGC GLS Support each own a distinct Assignment Group.
+_Avoid_: Assignment Group, country team, queue (overloaded)
+
+**Email Alias**:
+A `training-*@redhat.com` address in the Ticket description that selects a Sub-region.
+_Avoid_: Country, LMS Country, mailbox as the generic
+
+**LMS Country**:
+The `country` field on the **first** LMS user record matched from the Ticket sender email. Unnormalized (ISO code or English name). Selects a Sub-region only when Subject-based routing and Email Alias did not match, only when the sender is not `@redhat.com`, and only when that one field maps to a single Sub-region. Later LMS records are ignored.
+_Avoid_: Country (bare), region, using LMS Country for the training-* queue
+
 ## Domain rules
 
 - Guide Text is the source of truth; video content that disagrees is a Defect in the video.
@@ -217,7 +236,9 @@ _Avoid_: random assign, always-on-call
 - Whether a Learner Follow-up is a Resolution Follow-up is judged from the latest Learner Follow-up, not from earlier ones. An older "it is fixed" does not override a newer report that the problem is back.
 - A latest Learner Follow-up that both resolves the original report and raises a new problem is not a Resolution Follow-up; investigate the remaining claim.
 - The Shift frontend is the source of truth for who is next in Round-Robin; Auto-Assign does not keep that name across cycles.
-- Subject-based routing overrides On-Shift Pool assignment for specific GLS CX ticket types: a ticket whose subject matches a known pattern (e.g. "Audit Request received", "New RHLS Course Entitlement", "mentioned you in Pending TUAs") is dispatched to a dedicated zone-level schedule block instead of the group's standard pool. Checks are evaluated in priority order; the first match wins. If nobody is on shift for the matched block, the ticket is skipped until someone comes on shift.
+- GLS CX routing checks are evaluated in priority order; the first match wins: Subject-based routing (e.g. "Audit Request received", "New RHLS Course Entitlement", "mentioned you in Pending TUAs"), then Email Alias, then LMS Country → Sub-region, then the mixed Assignment Group's On-Shift Pool. If nobody is on Shift for a matched Subject-based, Email Alias, or LMS Country Sub-region, the Ticket stays unassigned until that Sub-region has someone on Shift — it does not fall back to the mixed On-Shift Pool. Missing, unmapped, or unusable LMS Country (blank, `@redhat.com` sender, or no Sub-region mapping) does not skip: the Ticket stays on the mixed On-Shift Pool.
+- LMS Country routing runs only on the mixed Assignment Group of a Zone (GLS Customer Experience - EMEA today). Sub-regions that already own their own Assignment Group do not Country-reroute.
+- If LMS Country selects a Sub-region that owns a different Assignment Group than the Ticket's current one, Auto-Assign moves the Ticket there and stops: no ACK, no assignee, no Round-Robin turn on the source On-Shift Pool. The destination Assignment Group's Auto-Assign dispatches it. If the Sub-region shares the current Assignment Group, Auto-Assign dispatches from that Sub-region's On-Shift Pool in the same cycle.
 - Round-Robin follows engineers by name, not by position in the On-Shift Pool. If the pool changes, the next turn is the next name still in the pool after the last engineer who received work, wrapping to the start if needed.
 - Auto-Assign does not query the Shift frontend unless there is unassigned work. It records the engineer who actually received the work, not an inferred next person.
 - Each On-Shift Pool (one Shift-frontend group, or the whole T2 instance when there is no group) has its own last-assigned engineer. Pools do not share Round-Robin state.

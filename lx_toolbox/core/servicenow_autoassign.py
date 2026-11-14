@@ -3,6 +3,7 @@ import re
 import time
 import json
 import logging
+import unicodedata
 import requests
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -47,6 +48,15 @@ def _contains_consecutive(haystack: List[str], needle: List[str]) -> bool:
         return False
     span = len(needle)
     return any(haystack[i:i + span] == needle for i in range(len(haystack) - span + 1))
+
+
+def _normalize_country(value: str) -> str:
+    """Lowercase ASCII form: 'ES' → 'es', 'Türkiye' → 'turkiye'."""
+    if not value:
+        return ""
+    decomposed = unicodedata.normalize("NFKD", value)
+    ascii_form = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return " ".join(ascii_form.strip().lower().split())
 
 
 def _extract_auto_resolve_reporter(description: str) -> Optional[str]:
@@ -272,10 +282,18 @@ class ServiceNowAutoAssign:
         used to route tickets whose description contains one of those aliases
         to a sub-region-specific schedule (e.g. EMEA sub-regions that share
         the same ServiceNow assignment group but have different priorities).
+
+        Groups that carry a ``countries`` list map LMS Country strings (ISO2,
+        English names, aliases) to that Sub-region. LMS Country routing runs
+        only on mixed Assignment Groups (a non-schedule-only team that shares
+        its sys_id with another GLS CX team).
         """
         self._gls_cx_team_zone: Dict[str, str] = {}
         self._email_alias_to_team_key: Dict[str, str] = {}
         self._schedule_only_team_keys: set = set()
+        self._country_to_team_key: Dict[str, str] = {}
+        self._country_routing_team_keys: set = set()
+        self._ambiguous_countries: set = set()
 
         raw = self.config.get("SNOW", "GROUPS_CONFIG") or ""
         if not raw:
@@ -319,6 +337,32 @@ class ServiceNowAutoAssign:
 
             if slug.startswith(("audit-", "rhls-entitlement-", "tua-")):
                 self._schedule_only_team_keys.add(team_key)
+
+            for raw_country in group.get("countries") or []:
+                norm = _normalize_country(str(raw_country))
+                if not norm or norm in self._ambiguous_countries:
+                    continue
+                existing = self._country_to_team_key.get(norm)
+                if existing and existing != team_key:
+                    logger.warning(
+                        f"LMS Country '{raw_country}' maps to both {existing} and {team_key}; leaving unmapped"
+                    )
+                    self._ambiguous_countries.add(norm)
+                    del self._country_to_team_key[norm]
+                else:
+                    self._country_to_team_key[norm] = team_key
+
+        gls_keys = [k for k in teams if k.startswith("gls-cx-")]
+        for team_key in gls_keys:
+            if team_key in self._schedule_only_team_keys:
+                continue
+            ag = tuple(teams[team_key].assignment_group_id)
+            for other_key in gls_keys:
+                if other_key == team_key:
+                    continue
+                if tuple(teams[other_key].assignment_group_id) == ag:
+                    self._country_routing_team_keys.add(team_key)
+                    break
 
     def _get_team_members(self, team_key: str) -> List[str]:
         """Get team member sys_ids, using cache to avoid repeated API calls"""
@@ -948,10 +992,14 @@ class ServiceNowAutoAssign:
 
         1. **Audit** – short_description contains "Audit Request received" →
            assignee comes from the zone-level ``audit-<zone>`` schedule.
-        2. **Email alias** – description contains a known
+        2. **RHLS entitlement** / **TUA** – subject patterns → zone schedule.
+        3. **Email alias** – description contains a known
            ``training-*@redhat.com`` alias → assignee comes from the
            matching sub-region schedule.
-        3. **Standard** – use the pre-resolved *assignee_name* from the
+        4. **LMS Country** – on mixed Assignment Groups, first LMS record's
+           country selects a Sub-region (same group: peek that pool; different
+           group: move and stop).
+        5. **Standard** – use the pre-resolved *assignee_name* from the
            group's own schedule.
 
         When a special-routing match is found but nobody is on shift for
@@ -1002,19 +1050,27 @@ class ServiceNowAutoAssign:
                     logger.debug(f"TUA ticket {ticket.get('number')} – no one on shift, skipping")
                     return None
 
-            elif team_key and self._email_alias_to_team_key:
-                description = ticket.get('description', '')
-                alias_assignee, matched_alias = self._resolve_email_alias_assignee(description)
-                if matched_alias:
-                    if alias_assignee and alias_assignee != "None":
-                        logger.info(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' routed to {alias_assignee}")
-                        assignee_name = alias_assignee
-                        alias_team_key = self._email_alias_to_team_key.get(matched_alias)
-                        if alias_team_key and alias_team_key in self.teams:
-                            commit_config = self.teams[alias_team_key]
-                    else:
-                        logger.debug(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' but no one on sub-region shift, skipping")
+            elif team_key:
+                matched_alias = None
+                if self._email_alias_to_team_key:
+                    description = ticket.get('description', '')
+                    alias_assignee, matched_alias = self._resolve_email_alias_assignee(description)
+                    if matched_alias:
+                        if alias_assignee and alias_assignee != "None":
+                            logger.info(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' routed to {alias_assignee}")
+                            assignee_name = alias_assignee
+                            alias_team_key = self._email_alias_to_team_key.get(matched_alias)
+                            if alias_team_key and alias_team_key in self.teams:
+                                commit_config = self.teams[alias_team_key]
+                        else:
+                            logger.debug(f"Ticket {ticket.get('number')} matched alias '{matched_alias}' but no one on sub-region shift, skipping")
+                            return None
+                if not matched_alias and team_key in self._country_routing_team_keys:
+                    country_result = self._route_by_lms_country(ticket, team_key)
+                    if country_result == "skip":
                         return None
+                    if isinstance(country_result, tuple):
+                        assignee_name, commit_config = country_result
 
             if assignee_name == "None":
                 return None
@@ -1298,6 +1354,60 @@ class ServiceNowAutoAssign:
                 return None, alias
         return None, None
 
+    def _route_by_lms_country(self, ticket: Dict[str, Any], team_key: str):
+        """Map the first LMS Country to a Sub-region.
+
+        Returns ``(assignee_name, commit_config)`` when the Sub-region shares
+        this Assignment Group and someone is on Shift; ``"skip"`` when the
+        Sub-region matched but nobody is on Shift (or the Ticket was moved);
+        ``None`` to fall through to the mixed On-Shift Pool.
+        """
+        email = (ticket.get("u_email_from_address") or "").strip()
+        if not email or email.lower().endswith("@redhat.com"):
+            return None
+
+        lms_entries = self.lookup_user_details(email=email)
+        if not lms_entries:
+            return None
+
+        country = _normalize_country(lms_entries[0].get("country") or "")
+        if not country:
+            return None
+
+        dest_key = self._country_to_team_key.get(country)
+        if not dest_key:
+            return None
+        dest = self.teams.get(dest_key)
+        src = self.teams.get(team_key)
+        if not dest or not src:
+            return None
+
+        dest_ag = dest.get_primary_assignment_group_id()
+        src_ag = src.get_primary_assignment_group_id()
+        if dest_ag and dest_ag != src_ag:
+            if self.update_ticket(ticket["sys_id"], {"assignment_group": dest_ag}):
+                logger.info(
+                    f"Ticket {ticket.get('number')} LMS Country '{lms_entries[0].get('country')}' "
+                    f"moved to {dest.team_name}"
+                )
+            else:
+                logger.error(f"Failed to move ticket {ticket.get('number')} to {dest.team_name}")
+            return "skip"
+
+        assignee = self.peek_shift(dest)
+        if not assignee or assignee == "None":
+            logger.debug(
+                f"Ticket {ticket.get('number')} LMS Country matched {dest.team_name} "
+                f"but no one on sub-region shift, skipping"
+            )
+            return "skip"
+
+        logger.info(
+            f"Ticket {ticket.get('number')} LMS Country '{lms_entries[0].get('country')}' "
+            f"routed to {assignee}"
+        )
+        return assignee, dest
+
     def run_auto_assignment(self, team_key: str, assignee_name: str = None) -> Dict[str, int]:
         """Run auto-assignment for a specific team"""
         team_config = self.teams.get(team_key)
@@ -1357,7 +1467,8 @@ class ServiceNowAutoAssign:
                         desc = ticket.get('description', '').lower()
                         is_audit = 'Audit Request received' in short_desc
                         is_alias = any(a in desc for a in self._email_alias_to_team_key)
-                        if not is_audit and not is_alias:
+                        is_country_queue = team_key in self._country_routing_team_keys
+                        if not is_audit and not is_alias and not is_country_queue:
                             stats["skipped"] += 1
                             continue
                     cx_result = self.process_gls_cx_ticket(ticket, team_config, assignee_name, team_key=team_key)
